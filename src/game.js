@@ -874,10 +874,7 @@ export class Game {
       this.hooks.haptic(8);
       if (it.k === 'ing') this.hooks.tut && this.hooks.tut('pick');
       if (it.k === 'dish') this.hooks.tut && this.hooks.tut('dish');
-      if (this.room(a) <= 0 && a.stack.length >= 3) {
-        const p = this.stackTopPos(a);
-        popText(p.x, p.y + 0.4, p.z, '최대!', 'pop-max', 0.8);
-      }
+
     }
   }
 

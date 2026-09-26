@@ -47,7 +47,13 @@ async function newPage(browser, w = 390, h = 844, init = null) {
   });
   page.on('pageerror', (e) => errors.push(`[${w}x${h}] ${e}`));
   const cdp = await ctx.newCDPSession(page);
-  const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] });
+  let down = false;
+  const touch = async (type, x, y) => {
+    if (type === 'touchEnd' && !down) return;
+    if (type === 'touchMove' && !down) type = 'touchStart';
+    down = type !== 'touchEnd';
+    await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] });
+  };
   page.touch = touch;
   // 조이스틱으로 목표 월드 좌표까지 걷기 (화면 오른쪽 = +x, 아래 = +z)
   // 게임의 길찾기 경로(웨이포인트)를 따라 조이스틱을 기울임

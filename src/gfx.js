@@ -13,7 +13,7 @@ export const gfx = {
   camTarget: new THREE.Vector3(),
   camPos: new THREE.Vector3(),
   shake: 0,
-  viewW: 10.5,
+  viewW: 9.6,
   pitch: 0.93,
   zoom: 1,
   width: 390,

@@ -486,15 +486,16 @@ body {
 .tut {
   position: absolute;
   left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 150px);
+  top: calc(env(safe-area-inset-top, 0px) + 128px);
   transform: translate(-50%, 0) scale(0.9);
   width: max-content;
-  max-width: 86%;
+  max-width: 72%;
   background: #fff;
   color: #3a2233;
   font-weight: 900;
-  font-size: 16px;
-  padding: 11px 18px;
+  font-size: 15px;
+  line-height: 1.35;
+  padding: 9px 14px;
   border-radius: 16px;
   border: 3px solid #ffc83d;
   box-shadow: 0 5px 0 #c9901a, 0 8px 20px rgba(0, 0, 0, 0.3);
@@ -509,7 +510,7 @@ body {
 .hand {
   position: absolute;
   left: 50%;
-  top: 62%;
+  top: 70%;
   width: 64px;
   height: 64px;
   opacity: 0;
@@ -1640,4 +1641,21 @@ body {
     width: 70px;
     height: 70px;
   }
+}
+.maxtag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-weight: 900;
+  font-size: 16px;
+  color: #fff;
+  background: #e8483b;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  padding: 0 7px;
+  display: none;
+  box-shadow: 0 2px 0 #8a1e10;
+}
+.maxtag.on {
+  display: block;
 }

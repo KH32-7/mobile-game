@@ -251,6 +251,7 @@ export class UI {
     this.bubbles.clear();
     this.stBadges.forEach((b) => b.remove());
     this.stBadges.clear();
+    if (this.maxEl) this.maxEl.classList.remove('on');
   }
 
   updateWorld() {
@@ -301,6 +302,21 @@ export class UI {
         b.el.remove();
         this.bubbles.delete(id);
       }
+    }
+    // 셰프 머리 위 MAX 표시
+    if (!this.maxEl) {
+      this.maxEl = document.createElement('div');
+      this.maxEl.className = 'maxtag';
+      this.maxEl.textContent = 'MAX';
+      this.wui.appendChild(this.maxEl);
+    }
+    const ch = g.chef;
+    const full = ch.stack.length >= g.chefCap();
+    this.maxEl.classList.toggle('on', full);
+    if (full) {
+      const tp = g.stackTopPos(ch);
+      project(tp.x, tp.y + 0.35, tp.z, tmp);
+      this.maxEl.style.transform = `translate(${tmp.x}px, ${tmp.y}px) translate(-50%, -100%)`;
     }
     // 조리대 상태 배지
     for (const s of Object.values(g.stations)) {
