@@ -66,6 +66,10 @@ export class FX {
     }
   }
   pop(text, x, y, opts = {}) {
+    // 텍스트 팝업은 동시에 최대 2개 (새 것이 오래된 것을 밀어냄)
+    while (this.pops.length >= 2) this.pops.shift();
+    // 겹치지 않게 살짝 위로
+    for (const p of this.pops) if (Math.abs(p.x - x) < 60 && Math.abs(p.y - y) < 20) y -= 22;
     this.pops.push({ text, x, y, t: 0, life: opts.life || 1.0, size: opts.size || 16, color: opts.color || '#fff', vy: opts.vy ?? -40 });
   }
   update(dt) {

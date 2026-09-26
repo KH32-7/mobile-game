@@ -16,8 +16,8 @@ export const PHYS = {
   millE: 0.8,
   cupR: 11,
   cupPullR: 1.9, // cupR 배수
-  cupPull: 520,
-  captureSpeed: 330,
+  cupPull: 460,
+  captureSpeed: 265,
   lipSlow: 0.72,
   slopeAccel: 260,
   stopSpeed: 9,

@@ -32,11 +32,13 @@ export function newBall(x, y) {
 export function relicMods(R, lv = {}, ctx = {}) {
   const has = (id) => R && R.has(id);
   const L = (id) => (has(id) ? lv[id] || 1 : 0);
+  const syn = ctx.syn || {};
+  const terr = [1, 0.85, 0.6][syn.지형 || 0];
   return {
     sticky: has('sticky'),
     ghost: has('ghost'),
     pull: L('magnet') === 2 ? 3 : L('magnet') ? 2 : 1,
-    bumperMul: (L('bounceking') === 2 ? 2 : L('bounceking') ? 1.5 : 1) * (has('bouncy') ? 1.25 : 1),
+    bumperMul: (L('bounceking') === 2 ? 2 : L('bounceking') ? 1.5 : 1) * (has('bouncy') ? 1.25 : 1) * [1, 1.15, 1.35][syn.범퍼 || 0],
     sandproof: has('sandproof'),
     waterski: has('waterski'),
     windbreak: has('windbreak'),
@@ -44,12 +46,15 @@ export function relicMods(R, lv = {}, ctx = {}) {
     coinR: L('coinmag') === 2 ? 4 : L('coinmag') ? 3 : 1,
     cushion: has('cushion'),
     bouncy: has('bouncy'),
-    cupMul: (L('bigcup') === 2 ? 1.6 : L('bigcup') ? 1.35 : 1) * (has('comeback') && ctx.hearts != null && ctx.hearts <= 2 ? 1.5 : 1),
+    cupMul: (L('bigcup') === 2 ? 1.6 : L('bigcup') ? 1.35 : 1) * (has('comeback') && ctx.hearts != null && ctx.hearts <= 2 ? 1.5 : 1) * [1, 1.1, 1.25][syn.컵 || 0],
     captureMul: (has('bigcup') ? 1.3 : 1) * (L('radar') === 2 ? 1.7 : L('radar') ? 1.4 : 1),
     fricMul: L('feather') === 2 ? 0.65 : L('feather') ? 0.75 : 1,
-    sandMul: has('bouncy') ? 1.5 : 1,
-    slopeMul: has('sloperider') ? 1.6 : 1,
+    sandMul: (has('bouncy') ? 1.5 : 1) * terr,
+    slopeMul: (has('sloperider') ? 1.6 : 1) * terr,
+    windMul: terr,
     teleBoost: has('warpmaster') ? 1.4 : 1,
+    wallBoost: [1, 1.08, 1.2][syn.벽 || 0],
+    crateEasy: (syn.상자 || 0) >= 2,
   };
 }
 
@@ -122,7 +127,7 @@ export function stepBall(h, st, b, dt, M, ev) {
       b.vy += dy * a * sdt;
     }
     if (h.wind && !M.windbreak) {
-      const k = M.heavy ? 0.5 : 1;
+      const k = (M.heavy ? 0.5 : 1) * (M.windMul || 1);
       b.vx += h.wind.x * k * sdt;
       b.vy += h.wind.y * k * sdt;
     }
@@ -181,6 +186,13 @@ export function stepBall(h, st, b, dt, M, ev) {
         dy /= d;
       }
       const imp = resolve(b, dx, dy, r - d, eWall);
+      if (imp > 80 && M.wallBoost > 1) {
+        const k = Math.min(M.wallBoost, (PHYS.maxShotSpeed * 1.1) / Math.max(1, Math.hypot(b.vx, b.vy)));
+        if (k > 1) {
+          b.vx *= k;
+          b.vy *= k;
+        }
+      }
       if (imp > 25) ev.push({ type: 'wall', x: cx, y: cy, speed: imp, nx: dx, ny: dy });
     }
     // 유령 모드 종료 체크
@@ -224,7 +236,7 @@ export function stepBall(h, st, b, dt, M, ev) {
         dy /= d;
       }
       const vn = -(b.vx * dx + b.vy * dy);
-      if (vn > PHYS.crateBreakSpeed * (M.heavy ? 0.4 : 1)) {
+      if (vn > PHYS.crateBreakSpeed * (M.heavy || M.crateEasy ? 0.4 : 1)) {
         st.crateAlive[i] = false;
         const k = M.heavy ? 0.92 : 0.68;
         b.vx *= k;
@@ -361,6 +373,11 @@ export function stepBall(h, st, b, dt, M, ev) {
           ev.push({ type: 'lip', x: c.x, y: c.y });
         }
       } else if (b.lip === i && d > cr + r) b.lip = -1;
+    }
+    // 마지막 안전 지점 (물 드롭 위치)
+    if (tv !== TILE.WATER && tv !== TILE.VOID && b.ghostComp < 0) {
+      b.safeX = b.x;
+      b.safeY = b.y;
     }
     // 물
     if (tv === TILE.WATER) {

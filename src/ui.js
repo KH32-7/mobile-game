@@ -1,9 +1,9 @@
 // DOM UI: HUD, 오버레이 화면들 (타이틀, 보상, 상점, 결과, 일시정지, 메타 화면)
-import { RELICS, RELIC_MAP, CONSUMABLES, RARITY, defOf, drawRelicIcon } from './relics.js';
+import { RELICS, RELIC_MAP, CONSUMABLES, RARITY, SYNERGY, synergyLevels, defOf, drawRelicIcon } from './relics.js';
 import { WORLDS, WORLD_MAP, STAR_GOALS, BALL_SKINS, TRAILS, FLAGS } from './worlds.js';
 import { RUN } from './config.js';
 import { fmtToPar } from './storage.js';
-import { sfx, setMuted, isMuted, initAudio, startBgm } from './audio.js';
+import { sfx, setMuted, isMuted, initAudio, startBgm, setVolumes } from './audio.js';
 import { dateSeedStr, hashStr } from './rng.js';
 import * as meta from './meta.js';
 import { drawBallSkin, drawFlag } from './draw.js';
@@ -100,7 +100,7 @@ export class UI {
   // ---------- HUD ----------
   hud(g, flash) {
     const r = g.run;
-    const show = !!r && ['intro', 'ready', 'rolling', 'celebrate', 'decide', 'reward', 'shop'].includes(g.state);
+    const show = !!r && ['intro', 'ready', 'rolling', 'celebrate', 'dying', 'reward', 'shop'].includes(g.state);
     $('#hud').classList.toggle('hidden', !show);
     $('#bottomBar').classList.toggle('hidden', !show || g.state === 'reward' || g.state === 'shop');
     if (!show) {
@@ -110,7 +110,9 @@ export class UI {
     const boss = g.hole.boss ? '<span class="boss">BOSS</span>' : '';
     $('#hudHole').innerHTML = `HOLE ${r.holeIdx + 1}<span style="opacity:.7;font-size:13px">/${RUN.holes}</span>${boss}`;
     const over = g.strokes >= g.par;
-    $('#hudPar').innerHTML = `파 ${g.par} · <b style="color:${over ? '#ff8a80' : '#ffe57f'}">${g.strokes}타</b> · 합계 ${fmtToPar(r.strokesTotal - r.parTotal)}`;
+    const left = g.par - g.strokes;
+    const next = left > 0 ? `<span class="pv">파까지 ${left}타</span>` : `<span class="pv bad">하트 -${Math.min(2, g.strokes - g.par + 1)} 예정 · 기권까지 ${g.par + 3 - g.strokes}타</span>`;
+    $('#hudPar').innerHTML = `파 ${g.par} · <b style="color:${over ? '#ff8a80' : '#ffe57f'}">${g.strokes}타</b> · 합계 ${fmtToPar(r.strokesTotal - r.parTotal)}<br>${g.state === 'ready' || g.state === 'rolling' || g.state === 'intro' ? next : ''}`;
     let hs = '';
     for (let i = 0; i < r.maxHearts; i++) hs += HEART(i < r.hearts ? '#ff4f8b' : 'rgba(0,0,0,0.35)', flash === 'heart' && i === r.hearts ? 'lost' : '');
     $('#hudHearts').innerHTML = hs;
@@ -148,6 +150,7 @@ export class UI {
     }
     $('#btnMulligan').classList.toggle('hidden', !(g.canMulligan() && g.state === 'ready'));
     $('#hudTimer').classList.toggle('hidden', !(g.hole.timeLimit > 0));
+    if (g.hole.timeLimit > 0) this.timer(g.timeLeft);
   }
   relicSheet() {
     const g = this.g;
@@ -156,7 +159,9 @@ export class UI {
     g.paused = true;
     const el = document.createElement('div');
     el.className = 'sheet-wrap';
-    el.innerHTML = `<div class="sheet"><div class="sheet-h">보유 유물 ${g.run.relics.length}개</div><div class="list">${g.run.relics
+    const sl = synergyLevels(g.run.relics);
+    const act = Object.keys(SYNERGY).filter((t) => sl[t] > 0);
+    el.innerHTML = `<div class="sheet"><div class="sheet-h">보유 유물 ${g.run.relics.length}개</div>${act.length ? `<div class="synbox">${act.map((t) => `<b>${t} ${sl._cnt[t]}개</b> ${SYNERGY[t][sl[t] - 1]}`).join('<br>')}</div>` : '<div class="sub" style="text-align:center">같은 태그 유물 2개부터 시너지 발동</div>'}<div class="list">${g.run.relics
       .map((id) => {
         const d = RELIC_MAP[id];
         const lv2 = (g.run.relicLv || {})[id] >= 2;
@@ -173,23 +178,45 @@ export class UI {
     });
   }
   // 1회성 코치마크
-  coach(key, text, highlight, pos) {
+  // 1회성 코치마크: 탭해야 닫힘, 한 번에 하나씩 (대기열)
+  coach(key, text, highlight, pos, spot) {
     const m = meta.meta();
     m.settings.coach = m.settings.coach || {};
     if (m.settings.coach[key]) return;
     m.settings.coach[key] = 1;
     meta.persist();
+    this.coachQ = this.coachQ || [];
+    this.coachQ.push({ text, highlight, pos, spot });
+    if (!this.coachOpen) this.nextCoach();
+  }
+  nextCoach() {
+    const c = this.coachQ.shift();
+    if (!c) {
+      this.coachOpen = false;
+      this.g.spot = null;
+      return;
+    }
+    this.coachOpen = true;
     const el = document.createElement('div');
-    el.className = 'coach' + (pos === 'bottom' ? ' bottom' : '');
-    el.innerHTML = `<div class="coach-t">${text}</div><button class="coach-ok">알겠어요</button>`;
+    el.className = 'coach' + (c.pos === 'bottom' ? ' bottom' : '');
+    el.innerHTML = `<div class="coach-t">${c.text}</div><button class="coach-ok">알겠어요</button>`;
     $('#app').appendChild(el);
-    if (highlight === 'hearts') $('#hudHearts').classList.add('spot');
-    const done = () => {
+    if (c.highlight === 'hearts') $('#hudHearts').classList.add('spot');
+    this.g.spot = c.spot || null;
+    const done = (e) => {
+      if (e) e.stopPropagation();
       el.remove();
       $('#hudHearts').classList.remove('spot');
+      sfx.click();
+      this.nextCoach();
     };
-    el.querySelector('.coach-ok').onclick = done;
-    setTimeout(done, 6000);
+    el.addEventListener('click', done);
+  }
+  clearCoaches() {
+    this.coachQ = [];
+    $('#app').classList.add('paused');
+    this.coachOpen = false;
+    this.g.spot = null;
   }
   wipe() {
     const w = $('#wipe');
@@ -230,7 +257,7 @@ export class UI {
   }
   timer(t) {
     const el = $('#hudTimer');
-    el.textContent = `남은 시간 ${Math.max(0, Math.ceil(t))}`;
+    el.textContent = `남은 시간 ${Math.max(0, Math.ceil(t))}초${this.g && this.g.strokes === 0 ? ' (첫 샷부터)' : ''}`;
     el.classList.toggle('warn', t < 10);
   }
   banner(main, sub, boss) {
@@ -247,6 +274,7 @@ export class UI {
   }
   toast(html, ms = 1800) {
     const t = $('#toast');
+    t.classList.toggle('low', !!this.g && (['reward', 'shop', 'result', 'celebrate', 'dying'].includes(this.g.state) || !!this.g.bigText));
     t.innerHTML = html;
     t.classList.remove('hidden');
     clearTimeout(this.toastT);
@@ -285,6 +313,7 @@ export class UI {
   }
   renderTitle() {
     const m = meta.meta();
+    if (m.run && m.run.hearts <= 0) meta.clearRun();
     const wp = meta.worldProgress();
     const wi = WORLDS.findIndex((w) => w.id === this.titleWorld);
     const w = wp[wi];
@@ -293,6 +322,7 @@ export class UI {
     const dw = WORLDS[hashStr('dw-' + date) % WORLDS.length];
     const dBest = m.daily.best[date];
     const badge = meta.badgeCount();
+    const sv = meta.seasonView();
     const notices = meta.takeNotices();
     const affordable = RELICS.some((r) => !m.unlockedRelics.includes(r.id) && meta.RELIC_PRICE[r.id] <= m.gems);
     const prevW = WORLDS[wi - 1];
@@ -318,6 +348,7 @@ export class UI {
         <button class="meta-btn" id="tCodex">${ICONS.codex}<span>도감</span><small>${m.discovered.length}/${RELICS.length}</small></button>
         <button class="meta-btn" id="tRecords">${ICONS.records}<span>기록</span><small>${Object.keys(m.ach).length}/${meta.ACHIEVEMENTS.length}</small></button>
       </div>
+      <button class="season-bar" id="tSeason"><span>${meta.SEASON.name} <b>Lv ${sv.level}</b></span><i><em style="width:${sv.level >= meta.SEASON.levels ? 100 : (sv.into / meta.SEASON.xpPer) * 100}%"></em></i>${sv.claimable ? `<u>보상 ${sv.claimable}</u>` : ''}</button>
       <div class="world-card" style="--wc:${w.themes[0].voidA};--wc2:hsl(${w.themes[0].hue},${w.themes[0].sat}%,${w.themes[0].light}%)">
         <button class="wc-arrow" id="wPrev" aria-label="이전 월드" ${wi === 0 ? 'disabled' : ''}>&lsaquo;</button>
         <div class="wc-body ${w.unlocked ? '' : 'locked'}">${worldCard}<div class="wc-dots">${wp.map((x, i) => `<i class="${i === wi ? 'on' : ''} ${x.unlocked ? '' : 'lk'}"></i>`).join('')}</div></div>
@@ -357,6 +388,7 @@ export class UI {
     $('#tCollect', root).onclick = go(() => this.collectionScreen('relic'));
     $('#tCodex', root).onclick = go(() => this.codexScreen());
     $('#tRecords', root).onclick = go(() => this.recordsScreen('stats'));
+    $('#tSeason', root).onclick = go(() => this.seasonScreen());
   }
   switchWorld(d) {
     const wi = WORLDS.findIndex((w) => w.id === this.titleWorld);
@@ -473,6 +505,37 @@ export class UI {
         })
     );
   }
+  seasonScreen() {
+    const m = meta.meta();
+    const sv = meta.seasonView();
+    const claimed = (m.season && m.season.claimed) || [];
+    const rows = [];
+    for (let lv = 1; lv <= meta.SEASON.levels; lv++) {
+      const rw = meta.seasonReward(lv);
+      const got = claimed.includes(lv);
+      const can = lv <= sv.level && !got;
+      rows.push(`<div class="srow ${lv <= sv.level ? 'reached' : ''} ${rw.kind !== 'gems' ? 'big' : ''}"><div class="slv">${lv}</div><div class="sr-t"><b>${rw.kind === 'gems' ? GEM + ' ' + rw.n : rw.label}</b>${rw.kind !== 'gems' ? '<small>시즌 한정 꾸미기</small>' : ''}</div><button class="mini-btn" data-lv="${lv}" ${can ? '' : 'disabled'}>${got ? '받음' : can ? '받기' : '잠김'}</button></div>`);
+    }
+    const root = this.screen(
+      `<div class="card-panel wide"><h2>${meta.SEASON.name}</h2><div class="sub">Lv ${sv.level}/${meta.SEASON.levels} · 다음 레벨까지 ${meta.SEASON.xpPer - sv.into} XP<br>홀 클리어, 버디, 별, 미션, 출석으로 경험치 획득</div>
+      <div class="list" id="seasonList">${rows.join('')}</div></div>${this.backBtn()}`
+    );
+    this.wireBack(root);
+    root.querySelectorAll('[data-lv]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          const r = meta.claimSeason(+b.dataset.lv);
+          if (r) {
+            sfx.relic();
+            this.toast(`시즌 보상: <b>${r.label}</b>`);
+          }
+          this.seasonScreen();
+        })
+    );
+    const list = $('#seasonList', root);
+    const cur = list.children[Math.max(0, sv.level - 2)];
+    if (cur) list.scrollTop = cur.offsetTop - list.offsetTop;
+  }
   collectionScreen(tab) {
     const m = meta.meta();
     const tabs = [
@@ -506,7 +569,7 @@ export class UI {
           const own = m.cosmetics.owned[tab].includes(it.id);
           const eq = m.cosmetics.eq[tab] === it.id;
           return `<div class="shop-row"><canvas class="cos-prev" data-kind="${tab}" data-id="${it.id}" width="88" height="88"></canvas><div class="sr-t"><b>${it.name}</b></div>
-          <button class="mini-btn ${eq ? 'on' : ''}" data-cos="${it.id}" ${eq || (!own && m.gems < it.price) ? 'disabled' : ''}>${eq ? '장착중' : own ? '장착' : `${GEM}${it.price}`}</button></div>`;
+          <button class="mini-btn ${eq ? 'on' : ''}" data-cos="${it.id}" ${eq || (!own && (it.season || m.gems < it.price)) ? 'disabled' : ''}>${eq ? '장착중' : own ? '장착' : it.season ? '시즌 보상' : `${GEM}${it.price}`}</button></div>`;
         })
         .join('');
     }
@@ -639,8 +702,7 @@ export class UI {
     if (!g.run || g.paused || !['intro', 'ready', 'rolling', 'celebrate'].includes(g.state)) return;
     g.paused = true;
     g.aim = null;
-    document.querySelectorAll('.coach').forEach((e) => e.remove());
-    $('#hudHearts').classList.remove('spot');
+    $('#app').classList.add('paused');
     const rel = g.run.relics.map((id) => `<div class="shop-row sm"><img src="${relicIcon(id, 64)}" alt=""><div class="sr-t"><b>${RELIC_MAP[id].name}</b><small>${RELIC_MAP[id].desc}</small></div></div>`).join('');
     const root = this.screen(
       `<div class="menu-title">일시정지</div>
@@ -648,9 +710,19 @@ export class UI {
       <button class="btn ghost small" id="pRestart">새 런으로 재시작</button>
       <button class="btn ghost small" id="pTitle">타이틀로 (이어하기 저장됨)</button>
       <button class="btn ghost small" id="pMute">${isMuted() ? '소리 켜기' : '소리 끄기'}</button>
+      <div class="vol"><label>음악<input type="range" min="0" max="100" id="vMusic" value="${Math.round((meta.meta().settings.musicVol ?? 1) * 100)}"></label><label>효과음<input type="range" min="0" max="100" id="vSfx" value="${Math.round((meta.meta().settings.sfxVol ?? 1) * 100)}"></label></div>
       ${rel ? `<div class="card-panel wide" style="margin-top:12px"><div class="sub" style="margin:0 0 6px">보유 유물</div><div class="list">${rel}</div></div>` : ''}`
     );
     $('#pResume', root).onclick = () => this.resume();
+    const volCh = () => {
+      const st = meta.meta().settings;
+      st.musicVol = +$('#vMusic', root).value / 100;
+      st.sfxVol = +$('#vSfx', root).value / 100;
+      setVolumes(st.musicVol, st.sfxVol);
+      meta.persist();
+    };
+    $('#vMusic', root).oninput = volCh;
+    $('#vSfx', root).oninput = volCh;
     $('#pRestart', root).onclick = () => {
       const cfg = { mode: g.run.mode, world: g.run.world };
       g.paused = false;
@@ -672,6 +744,7 @@ export class UI {
   }
   resume() {
     this.g.paused = false;
+    $('#app').classList.remove('paused');
     this.close();
   }
   mulliganPrompt(g) {
@@ -699,10 +772,18 @@ export class UI {
     const def = defOf(id);
     const rar = RARITY[def.rarity || 1];
     const isNew = RELIC_MAP[id] && !meta.meta().discovered.includes(id);
-    const syn = def.consumable ? [] : this.synergy(g, def);
-    const tagHtml = syn.map(({ t, n }) => `<span class="tag ${n ? 'on' : ''}">${t}${n ? ` 시너지 ${n}` : ''}</span>`).join('');
+    const syn = def.consumable || def.upgrade ? [] : this.synergy(g, def);
+    const tagHtml = syn.map(({ t, n }) => `<span class="tag ${n ? 'on' : ''}">${t}${n ? ` ${n + 1}개` : ''}</span>`).join('');
     const trade = def.trade ? '<span class="tag trade">양날의 검</span>' : '';
-    return `<img src="${relicIcon(id, 104)}" alt=""><div class="rc-t"><div class="rn">${def.name}${isNew ? ' <span class="new">NEW</span>' : ''}</div><div class="rarity" style="color:${rar.color}">${def.consumable ? '소모품' : def.upgrade ? '강화' : rar.name}</div><div class="rd">${def.desc}</div><div class="tags">${trade}${tagHtml}</div></div>${extra}`;
+    // 이 유물로 새로 달성되는 시너지
+    let synBox = '';
+    if (!def.consumable && !def.upgrade && RELIC_MAP[id]) {
+      const before = synergyLevels(g.run.relics);
+      const after = synergyLevels([...g.run.relics, id]);
+      const ups = Object.keys(SYNERGY).filter((t) => after[t] > before[t]);
+      if (ups.length) synBox = `<div class="synbox">${ups.map((t) => `${t} 시너지 ${after[t] === 2 ? '2단계' : '달성'}! <b>${SYNERGY[t][after[t] - 1]}</b>`).join('<br>')}</div>`;
+    }
+    return `<img src="${relicIcon(id, 104)}" alt=""><div class="rc-t"><div class="rn">${def.name}${isNew ? ' <span class="new">NEW</span>' : ''}</div><div class="rarity" style="color:${rar.color}">${def.consumable ? '소모품' : def.upgrade ? '강화' : rar.name}</div><div class="rd">${def.desc}</div><div class="tags">${trade}${tagHtml}</div>${synBox}</div>${extra}`;
   }
   rewardScreen(g, options, cb) {
     this.hud(g);
@@ -826,6 +907,8 @@ export class UI {
         <div class="gain list-like" id="gemGain">${GEM} <b data-count="${d.gems}">+0</b> 보석 <small>${d.breakdown.map(([k, v]) => `${k} ${v}`).join(' · ')}</small></div>
         ${d.newStars.length ? `<div class="gain star">새 별 ${d.newStars.map((_, i) => `<span class="stamp" style="animation-delay:${1.6 + i * 0.25}s">${STAR(true)}</span>`).join('')} ${d.newStars.map((i) => STAR_GOALS[i]).join(', ')}</div>` : ''}
         ${d.unlockedWorlds.length ? `<div class="gain world">새 월드 해금: <b>${d.unlockedWorlds.map((id) => WORLD_MAP[id].name).join(', ')}</b></div>` : ''}
+        ${d.dailyNote ? `<div class="gain list-like">${d.dailyNote}</div>` : ''}
+        ${d.xp ? `<div class="gain list-like">시즌 경험치 <b>+${d.xp} XP</b></div>` : ''}
         ${d.ach.length ? `<div class="gain list-like">업적: ${d.ach.map((a) => `<b>${a.name}</b>`).join(', ')}</div>` : ''}
         <div class="sub" style="margin:6px 0 0">최고 기록 ${m.stats.bestHoles}홀 · 완주 ${fmtToPar(m.stats.bestToPar)} · 보유 ${GEM}<b id="gemTotal">${m.gems - d.gems}</b></div>
         <button class="btn" id="again">다시 하기</button>

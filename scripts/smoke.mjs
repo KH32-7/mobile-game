@@ -74,7 +74,12 @@ async function autoDragShot(page, cdp, midShot) {
   return d;
 }
 async function dismissCoach(page) {
-  for (const el of await page.locator('.coach-ok').all()) if (await el.isVisible()) await el.tap();
+  for (let k = 0; k < 4; k++) {
+    const el = page.locator('.coach').first();
+    if (!(await el.count()) || !(await el.isVisible())) break;
+    await el.tap();
+    await page.waitForTimeout(120);
+  }
 }
 async function pickReward(page) {
   await dismissCoach(page);
@@ -342,28 +347,102 @@ try {
     await dismissCoach(page);
     s = await waitState(page, ['ready'], 6000);
     check(s.state === 'ready' && !(await page.evaluate(() => window.__game.paused)), '다음 홀 인트로에서 멈추지 않고 플레이 가능');
-    // 세이브 스컴: 약하게 여러 번 쳐서 하트를 잃은 뒤 새로고침
+    // 세이브 스컴: 약하게 2번 친 뒤 새로고침해도 타수/공 위치 유지
     const box = await page.locator('#cv').boundingBox();
-    const h0 = s.hearts;
-    for (let k = 0; k < 8; k++) {
-      s = await info(page);
-      if (s.hearts < h0 || s.state !== 'ready') break;
+    const weak = async (k) => {
       const cx = box.x + box.width / 2,
         cy = box.y + box.height * 0.55;
       await touchDrag(cdp, cx, cy, cx + (k % 2 ? 12 : -12), cy + 26, 6);
-      await waitState(page, ['ready', 'decide', 'result', 'reward'], 15000);
-      await page.waitForTimeout(200);
-    }
+      await page.waitForTimeout(150);
+      await waitState(page, ['ready', 'celebrate', 'reward', 'dying', 'result'], 15000);
+      await dismissCoach(page);
+    };
+    await weak(0);
+    await weak(1);
     s = await info(page);
-    check(s.hearts < h0, `약한 샷으로 하트 감소 (${h0} -> ${s.hearts}, ${s.strokes}타)`);
     const before = { hearts: s.hearts, strokes: s.strokes, x: Math.round(s.ball.x), y: Math.round(s.ball.y) };
+    check(s.strokes >= 2, `약한 샷 2번 (${s.strokes}타)`);
     await page.reload();
     await page.waitForSelector('#tCont');
     await page.tap('#tCont');
     s = await skipIntro(page);
     const after = { hearts: s.hearts, strokes: s.strokes, x: Math.round(s.ball.x), y: Math.round(s.ball.y) };
     check(JSON.stringify(before) === JSON.stringify(after), `이어하기 후 하트/타수/공 위치 유지 ${JSON.stringify(before)} = ${JSON.stringify(after)}`);
+    // 파+3 자동 기권 -> 홀 종료 시 하트 차감 (최대 2)
+    const h0 = s.hearts;
+    await page.screenshot({ path: SHOTS + '41_par_preview.png' });
+    for (let k = 0; k < 10; k++) {
+      s = await info(page);
+      if (s.state !== 'ready') break;
+      await weak(k);
+    }
+    s = await waitState(page, ['celebrate', 'reward'], 8000);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: SHOTS + '42_forfeit.png' });
+    s = await info(page);
+    check(s.hearts === h0 - 2, `파+3 자동 기권: 하트 ${h0} -> ${s.hearts} (최대 -2)`);
     await ctx.close();
+  }
+
+  // ===== 7. 하트 0 직후 새로고침 (사망 창 저장 버그) + 데일리 보상 제한 =====
+  console.log('[7] 사망 저장/데일리');
+  {
+    const { page, cdp, ctx } = await newPage();
+    await page.goto(BASE + '?debug&seed=99&hearts=1');
+    await page.waitForSelector('#tStart');
+    const runs0 = (await metaOf(page)).stats.runs;
+    await page.tap('#tStart');
+    await skipIntro(page);
+    const box = await page.locator('#cv').boundingBox();
+    for (let k = 0; k < 10; k++) {
+      const s = await info(page);
+      if (s.state !== 'ready') break;
+      const cx = box.x + box.width / 2,
+        cy = box.y + box.height * 0.55;
+      await touchDrag(cdp, cx, cy, cx + (k % 2 ? 12 : -12), cy + 26, 6);
+      await page.waitForTimeout(150);
+      await waitState(page, ['ready', 'dying', 'result'], 15000);
+      await dismissCoach(page);
+    }
+    let s = await waitState(page, ['dying', 'result'], 6000);
+    check(s.hearts === 0, '하트 1로 시작, 기권으로 하트 0');
+    await page.reload(); // 0.9초 안 새로고침
+    await page.waitForSelector('#tStart');
+    await page.waitForTimeout(300);
+    let m = await metaOf(page);
+    check(!(await page.isVisible('#tCont')) && m.run === null && m.stats.runs === runs0 + 1, '하트 0 저장본은 이어하기 불가, 런은 정산됨');
+    // 데일리: 1번 홀에서 죽으면 데일리 미션/보너스 없음, 두 번째 런은 보석 0
+    await page.tap('#tDaily');
+    await skipIntro(page);
+    await page.tap('[data-a="heart"]');
+    s = await waitState(page, ['result'], 6000);
+    m = await metaOf(page);
+    check((m.stats.dailies || 0) === 0, '데일리 1홀 사망으로는 데일리 완료 미션 불인정');
+    await page.tap('#title');
+    await page.waitForSelector('#tDaily');
+    await page.tap('#tDaily');
+    await skipIntro(page);
+    await page.tap('[data-a="sink"]');
+    await waitState(page, ['reward'], 8000);
+    await pickReward(page);
+    await skipIntro(page);
+    await page.tap('[data-a="heart"]');
+    s = await waitState(page, ['result'], 6000);
+    await page.waitForTimeout(500);
+    check(await page.isVisible('text=이미 받음'), '같은 날 두 번째 데일리 런은 보석 없음');
+    await page.screenshot({ path: SHOTS + '43_daily_second.png' });
+    await ctx.close();
+    // 보스 18 타이머: 첫 샷 전/코치마크 중엔 안 흐름
+    const { page: p3, ctx: c3 } = await newPage();
+    await p3.goto(BASE + '?debug&seed=5&hole=18');
+    await p3.waitForSelector('#tStart');
+    await p3.tap('#tStart');
+    await p3.waitForTimeout(2500);
+    await p3.screenshot({ path: SHOTS + '44_boss18_coach.png' });
+    await p3.waitForTimeout(2500);
+    const tl = await p3.evaluate(() => window.__game.timeLeft);
+    check(tl >= 59.9, `보스 타이머: 첫 샷 전에는 멈춤 (${tl.toFixed(1)})`);
+    await c3.close();
   }
 
   // ===== 5. 여러 화면 크기 =====

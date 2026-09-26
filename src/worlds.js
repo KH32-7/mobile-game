@@ -73,6 +73,7 @@ export const BALL_SKINS = [
   { id: 'eight', name: '8볼', price: 40, colors: ['#616161', '#111111'], dot: '#ffffff' },
   { id: 'neon', name: '네온 핑크', price: 45, colors: ['#ffb3d9', '#ff2d95'], glow: '#ff4fb0' },
   { id: 'rainbow', name: '무지개', price: 60, colors: null, rainbow: true },
+  { id: 'season', name: '시즌 벚꽃 공', price: 0, season: true, colors: ['#ffe4ef', '#ff7aa8'], stripe: '#ffffff' },
 ];
 export const TRAILS = [
   { id: 'basic', name: '기본', price: 0, color: '255,255,255' },
@@ -80,6 +81,7 @@ export const TRAILS = [
   { id: 'mint', name: '민트', price: 25, color: '100,255,200' },
   { id: 'rainbow', name: '무지개', price: 45, rainbow: true },
   { id: 'star', name: '별가루', price: 55, color: '255,240,120', sparkle: true },
+  { id: 'season', name: '벚꽃잎', price: 0, season: true, color: '255,170,200', sparkle: true },
 ];
 export const FLAGS = [
   { id: 'theme', name: '월드 기본', price: 0 },
@@ -87,4 +89,5 @@ export const FLAGS = [
   { id: 'pirate', name: '해적', price: 35, color: '#212121', mark: '#ffffff' },
   { id: 'rainbow', name: '무지개', price: 40, rainbow: true },
   { id: 'royal', name: '로열', price: 50, color: '#7b1fa2', mark: '#ffd600' },
+  { id: 'season', name: '시즌 깃발', price: 0, season: true, color: '#ff7aa8', mark: '#ffffff' },
 ];

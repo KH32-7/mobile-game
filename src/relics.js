@@ -43,6 +43,31 @@ export const RELICS = [
   { id: 'acehunter', name: '홀인원 사냥꾼', desc: '홀인원하면 하트 +2, 코인 +10', color: '#ffca28', rarity: 2, tags: ['첫 샷', '하트'] },
   { id: 'turtle', name: '거북이 등껍질', desc: '모든 홀 파 +1. 대신 최대 파워 -25%', color: '#558b2f', rarity: 2, tags: ['파워', '하트'], trade: true },
 ];
+// 태그 시너지: 같은 태그 2개면 1단계, 3개 이상이면 2단계 (효과는 곱연산으로 쌓임)
+export const SYNERGY = {
+  코인: ['코인 획득 x1.25', '코인 획득 x1.6'],
+  벽: ['벽 반사 직후 속도 +8%', '벽 반사 직후 속도 +20%'],
+  범퍼: ['범퍼 파워 x1.15', '범퍼 파워 x1.35, 범퍼 맞을 때 코인 +1'],
+  컵: ['컵 크기 x1.1', '컵 크기 x1.25'],
+  파워: ['최대 파워 +8%', '최대 파워 +20%'],
+  '첫 샷': ['홀 첫 샷 파워 +10%', '홀 첫 샷 파워 +20%, 홀인원 코인 x2'],
+  하트: ['최대 하트 +1', '최대 하트 +2'],
+  지형: ['모래/경사/바람 영향 -15%', '모래/경사/바람 영향 -40%'],
+  조준: ['조준선 길이 x1.3', '조준선 길이 x1.7, 반사 +1'],
+  상자: ['상자 부수면 코인 +1', '상자가 쉽게 부서지고 코인 +2'],
+  물: ['구명조끼/스침 홀당 +1회', '구명조끼/스침 홀당 +2회'],
+};
+export function synergyLevels(ids) {
+  const cnt = {};
+  for (const id of ids) {
+    const r = RELIC_MAP[id];
+    if (r) for (const t of r.tags || []) cnt[t] = (cnt[t] || 0) + 1;
+  }
+  const lv = {};
+  for (const t of Object.keys(SYNERGY)) lv[t] = cnt[t] >= 3 ? 2 : cnt[t] >= 2 ? 1 : 0;
+  lv._cnt = cnt;
+  return lv;
+}
 export const RARITY = { 1: { name: '일반', color: '#9e9e9e', w: 60 }, 2: { name: '희귀', color: '#2f80ff', w: 30 }, 3: { name: '영웅', color: '#a64dff', w: 10 } };
 
 export const RELIC_MAP = Object.fromEntries(RELICS.map((r) => [r.id, r]));

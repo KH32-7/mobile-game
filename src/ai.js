@@ -82,12 +82,13 @@ export function planShot(h, st, bx, by, M, maxSpeed, opts = {}) {
 }
 
 
-// 사람 근사: 조준 각도/파워에 오차를 더함 (검증 스크립트용)
-export function humanize(shot, rng, aErr = 0.05, pErr = 0.09) {
+// 사람 근사: 조준 오차가 샷 세기에 비례 (짧은 퍼트는 정확, 긴 샷은 부정확)
+export function humanize(shot, rng, aBase = 0.018, aK = 0.045, pBase = 0.03, pK = 0.1) {
   const g = () => {
     let u = 0;
     for (let i = 0; i < 6; i++) u += rng();
     return (u - 3) / Math.sqrt(0.5);
   };
-  return { a: shot.a + g() * aErr, p: Math.max(0.03, Math.min(1, shot.p * (1 + g() * pErr))) };
+  const p0 = shot.p;
+  return { a: shot.a + g() * (aBase + aK * p0), p: Math.max(0.03, Math.min(1, p0 * (1 + g() * (pBase + pK * p0)))) };
 }

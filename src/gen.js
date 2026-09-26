@@ -334,6 +334,54 @@ export function lineClear(h, x0, y0, x1, y1, margin = 7) {
   return true;
 }
 
+// 짧은 직선 홀은 경로 위에 장애물 1개 강제 (홀인원 남발 방지)
+function forceObstacle(h, rng, meta) {
+  const g = h.grid;
+  const dist = distField(h);
+  const tx = Math.floor(h.tee.x / T),
+    ty = Math.floor(h.tee.y / T);
+  const path = pathFromDist(h, dist, tx, ty);
+  if (!path || path.length < 4) return;
+  const a = path[0],
+    b = path[path.length - 1];
+  const straight = lineClear(h, tcx(a[0]), tcx(a[1]), tcx(b[0]), tcx(b[1]));
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]) * T;
+  if (!straight) return;
+  void len;
+  const mid = path.slice(Math.floor(path.length * 0.35), Math.ceil(path.length * 0.7));
+  rng.shuffle(mid);
+  // 1순위: 시야를 막는 작은 기둥(벽 섬) - 뱅크 샷이 필요해짐
+  for (const [x, y] of mid) {
+    if (meta.noGoRows && y >= meta.noGoRows[0] && y <= meta.noGoRows[1]) continue;
+    const i = y * g.cols + x;
+    const old = g.t[i];
+    g.t[i] = VOID;
+    if (validateHole(h).ok && !lineClear(h, tcx(a[0]), tcx(a[1]), tcx(b[0]), tcx(b[1]), 7)) {
+      h.forced = 'pillar';
+      return;
+    }
+    g.t[i] = old;
+  }
+  for (const [x, y] of mid) {
+    if (meta.noGoRows && y >= meta.noGoRows[0] && y <= meta.noGoRows[1]) continue;
+    const snapB = h.bumpers.length;
+    h.bumpers.push({ x: tcx(x) + rng.range(-5, 5), y: tcx(y), r: 10 });
+    if (validateHole(h).ok) {
+      h.forced = 'bumper';
+      return;
+    }
+    h.bumpers.length = snapB;
+  }
+  // 범퍼가 안 되면 모래
+  for (const [x, y] of mid) {
+    if (g.t[y * g.cols + x] !== GRASS) continue;
+    g.t[y * g.cols + x] = SAND;
+    if (x + 1 < g.cols && g.t[y * g.cols + x + 1] === GRASS) g.t[y * g.cols + x + 1] = SAND;
+    h.forced = 'sand';
+    return;
+  }
+}
+
 function pathFromDist(h, dist, sx, sy) {
   const g = h.grid;
   const path = [[sx, sy]];
@@ -770,6 +818,7 @@ function tryGenerate(rng, idx, world) {
   if (!validateHole(h).ok) return null;
   placeElements(h, rng, idx, meta, world);
   if (!validateHole(h).ok) return null;
+  forceObstacle(h, rng, meta);
   h.segs = computeSegments(h);
   const pr = computePar(h);
   h.par = pr.par;

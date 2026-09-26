@@ -3,7 +3,7 @@ import './style.css';
 import { Renderer } from './render.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
-import { initAudio, setMuted, suspend, resume, isMuted } from './audio.js';
+import { initAudio, setMuted, suspend, resume, isMuted, setVolumes } from './audio.js';
 import * as meta from './meta.js';
 
 const params = new URLSearchParams(location.search);
@@ -23,6 +23,7 @@ ui.bind(game, opts);
 
 const m = meta.meta();
 setMuted(!!m.settings.muted);
+setVolumes(m.settings.musicVol ?? 1, m.settings.sfxVol ?? 1);
 
 function onResize() {
   renderer.resize();

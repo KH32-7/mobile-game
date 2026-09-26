@@ -3,11 +3,11 @@ import { T, PHYS, RUN, SCORE_TEXT } from './config.js';
 import { generateHole, distField, BOSS, isPass, TILE } from './gen.js';
 import { makeState, newBall, stepWorld, relicMods, previewPath, settleToFloor, cupPos } from './physics.js';
 import { planShot } from './ai.js';
-import { RELICS, RELIC_MAP, CONSUMABLES, RARITY, defOf } from './relics.js';
+import { RELICS, RELIC_MAP, CONSUMABLES, RARITY, defOf, synergyLevels } from './relics.js';
 import { WORLDS, WORLD_MAP } from './worlds.js';
 import { mulberry32, mix, hashStr, dateSeedStr } from './rng.js';
 import { FX } from './fx.js';
-import { sfx, rollSound, setBgmStyle } from './audio.js';
+import { sfx, rollSound, setBgmStyle, setMood } from './audio.js';
 import * as meta from './meta.js';
 
 const FIXED = 1 / 120;
@@ -67,7 +67,7 @@ export class Game {
     const availH = Math.max(100, bot - top);
     const fit = Math.min((W - 6) / worldW, 1.6);
     const over = Math.min(fit, availH / (worldH + 8));
-    const scale = this.cam.overview || this.state === 'intro' || this.state === 'title' ? over : fit;
+    let scale = this.cam.overview || this.state === 'intro' || this.state === 'title' ? over : fit;
     let cy, y;
     if (worldH * scale <= availH) {
       cy = top + availH * (this.state === 'title' ? 0.64 : 0.5);
@@ -86,7 +86,14 @@ export class Game {
     }
     const c = this.cam;
     const k = snap ? 1 : 0.1;
-    c.x = worldW / 2;
+    let tx = worldW / 2;
+    if (this.zoomCup && this.state === 'celebrate') {
+      scale *= 1.45;
+      tx = this.zoomCup.x;
+      y = this.zoomCup.y;
+      cy = top + availH * 0.55;
+    }
+    c.x += (tx - c.x) * (snap ? 1 : 0.12);
     c.scale += (scale - c.scale) * (snap ? 1 : 0.15);
     c.y += (y - c.y) * k;
     c.cy += (cy - c.cy) * (snap ? 1 : 0.2);
@@ -165,6 +172,13 @@ export class Game {
   resumeRun(snap) {
     this.run = JSON.parse(JSON.stringify(snap));
     const r = this.run;
+    if (r.hearts <= 0) {
+      // 하트 0 상태 저장본: 이어하지 않고 바로 결과
+      const h = generateHole(r.seed, r.holeIdx, r.world);
+      this.setHole(h, r.world, r.holeIdx);
+      this.showResult(false);
+      return;
+    }
     r.relicLv = r.relicLv || {};
     this.timers = [];
     this.paused = false;
@@ -173,8 +187,9 @@ export class Game {
       const h = generateHole(r.seed, r.holeIdx, r.world);
       this.setHole(h, r.world, r.holeIdx);
       this.updateMods();
-      this.par = this.parFor(h);
-      this.strokes = 0;
+      const last = r.scorecard[r.scorecard.length - 1];
+      this.par = last ? last.par : this.parFor(h);
+      this.strokes = last ? last.strokes : 0;
       this.state = 'celebrate';
       if (r.pending === 'reward') this.afterHole();
       else this.openShop();
@@ -197,6 +212,7 @@ export class Game {
       crateAlive: st.crateAlive.slice(),
       coinTaken: st.coinTaken.slice(),
       cupGone: st.cupGone.slice(),
+      cups: this.hole.cups.map((c) => [c.x, c.y]),
       firstShot: this.firstShot,
       mulligans: this.mulligans,
       shieldLeft: this.shieldLeft,
@@ -217,14 +233,18 @@ export class Game {
     return this.has(id) ? (this.run.relicLv && this.run.relicLv[id]) || 1 : 0;
   }
   updateMods() {
-    this.M = relicMods(this.relicSet, this.run ? this.run.relicLv : {}, { hearts: this.run ? this.run.hearts : 5 });
+    this.syn = synergyLevels(this.run ? this.run.relics : []);
+    this.M = relicMods(this.relicSet, this.run ? this.run.relicLv : {}, { hearts: this.run ? this.run.hearts : 5, syn: this.syn });
+  }
+  synLv(tag) {
+    return (this.syn && this.syn[tag]) || 0;
   }
   parFor(h) {
     let p = h.par + (this.has('parplus') ? 1 : 0) + (this.has('turtle') ? 1 : 0) - (this.has('eagleeye') ? 1 : 0);
     return Math.max(2, p);
   }
   coinMul() {
-    return (this.has('glass') ? 2 : 1) * (this.has('greed') ? 1.5 : 1);
+    return (this.has('glass') ? 2 : 1) * (this.has('greed') ? 1.5 : 1) * [1, 1.25, 1.6][this.synLv('코인')];
   }
   has(id) {
     return this.run && this.run.relics.includes(id);
@@ -256,7 +276,14 @@ export class Game {
       return;
     }
     if (r.relics.includes(id)) return;
+    const heartBefore = this.synLv('하트');
     r.relics.push(id);
+    this.updateMods();
+    const hd = this.synLv('하트') - heartBefore;
+    if (hd > 0) {
+      r.maxHearts += hd;
+      r.hearts += hd;
+    }
     if (id === 'vitality') {
       r.maxHearts += 2;
       r.hearts = Math.min(r.maxHearts, r.hearts + 2);
@@ -285,7 +312,7 @@ export class Game {
     this.firstShot = true;
     this.mulligans = this.lv('mulligan');
     this.shieldLeft = this.lv('shield');
-    this.vestLeft = this.lv('lifevest');
+    this.vestLeft = this.lv('lifevest') + (this.has('lifevest') ? this.synLv('물') : 0);
     this.snap = null;
     this.timeLeft = h.timeLimit || 0;
     this.holeCoins = 0;
@@ -293,7 +320,8 @@ export class Game {
     this.paused = false;
     this.timers = [];
     this.bigText = null;
-    this.revealT = h.boss === 'threeCups' ? 4 : 0;
+    this.zoomCup = null;
+    this.revealT = h.boss === 'threeCups' ? 1.5 : 0;
     r.pending = null;
     // 샷 도중 저장된 상태가 있으면 복원 (세이브 스컴 방지)
     const hs = r.holeState;
@@ -304,6 +332,7 @@ export class Game {
       st.crateAlive = hs.crateAlive;
       st.coinTaken = hs.coinTaken;
       st.cupGone = hs.cupGone;
+      if (hs.cups) hs.cups.forEach(([cx, cy], i) => h.cups[i] && Object.assign(h.cups[i], { x: cx, y: cy }));
       st.balls = [newBall(hs.x, hs.y)];
       this.firstShot = hs.firstShot;
       this.mulligans = hs.mulligans ?? this.mulligans;
@@ -323,9 +352,12 @@ export class Game {
     this.ui.banner(`HOLE ${idx + 1}`, `파 ${this.par}${nine ? ' · ' + nine : ''}${resumed ? ' · 이어하기' : ''}`, boss ? `보스: ${boss.name}<br>${boss.desc}` : '');
     this.ui.hud(this);
     this.ui.showTutorial(!meta.meta().settings.tutorial);
-    if (resumed && this.strokes > 0) this.heartCheck(true);
     if (h.boss) this.after(1.7, () => this.ui.coach('boss', `보스 홀! ${boss.desc}${h.boss === 'threeCups' ? '. 가짜 컵은 깃발이 반대로 휘날리고 테두리에 금이 가 있음' : ''}`));
-    if (idx === 0 && !resumed) this.after(1.7, () => this.ui.coach('rules', '규칙: 파보다 많이 치면 넘친 타수만큼 하트가 깎임. 버디 이하면 코인과 회복 기회!', 'hearts'));
+    if (idx === 0 && !resumed) this.after(1.7, () => this.ui.coach('rules', '목표는 깃발 컵! 파(기준 타수)보다 많이 치면 홀이 끝날 때 넘친 타수만큼 하트가 깎임. 버디 이하면 코인과 회복 기회', 'hearts', 'bottom', 'cup'));
+  }
+
+  showGhost() {
+    return this.run && this.state === 'ready' && !this.aim && !this.ui.coachOpen && !this.paused && !meta.meta().settings.tutorial && this.strokes === 0;
   }
 
   // ---------- 입력 ----------
@@ -393,7 +425,9 @@ export class Game {
     const tick = Math.floor(a.power * 10);
     if (tick !== a.lastTick) {
       a.lastTick = tick;
+      a.moved = true;
       sfx.aimTick(a.power);
+      vib(a.power >= 1 ? 12 : 4);
     }
     const b = this.st.balls[0];
     // 조준선: 최대 비거리의 40% 고정 길이 (정지 지점은 감으로). 첫 반사까지만, 유물로 확장
@@ -402,8 +436,8 @@ export class Game {
       aa = 140;
     const full = v0 / k - (aa / (k * k)) * Math.log(1 + (k * v0) / aa);
     const long = this.has('longaim');
-    const dist = full * (long ? 0.8 : 0.4);
-    const bounces = (long ? 3 : 0) + (this.has('cushion') ? 1 : 0);
+    const dist = full * (long ? 0.8 : 0.4) * [1, 1.3, 1.7][this.synLv('조준')];
+    const bounces = (long ? 3 : 0) + (this.has('cushion') ? 1 : 0) + (this.synLv('조준') >= 2 ? 1 : 0);
     a.path = previewPath(this.hole, this.st, b.x, b.y, a.dx, a.dy, dist, bounces);
     a.path.fullLen = dist;
   }
@@ -413,7 +447,7 @@ export class Game {
     this.aim = null;
     if (this.state !== 'ready') return;
     if (a.power <= 0) {
-      this.ui.toast('샷 취소');
+      if (a.moved) this.ui.toast('샷 취소');
       return;
     }
     this.shoot(a.dx, a.dy, a.power);
@@ -424,7 +458,8 @@ export class Game {
 
   maxSpeed() {
     let s = PHYS.maxShotSpeed * [1, 1.25, 1.4][this.lv('tailwind')];
-    if (this.firstShot) s *= [1, 1.3, 1.5][this.lv('luckytee')];
+    if (this.firstShot) s *= [1, 1.3, 1.5][this.lv('luckytee')] * [1, 1.1, 1.2][this.synLv('첫 샷')];
+    s *= [1, 1.08, 1.2][this.synLv('파워')];
     if (this.has('feather')) s *= 0.85;
     if (this.has('turtle')) s *= 0.75;
     return s;
@@ -481,6 +516,7 @@ export class Game {
     this.fx.ring(b.x, b.y, '#ffffff', 16, 0.3);
     this.saveProgress();
     this.ui.showTutorial(false);
+    this.ghostT = 0;
     if (!meta.meta().settings.tutorial) {
       meta.meta().settings.tutorial = true;
       meta.persist();
@@ -530,8 +566,10 @@ export class Game {
       }
     }
     // 보스 제한 시간
-    if (this.timeLeft > 0 && (this.state === 'ready' || this.state === 'rolling')) {
+    if (this.timeLeft > 0 && (this.state === 'ready' || this.state === 'rolling') && this.strokes > 0 && !this.ui.coachOpen) {
+      const before = Math.ceil(this.timeLeft);
       this.timeLeft -= dtReal;
+      if (Math.ceil(this.timeLeft) !== before && this.timeLeft <= 10 && this.timeLeft > 0) sfx.tick();
       if (this.timeLeft <= 0) {
         this.strokes++;
         this.timeLeft = 30;
@@ -539,7 +577,7 @@ export class Game {
         this.fx.pop('시간 초과! +1', b.x, b.y - 24, { color: '#ff8a80', size: 18, life: 1.4 });
         sfx.heart();
         this.shake(4);
-        if (this.state === 'ready') this.heartCheck();
+        if (this.state === 'ready') this.forfeitCheck();
       }
       this.ui.timer(this.timeLeft);
     }
@@ -595,6 +633,11 @@ export class Game {
         }
     }
     rollSound(rsurf, rs);
+    // 음악 상황 전환
+    let mood = 'normal';
+    if (this.aim && this.aim.power > 0) mood = 'aim';
+    else if (this.state === 'rolling' && this.stingDone) mood = 'tense';
+    setMood(mood);
     this.camTarget();
   }
 
@@ -639,7 +682,7 @@ export class Game {
     for (const e of ev) {
       switch (e.type) {
         case 'wall':
-          if (!demo) sfx.wall(e.speed, e.wood);
+          if (!demo) sfx.wall(e.speed, e.wood ? 'wood' : this.world.wall || 'wood');
           if (!demo && e.speed > 600 && this.has('glass') && !this.glassHit && this.state === 'rolling') {
             this.glassHit = true;
             this.strokes++;
@@ -659,7 +702,7 @@ export class Game {
           sfx.bumper();
           meta.track('bumpers');
           this.bumpCount = (this.bumpCount || 0) + 1;
-          if (this.has('bounceking')) this.gainCoins(this.lv('bounceking'), e.x, e.y - 16);
+          if (this.has('bounceking') || this.synLv('범퍼') >= 2) this.gainCoins(this.lv('bounceking') + (this.synLv('범퍼') >= 2 ? 1 : 0), e.x, e.y - 16);
           break;
         case 'crate':
           this.fx.debris(e.x, e.y);
@@ -668,7 +711,7 @@ export class Game {
           this.shake(4);
           vib(15);
           meta.track('crates');
-          if (this.has('carpenter')) this.gainCoins(2, e.x, e.y - 16);
+          if (this.has('carpenter') || this.synLv('상자')) this.gainCoins((this.has('carpenter') ? 2 : 0) + this.synLv('상자'), e.x, e.y - 16);
           break;
         case 'cup':
           if (demo) {
@@ -760,7 +803,7 @@ export class Game {
     // 가짜 컵
     const fake = balls.find((b) => b.fake);
     if (fake) {
-      st.cupGone[fake.sinkCup] = true;
+      this.shuffleCup(fake.sinkCup);
       this.strokes++;
       this.fx.pop('가짜 컵! +1', fake.sinkX, fake.sinkY - 20, { color: '#ff8a80', size: 18, life: 1.4 });
       sfx.heart();
@@ -778,10 +821,17 @@ export class Game {
         } else {
           this.strokes++;
           this.fx.pop('벌타 +1', w.x, w.y - 20, { color: '#80d8ff', size: 16, life: 1.3 });
-          this.ui.coach('water', '물에 빠지면 벌타 +1, 친 자리로 돌아감');
+          this.ui.coach('water', '물에 빠지면 벌타 +1, 빠지기 직전 자리에서 다시 침');
         }
       }
-      const b = newBall(snap.x, snap.y);
+      // 물: 들어가기 직전 안전 지점에 드롭, 가짜 컵: 친 자리로
+      const w0 = water[0];
+      let b = newBall(snap.x, snap.y);
+      if (w0 && w0.safeX != null) {
+        b = newBall(w0.safeX - (w0.vx || 0) * 0.02, w0.safeY - (w0.vy || 0) * 0.02);
+        const tv = this.hole.grid.t[Math.floor(b.y / T) * this.hole.cols + Math.floor(b.x / T)];
+        if (!isPass(tv)) b = newBall(w0.safeX, w0.safeY);
+      }
       st.balls = [b];
     } else {
       // 여러 공이면 컵에 가장 가까운 공만 남김
@@ -801,66 +851,60 @@ export class Game {
     }
     if (this.has('pinball') && this.bumpCount >= 3) this.gainCoins(5, st.balls[0].x, st.balls[0].y - 30);
     this.state = 'ready';
-    this.heartCheck();
     this.saveProgress();
     this.ui.hud(this);
+    this.forfeitCheck();
   }
 
-  // 파를 넘기는 게 확정된 타수만큼 하트 차감
-  heartCheck(quiet) {
-    const r = this.run;
-    const need = this.strokes + 1 - this.par;
-    let delta = need - this.lost;
-    if (delta > 0) {
-      this.lost = need;
-      const b = this.st.balls[0];
-      while (delta > 0 && this.shieldLeft > 0) {
-        this.shieldLeft--;
-        delta--;
-        this.fx.ring(b.x, b.y, '#4fc3f7', 30, 0.6, 4);
-        this.fx.pop('보호막!', b.x, b.y - 40, { color: '#81d4fa', size: 16 });
-        sfx.ghost();
+  // 가짜 컵은 다른 자리로 이동 (진짜 컵 단서는 깃발 방향)
+  shuffleCup(i) {
+    const h = this.hole;
+    const g = h.grid;
+    const green = h.chunks[h.chunks.length - 1];
+    const rng = mulberry32(mix(this.run ? this.run.seed : 1, this.strokes, i, 31));
+    const cands = [];
+    for (let y = green.y0; y < green.y0 + green.h; y++)
+      for (let x = green.x0; x < green.x0 + green.w; x++) {
+        if (g.t[y * g.cols + x] === TILE.VOID || g.t[y * g.cols + x] === TILE.WATER) continue;
+        const cx = (x + 0.5) * T,
+          cy = (y + 0.5) * T;
+        if (h.cups.some((c, k) => k !== i && Math.hypot(c.x - cx, c.y - cy) < T * 2)) continue;
+        if (Math.hypot(h.cups[i].x - cx, h.cups[i].y - cy) < T * 1.5) continue;
+        cands.push([cx, cy]);
       }
-      if (delta <= 0) return;
-      r.hearts = Math.max(0, r.hearts - delta);
-      this.updateMods();
-      if (!quiet) this.ui.coach('heartloss', `파 ${this.par}를 넘기게 되어 하트 -${delta}. 남은 하트가 0이 되면 런 종료`);
-      this.fx.pop(`-${'♥'.repeat(Math.min(3, delta))}`, b.x, b.y - 26, { color: '#ff5c8a', size: 20, life: 1.3 });
-      sfx.heart();
-      vib([20, 40, 20]);
-      this.shake(3);
-      this.ui.hud(this, 'heart');
-      this.checkDeath();
+    if (cands.length) {
+      const [nx, ny] = cands[Math.floor(rng() * cands.length)];
+      this.fx.ring(h.cups[i].x, h.cups[i].y, '#ff8a80', 24, 0.5);
+      h.cups[i].x = nx;
+      h.cups[i].y = ny;
+      this.fx.sparkle(nx, ny, '#ffcdd2', 12);
     }
   }
-  checkDeath() {
-    if (this.run.hearts > 0 || this.state === 'decide') return;
-    if (this.has('lastchance') && !this.run.lastUsed) {
-      this.run.lastUsed = true;
-      this.run.hearts = 1;
-      const b = this.st.balls[0];
-      this.fx.ring(b.x, b.y, '#ff5252', 40, 0.8, 5);
-      this.fx.pop('마지막 기회!', b.x, b.y - 30, { color: '#ff8a80', size: 20, life: 1.6 });
-      sfx.heal();
-      this.ui.hud(this, 'heart');
-      return;
-    }
-    this.state = 'decide';
-    this.aim = null;
-    this.saveProgress();
-    if (this.canMulligan()) this.ui.mulliganPrompt(this);
-    else this.after(0.9, () => this.gameOver());
+
+  // 파+3 에 도달하면 자동 기권
+  forfeitCheck() {
+    if (this.state !== 'ready' || this.strokes < this.par + 3) return;
+    this.holeComplete(null, true);
   }
+
   debugLoseHeart() {
     if (!this.run || this.state !== 'ready') return;
     this.run.hearts = Math.max(0, this.run.hearts - 1);
     sfx.heart();
     this.ui.hud(this, 'heart');
-    this.checkDeath();
+    if (this.run.hearts <= 0) this.die();
+  }
+  // 하트 0: 즉시 정산 (새로고침해도 되살릴 수 없게) 후 결과 화면
+  die() {
+    this.state = 'dying';
+    this.aim = null;
+    this.finalizeRun(false);
+    sfx.gameOver();
+    this.after(1.4, () => this.showResult(false));
   }
 
   canMulligan() {
-    return this.has('mulligan') && this.mulligans > 0 && this.snap && (this.state === 'ready' || this.state === 'decide');
+    return this.has('mulligan') && this.mulligans > 0 && this.snap && this.state === 'ready';
   }
   useMulligan() {
     if (!this.canMulligan()) return;
@@ -872,7 +916,6 @@ export class Game {
     this.vestLeft = s.vestLeft;
     this.strokes = s.strokes;
     this.run.hearts = s.hearts;
-    this.lost = s.lost;
     this.run.coins = s.coins;
     st.crateAlive = s.crateAlive;
     st.coinTaken = s.coinTaken;
@@ -888,14 +931,24 @@ export class Game {
     this.ui.hud(this);
   }
 
-  holeComplete(ball) {
+  holeComplete(ball, forfeit = false) {
     const r = this.run;
+    if (forfeit) this.strokes = this.par + 3;
     const diff = this.strokes - this.par;
-    const ace = this.strokes === 1;
+    const ace = this.strokes === 1 && !forfeit;
     this.state = 'celebrate';
+    this.aim = null;
     let key = ace ? 'ace' : String(Math.max(-3, diff));
     let text = SCORE_TEXT[key] || (diff > 0 ? `+${diff}` : 'WOW');
-    if (diff >= 3) text = `+${diff}`;
+    if (diff >= 3) text = forfeit ? '기권 +3' : `+${diff}`;
+    // 하트: 홀이 끝날 때 초과 타수만큼 (최대 2), 보호막이 먼저 막음
+    let loss = Math.min(2, Math.max(0, diff));
+    let shielded = 0;
+    while (loss > 0 && this.shieldLeft > 0) {
+      this.shieldLeft--;
+      loss--;
+      shielded++;
+    }
     let coins = 0,
       heal = 0;
     const rng = mulberry32(mix(r.seed, r.holeIdx, 4242));
@@ -916,6 +969,7 @@ export class Game {
       coins += 10;
       heal += 2;
     }
+    if (ace && this.synLv('첫 샷') >= 2) coins *= 2;
     coins = Math.round(coins * this.coinMul());
     if (diff > 0 && this.has('gambler')) coins = -Math.min(3, r.coins);
     coins += this.lv('coinmag');
@@ -924,17 +978,42 @@ export class Game {
     if (coins) subs.push(`${coins > 0 ? '+' : ''}${coins} 코인`);
     const healed = Math.min(heal, r.maxHearts - r.hearts);
     if (healed > 0) subs.push(`하트 +${healed}`);
-    this.bigText = { text, sub: subs.join('  '), t: 0, life: 2.2, c1: colors[0], c2: colors[1] };
+    if (loss > 0) subs.push(`하트 -${loss}`);
+    if (shielded) subs.push(`보호막 ${shielded}`);
+    this.bigText = { text, sub: subs.join('  '), t: 0, life: 2.2, c1: colors[0], c2: colors[1], bad: diff > 0 };
     r.coins += coins;
     r.maxCoins = Math.max(r.maxCoins, r.coins);
-    r.hearts += healed;
+    r.hearts += healed - loss;
+    let dead = false;
+    if (r.hearts <= 0) {
+      if (this.has('lastchance') && !r.lastUsed) {
+        r.lastUsed = true;
+        r.hearts = 1;
+        subs.push('마지막 기회!');
+        this.bigText.sub = subs.join('  ');
+      } else {
+        r.hearts = 0;
+        dead = true;
+      }
+    }
     this.updateMods();
     if (healed) sfx.heal();
+    if (loss > 0) {
+      sfx.heart();
+      vib([20, 40, 20]);
+      this.ui.hud(this, 'heart');
+      this.after(0.6, () => this.ui.coach('heartloss', `파 ${this.par}보다 ${diff}타 더 쳐서 하트 -${loss}. 한 홀에서 잃는 하트는 최대 2개, 파+3 이면 자동 기권`, 'hearts', 'bottom'));
+    }
     const level = ace || diff <= -2 ? 2 : diff === -1 ? 1 : 0;
     if (diff <= 0) sfx.fanfare(level);
-    const cx = ball.sinkX,
-      cy = ball.sinkY;
-    this.fx.confetti(cx, cy, diff <= 0 ? 70 : 25);
+    const ci = this.hole.cups.findIndex((c) => c.real);
+    const cp = cupPos(this.hole, this.st, ci);
+    const cx = ball ? ball.sinkX : cp.x,
+      cy = ball ? ball.sinkY : cp.y;
+    // 버디 이상은 컵 줌인
+    if (diff < 0) this.zoomCup = { x: cx, y: cy, t: 0 };
+    if (diff <= 0) this.fx.confetti(cx, cy, 70);
+    else if (!forfeit) this.fx.confetti(cx, cy, 20);
     if (diff <= -1) {
       let k = 0;
       const fire = () => {
@@ -973,6 +1052,12 @@ export class Game {
     if (ach.length) meta.takeNotices();
     this.ui.hud(this);
     r.holeState = null;
+    if (dead) {
+      this.state = 'dying';
+      this.finalizeRun(false);
+      this.after(2.2, () => this.showResult(false));
+      return;
+    }
     r.pending = r.holeIdx >= RUN.holes - 1 ? null : 'reward';
     meta.saveRun(this.runSnapshot());
     this.after(2.3, () => this.afterHole());
@@ -1085,36 +1170,37 @@ export class Game {
   gameOver() {
     if (this.state === 'result' || !this.run) return;
     this.bigText = null;
+    this.finalizeRun(false);
     sfx.gameOver();
     this.showResult(false);
   }
 
+  // 런 정산 (한 번만)
+  finalizeRun(complete) {
+    const r = this.run;
+    if (r._res) return r._res;
+    const holesCleared = r.scorecard.length;
+    const toPar = r.strokesTotal - r.parTotal;
+    const res = meta.finishRun({ mode: r.mode, world: r.world, date: r.date, holesCleared, toPar, strokes: r.strokesTotal, complete, relicsCount: r.relics.length, maxCoins: r.maxCoins, counts: r.counts });
+    meta.takeNotices();
+    r._res = { complete, holesCleared, toPar, ...res };
+    return r._res;
+  }
   showResult(complete) {
     const r = this.run;
     this.state = 'result';
     this.paused = false;
     this.timers = [];
     this.bigText = null;
+    this.zoomCup = null;
     rollSound(1, 0);
-    const holesCleared = r.scorecard.length;
-    const toPar = r.strokesTotal - r.parTotal;
-    const res = meta.finishRun({
-      mode: r.mode,
-      world: r.world,
-      date: r.date,
-      holesCleared,
-      toPar,
-      strokes: r.strokesTotal,
-      complete,
-      relicsCount: r.relics.length,
-      maxCoins: r.maxCoins,
-      counts: r.counts,
-    });
-    meta.takeNotices();
-    this.ui.resultScreen(this, { complete, holesCleared, toPar, ...res });
+    this.ui.resultScreen(this, this.finalizeRun(complete));
+    sfx.stinger(complete);
+    void r;
   }
 
   quitToTitle() {
+    this.ui.clearCoaches();
     this.run = null;
     this.timers = [];
     rollSound(1, 0);

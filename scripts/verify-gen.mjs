@@ -121,7 +121,7 @@ function playHole(seed, idx, wid, rngSeed) {
   let strokes = 0;
   let done = false;
   while (strokes < 12 && !done) {
-    const shot = humanize(planShot(h, st, b.x, b.y, M, PHYS.maxShotSpeed, { angles: 20, powers: [0.2, 0.35, 0.5, 0.7, 0.9] }), rng);
+    const shot = humanize(planShot(h, st, b.x, b.y, M, PHYS.maxShotSpeed, { angles: 32, powers: [0.12, 0.2, 0.3, 0.42, 0.56, 0.72, 0.88, 1] }), rng);
     const px = b.x,
       py = b.y;
     b.vx = Math.cos(shot.a) * shot.p * PHYS.maxShotSpeed;
@@ -147,18 +147,19 @@ function playHole(seed, idx, wid, rngSeed) {
       ev.length = 0;
     }
     if (b.waterHit) {
+      // 게임과 같은 규칙: 빠지기 직전 안전 지점에 드롭
       strokes++;
-      b.x = px;
-      b.y = py;
+      b.x = b.safeX ?? px;
+      b.y = b.safeY ?? py;
       b.waterHit = false;
     }
     if (!done && h.grid.t[Math.floor(b.y / T) * h.grid.cols + Math.floor(b.x / T)] === TILE.VOID) settleToFloor(h, b);
     st.t += 1.3;
   }
-  return { seed, idx, wid, par: h.par, strokes, done };
+  return { seed, idx, wid, par: h.par, strokes, done, feat: h.parFeat, forced: h.forced || '', fake: h.cups.length > 1 };
 }
 
-const play = { holes: 0, cleared: 0, over: 0, strokes: 0, worst: [], front: [0, 0], back: [0, 0] };
+const play = { holes: 0, cleared: 0, over: 0, strokes: 0, worst: [], front: [0, 0], back: [0, 0], atOrUnder: 0, aces: 0, plus2: 0 };
 const t1 = Date.now();
 if (NPLAY) {
   const tasks = [];
@@ -176,6 +177,7 @@ if (NPLAY) {
       })
     )
   );
+  if (process.env.DUMP) (await import('node:fs')).writeFileSync(process.env.DUMP, JSON.stringify(results.flat()));
   for (const r of results.flat()) {
     play.holes++;
     if (!r.done) {
@@ -183,6 +185,10 @@ if (NPLAY) {
       continue;
     }
     play.cleared++;
+    const st = Math.min(r.strokes, r.par + 3); // 게임은 파+3 에서 자동 기권
+    if (st <= r.par) play.atOrUnder++;
+    if (r.strokes === 1) play.aces++;
+    if (st - r.par >= 2) play.plus2++;
     play.strokes += r.strokes;
     play.over += r.strokes - r.par;
     const nine = r.idx < 9 ? play.front : play.back;
@@ -208,6 +214,13 @@ if (NPLAY) {
   console.log(`사람 근사 AI 자동 플레이: ${play.cleared}/${play.holes}홀 클리어, 평균 타수 ${(play.strokes / play.cleared).toFixed(2)}, 파 대비 평균 ${avg >= 0 ? '+' : ''}${avg.toFixed(2)} (전반 ${(play.front[0] / play.front[1]).toFixed(2)}, 후반 ${(play.back[0] / play.back[1]).toFixed(2)}), ${playMs}ms`);
   if (play.worst.length) console.log('  미클리어:', play.worst.slice(0, 8).join(' | '));
   if (Math.abs(avg) > 0.5) errors.push(`par calibration off: AI average vs par ${avg.toFixed(2)} (allowed +-0.5)`);
+  const pu = play.atOrUnder / play.holes,
+    pa = play.aces / play.holes,
+    p2 = play.plus2 / play.holes;
+  console.log(`  분포: 파 이하 ${(pu * 100).toFixed(1)}% (목표 55~70), 홀인원 ${(pa * 100).toFixed(1)}% (<=5), +2 이상 ${(p2 * 100).toFixed(1)}% (<=10)`);
+  if (pu < 0.55 || pu > 0.7) errors.push(`par-or-better rate ${(pu * 100).toFixed(1)}% out of 55~70%`);
+  if (pa > 0.05) errors.push(`hole-in-one rate ${(pa * 100).toFixed(1)}% > 5%`);
+  if (p2 > 0.1) errors.push(`+2 or worse rate ${(p2 * 100).toFixed(1)}% > 10%`);
 }
 const clearRate = NPLAY ? play.cleared / play.holes : 1;
 if (clearRate < 0.97) errors.push(`autoplay clear rate too low: ${(clearRate * 100).toFixed(1)}%`);
