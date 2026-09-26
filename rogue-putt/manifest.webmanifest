@@ -1,0 +1,14 @@
+{
+  "name": "로그 퍼트 (Rogue Putt)",
+  "short_name": "로그 퍼트",
+  "description": "새총처럼 당겨 치는 로그라이크 미니골프",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#175434",
+  "theme_color": "#175434",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
