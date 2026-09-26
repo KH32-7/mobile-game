@@ -128,7 +128,11 @@ const app = {
       cos.skin = id;
       if (changed) {
         this.save();
-        this.game.loadStage();
+        this.ui.close(true);
+        this.ui.curtain(() => {
+          this.game.loadStage();
+          this.game.refreshCostume();
+        }, it.name);
       }
     }
     this.game.refreshCostume();
@@ -163,21 +167,26 @@ const app = {
         this.save();
         return;
       }
-      p.stage = Math.min(STAGES.length - 1, p.stage + 1);
-      p.run = newRun();
-      p.stats.stage = p.stage + 1;
-      this.meta.checkAch();
-      g.loadStage();
-      this.save();
-      this.ui.banner(`${p.stage + 1}호점 오픈!`, STAGES[p.stage].name, null);
+      const nextIdx = Math.min(STAGES.length - 1, p.stage + 1);
+      this.ui.curtain(() => {
+        p.stage = nextIdx;
+        p.run = newRun();
+        p.stats.stage = p.stage + 1;
+        this.meta.checkAch();
+        g.loadStage();
+        this.save();
+        setTimeout(() => this.ui.banner(`${p.stage + 1}호점 오픈!`, STAGES[p.stage].name, null), 700);
+      }, STAGES[nextIdx].name);
     });
   },
 
   restartStage() {
-    this.p.run = newRun();
-    this.game.loadStage();
-    this.save();
-    this.ui.toast('식당을 새로 시작했어요');
+    this.ui.curtain(() => {
+      this.p.run = newRun();
+      this.game.loadStage();
+      this.save();
+      this.ui.toast('식당을 새로 시작했어요');
+    }, STAGES[this.p.stage].name);
   },
 
   wipeAll() {

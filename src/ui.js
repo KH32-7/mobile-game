@@ -240,6 +240,26 @@ export class UI {
     }
   }
 
+  // 화면 전환: 노렌(천 가림막)이 내려왔다 올라감
+  curtain(mid, title = '') {
+    const app = document.getElementById('app');
+    const el = document.createElement('div');
+    el.className = 'curtain';
+    el.innerHTML = `<div class="cp"></div><div class="cp"></div><div class="cp"></div><div class="ct">${title}</div>`;
+    app.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('down'));
+    audio.play('whoosh');
+    setTimeout(() => {
+      mid && mid();
+      setTimeout(() => {
+        el.classList.remove('down');
+        el.classList.add('up');
+        audio.play('pop');
+        setTimeout(() => el.remove(), 600);
+      }, 650);
+    }, 480);
+  }
+
   // 튜토리얼: 목표 위를 가리키며 톡톡 치는 손가락
   updatePointer(target, on) {
     let el = document.getElementById('h-point');
@@ -892,7 +912,7 @@ export class UI {
       if (allDone && !flown) {
         flown = true;
         const rw = w.querySelector('.rw');
-        rw.classList.add('pop');
+        rw.classList.add('rwpop');
         this.flyReward(rw, 'pearl', 10);
         return;
       }

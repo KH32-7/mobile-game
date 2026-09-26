@@ -58,6 +58,16 @@ async function newPage(browser, w = 390, h = 844, init = null) {
   // 조이스틱으로 목표 월드 좌표까지 걷기 (화면 오른쪽 = +x, 아래 = +z)
   // 게임의 길찾기 경로(웨이포인트)를 따라 조이스틱을 기울임
   page.walkTo = async (tx, tz, tol = 0.3, timeout = 60000) => {
+    // 저프레임에서 지나치는 경우를 대비해 최대 3번 재시도
+    for (let k = 0; k < 3; k++) {
+      await page.walkOnce(tx, tz, tol, timeout);
+      await page.waitForTimeout(250);
+      const c = await page.evaluate(() => ({ x: __game.game.chef.x, z: __game.game.chef.z, panel: !!__game.ui.panel }));
+      if (c.panel || Math.hypot(c.x - tx, c.z - tz) < tol * 1.6) return true;
+    }
+    return false;
+  };
+  page.walkOnce = async (tx, tz, tol = 0.3, timeout = 60000) => {
     const ox = w / 2;
     const oy = h * 0.7;
     const pts = await page.evaluate(([x, z]) => {
@@ -273,8 +283,10 @@ async function main() {
         return { x: pad.x, z: pad.z, n: g.done.size };
       });
       await p2.tapSel('.debug [data-a="money"]');
-      await p2.walkTo(info.x, info.z, 0.3);
-      await p2.waitFor(`__game.game.done.size > ${info.n}`, 20000, '디버그 해금');
+      for (let k = 0; k < 3; k++) {
+        await p2.walkTo(info.x, info.z, 0.3);
+        if (await p2.waitFor(`__game.game.done.size > ${info.n}`, 20000, '디버그 해금')) break;
+      }
     }
     assert(await p2.g(() => __game.game.done.size >= 3), '디버그 돈으로 해금 발판 3개 밟아서 해금');
     await p2.tapSel('.debug [data-a="unlock"]');
