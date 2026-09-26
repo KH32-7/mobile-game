@@ -190,8 +190,8 @@ export class Game {
 
   fortHp(sec, count) {
     const raw = CFG.fortHpBase + CFG.fortHpPerSec * sec + count * (CFG.fortHpFrac + CFG.fortHpFracPerSec * sec);
-    const cap = count * (CFG.fortHpCap + CFG.fortHpCapPerSec * sec);
-    return Math.max(5, Math.round(Math.min(raw, cap) * (this.opts.fortHp || 1)));
+    const cap = count * Math.min(CFG.fortHpCapMax, CFG.fortHpCap + CFG.fortHpCapPerSec * sec);
+    return Math.max(1, Math.min(Math.round(raw * (this.opts.fortHp || 1)), Math.floor(cap)));
   }
 
   placeFortress(fortD, sec) {
@@ -783,15 +783,20 @@ export class Game {
     if (this.mode !== 'siege') return;
     if (this.modeT < 0.4) return;
     this.siegeAcc += dt * (CFG.fortressRate + Math.min(60, f.hp * CFG.fortressRateScale)) * (1 + this.rush);
-    while (this.siegeAcc >= 1 && sw.count > 0 && sw.members.length > 0) {
+    let inflight = 0;
+    for (const c of this.chargers) inflight += c.rep;
+    // 이미 날아가는 인원으로 성문이 부서지면 더 보내지 않음 (헛된 소모 방지)
+    while (this.siegeAcc >= 1 && sw.count > 0 && sw.members.length > 0 && inflight < f.hp) {
       this.siegeAcc -= 1;
       let bi = -1, br = -1e9;
       for (let i = 1; i < sw.members.length; i++) if (sw.members[i].rel > br) { br = sw.members[i].rel; bi = i; }
       if (bi < 0) bi = 0;
       const m = sw.members[bi];
       const rep = Math.max(1, Math.round(sw.count / sw.members.length));
-      this.chargers.push({ x: m.x, y: m.y, d: this.dist + m.rel, vy: 3, alt: m.alt, rep, tx: (Math.random() - 0.5) * 2.4 });
-      sw.remove(bi, rep);
+      const r2 = Math.min(rep, Math.ceil(f.hp - inflight));
+      this.chargers.push({ x: m.x, y: m.y, d: this.dist + m.rel, vy: 3, alt: m.alt, rep: r2, tx: (Math.random() - 0.5) * 2.4 });
+      inflight += r2;
+      sw.remove(bi, r2);
     }
   }
 

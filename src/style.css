@@ -299,3 +299,6 @@ button { font-family: var(--font); border: 0; cursor: pointer; color: #fff; touc
 .skin .sn small { font-size: 11px; color: #ffd84a; }
 .skin .btn.small { min-height: 36px; font-size: 12px; margin-top: 6px; }
 .skin .maxlv { font-size: 12px; opacity: .8; margin-top: 8px; }
+/* 결과/부활 패널 안의 큰 버튼이 .result .big 숫자 스타일을 물려받지 않게 */
+.result .btn.big { font-size: 26px; line-height: normal; font-weight: 800; }
+.result .btn.rvbtn { font-size: 22px; }

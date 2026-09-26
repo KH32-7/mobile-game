@@ -17,18 +17,18 @@ export class CharRenderer {
     const parts = [], cols = [];
     const white = new THREE.Color(1, 1, 1), black = new THREE.Color(0.05, 0.05, 0.1), pink = new THREE.Color(1, 0.55, 0.65);
     for (const s of [-1, 1]) {
-      const e = new THREE.SphereGeometry(0.075, 7, 5); e.scale(1, 1.15, 0.6); e.translate(s * 0.08, 0.56, -0.165); parts.push(e); cols.push(white);
-      const p = new THREE.SphereGeometry(0.042, 6, 4); p.scale(1, 1.15, 0.6); p.translate(s * 0.08, 0.55, -0.205); parts.push(p); cols.push(black);
-      const c = new THREE.SphereGeometry(0.04, 5, 3); c.scale(1.3, 0.7, 0.4); c.translate(s * 0.13, 0.44, -0.17); parts.push(c); cols.push(pink);
+      const e = new THREE.SphereGeometry(0.075, 6, 4); e.scale(1, 1.15, 0.6); e.translate(s * 0.08, 0.56, -0.165); parts.push(e); cols.push(white);
+      const p = new THREE.SphereGeometry(0.042, 5, 3); p.scale(1, 1.15, 0.6); p.translate(s * 0.08, 0.55, -0.205); parts.push(p); cols.push(black);
+      const c = new THREE.SphereGeometry(0.04, 4, 2); c.scale(1.3, 0.7, 0.4); c.translate(s * 0.13, 0.44, -0.17); parts.push(c); cols.push(pink);
     }
     // 등쪽 무늬: 하이라이트 + 물방울 점 3개 (뒤에서 봐도 귀엽게)
-    const hl = new THREE.SphereGeometry(0.06, 6, 4); hl.scale(1, 1.4, 0.5); hl.translate(0.08, 0.63, 0.17); parts.push(hl); cols.push(new THREE.Color(1, 1, 1));
+    const hl = new THREE.SphereGeometry(0.06, 5, 3); hl.scale(1, 1.4, 0.5); hl.translate(0.08, 0.63, 0.17); parts.push(hl); cols.push(new THREE.Color(1, 1, 1));
     for (const [dx, dy, r] of [[-0.06, 0.5, 0.045], [0.02, 0.38, 0.035], [-0.07, 0.3, 0.03]]) {
-      const sp = new THREE.SphereGeometry(r, 6, 4); sp.scale(1, 1, 0.45); sp.translate(dx, dy, 0.19); parts.push(sp); cols.push(new THREE.Color(1, 0.95, 0.7));
+      const sp = new THREE.SphereGeometry(r, 5, 3); sp.scale(1, 1, 0.45); sp.translate(dx, dy, 0.19); parts.push(sp); cols.push(new THREE.Color(1, 0.95, 0.7));
     }
     // 머리 위 더듬이 (모자 포인트)
     const st = new THREE.CylinderGeometry(0.012, 0.012, 0.14, 4); st.translate(0, 0.83, 0.02); parts.push(st); cols.push(new THREE.Color(0.2, 0.2, 0.3));
-    const ball = new THREE.SphereGeometry(0.045, 6, 4); ball.translate(0, 0.91, 0.02); parts.push(ball); cols.push(new THREE.Color(1, 0.85, 0.3));
+    const ball = new THREE.SphereGeometry(0.045, 5, 3); ball.translate(0, 0.91, 0.02); parts.push(ball); cols.push(new THREE.Color(1, 0.85, 0.3));
     const eyes = mergeSimple(parts.map((g) => g.toNonIndexed ? g : g), cols);
     this.eyes = new THREE.InstancedMesh(eyes, new THREE.MeshBasicMaterial({ vertexColors: true }), MAX);
     this.eyes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -42,7 +42,7 @@ export class CharRenderer {
     this.shadow.renderOrder = -1;
 
     // 팔다리 (캐릭터당 4개, 관절이 위쪽에 오도록)
-    const limb = new THREE.CapsuleGeometry(0.055, 0.12, 2, 5);
+    const limb = new THREE.CapsuleGeometry(0.055, 0.12, 1, 4);
     limb.translate(0, -0.1, 0);
     this.limbs = new THREE.InstancedMesh(limb, new THREE.MeshLambertMaterial({ color: 0xffffff }), MAX * 4);
     this.limbs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

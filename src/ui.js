@@ -304,12 +304,13 @@ export class UI {
         e.stopPropagation();
         const a = e.target.closest('button')?.dataset.a;
         this.hd.click();
+        if (a !== 'buy') this.confirmBuy = null;
         if (a === 'sel') this.hd.selectSkin(s.id);
         else if (a === 'up') { if (this.hd.levelUpSkin(s.id)) this.toast(`${s.name} Lv.${skinLv(s.id)}!`); }
         else if (a === 'frag') { if (this.hd.unlockFrags(s.id)) this.toast(`${s.name} 해금!`); }
         else if (a === 'buy') {
           if (this.confirmBuy === s.id) { this.confirmBuy = null; if (this.hd.buySkin(s.id)) this.toast(`${s.name} 해금!`); }
-          else { this.confirmBuy = s.id; clearTimeout(this._cbT); this._cbT = setTimeout(() => { this.confirmBuy = null; if (!this.skins.classList.contains('hidden')) this.renderSkins(); }, 3000); }
+          else this.confirmBuy = s.id; // 같은 버튼을 한 번 더 누르면 구매, 다른 카드를 누르면 취소
         }
         this.skinFocus = s.id;
         this.renderSkins();
