@@ -310,12 +310,12 @@ body {
 .demand {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 84px);
-  left: 64px;
-  right: 58px;
+  left: 62px;
+  right: 56px;
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
 }
 .demand .dl {
   font-size: 10px;
@@ -329,18 +329,18 @@ body {
 .dm {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   background: rgba(20, 18, 40, 0.62);
-  border-radius: 12px;
-  padding: 2px 7px 2px 3px;
+  border-radius: 11px;
+  padding: 1px 6px 1px 2px;
   color: #fff;
   font-size: 14px;
   font-weight: 900;
   border: 2px solid transparent;
 }
 .dm .mi {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
 }
 
 .dm.need {
@@ -647,10 +647,10 @@ body {
   align-items: center;
   gap: 1px;
   background: #fff;
-  border-radius: 14px;
-  padding: 3px 5px;
-  border: 2.5px solid #3a2233;
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 1px 3px;
+  border: 2px solid #3a2233;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
   will-change: transform;
 }
 .bubble::after {
@@ -664,8 +664,8 @@ body {
   border-bottom: 0;
 }
 .bubble .mi {
-  width: 30px;
-  height: 30px;
+  width: 27px;
+  height: 27px;
 }
 .bubble small {
   font-weight: 900;
@@ -1658,4 +1658,86 @@ body {
 }
 .maxtag.on {
   display: block;
+}
+#fx-top {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  overflow: hidden;
+}
+.flyi {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  will-change: transform;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+}
+.flyi svg {
+  width: 100%;
+  height: 100%;
+}
+.stats.res .rw.pop {
+  animation: rwPop 0.5s ease-out;
+  background: #fff4c8;
+}
+@keyframes rwPop {
+  40% {
+    transform: scale(1.12);
+  }
+}
+.stats em {
+  font-style: normal;
+}
+.point {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.point.show {
+  opacity: 1;
+}
+.point svg {
+  position: absolute;
+  left: -14px;
+  top: 8px;
+  width: 54px;
+  height: 54px;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.5));
+  animation: pointTap 0.9s ease-in-out infinite;
+}
+.point i {
+  position: absolute;
+  left: -22px;
+  top: -22px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 4px solid #fff;
+  animation: pointRing 0.9s ease-out infinite;
+}
+@keyframes pointTap {
+  0%,
+  100% {
+    transform: translateY(14px);
+  }
+  50% {
+    transform: translateY(0);
+  }
+}
+@keyframes pointRing {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
 }

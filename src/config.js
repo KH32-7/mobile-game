@@ -4,18 +4,19 @@ export const SAVE_KEY = 'sushi-loop-save';
 export const SAVE_VERSION = 3;
 
 export const CFG = {
-  chef: { speed: 3.4, speedPerLvl: 0.32, cap: 4, capPerLvl: 2, radius: 0.34 },
+  chef: { speed: 3.5, speedPerLvl: 0.32, cap: 5, capPerLvl: 2, radius: 0.34 },
   transfer: 0.085, // 아이템 1개 옮기는 간격(초)
   crate: { max: 10, regen: 0.75 },
-  station: { inCap: 8, outCap: 6, cookTime: 2.6, cookPerLvl: 0.86 },
+  station: { inCap: 10, outCap: 8, cookTime: 1.5, cookPerLvl: 0.86 },
   sink: { washTime: 0.55 },
   belt: { spacing: 0.92, speed: 0.95, speedPerLvl: 0.2, dryLaps: 3, grab: 0.28 },
-  cust: { patience: 48, eat: 2.4, interval: 6.5, maxOrders: 3, walk: 2.3, firstDelay: 1.5 },
+  cust: { patience: 48, eat: 2.4, seatCycle: 24, maxOrders: 3, walk: 2.3, firstDelay: 1.5 },
   combo: { fast: 10, tipPer: 0.1, maxMul: 3, slow: 22 },
   rush: { first: 75, min: 95, max: 140 },
   staff: { speed: 2.5, cap: 3, speedPerLvl: 0.14, capPerLvl: 1 },
   offline: { capHours: 2, minSec: 120, share: 0.45 },
-  plates: 12,
+  plates: 10,
+  platesPerSeat: 2,
   platesPerLvl: 4,
   unlockTime: 1.25, // 발판 결제에 걸리는 최소 시간
   autosave: 5,
@@ -23,16 +24,16 @@ export const CFG = {
 
 // 메뉴: 접시 색은 회전초밥집 가격표 느낌으로 메뉴마다 다르게
 export const MENUS = {
-  salmon: { name: '연어 초밥', ing: 'salmon', price: 5, plate: '#ff9a3c', desc: '기름진 연어를 얹은 대표 메뉴' },
-  tamago: { name: '달걀 초밥', ing: 'egg', price: 6, plate: '#ffd23f', desc: '달콤한 두툼 계란말이 초밥' },
-  tuna: { name: '참치 초밥', ing: 'tuna', price: 8, plate: '#e2394f', desc: '진한 붉은살 참치' },
-  ebi: { name: '새우튀김', ing: 'shrimp', price: 9, plate: '#4fb0ff', desc: '바삭한 튀김옷의 왕새우' },
-  udon: { name: '우동 그릇', ing: 'noodle', price: 11, plate: '#7a5cff', desc: '따끈한 국물의 쫄깃한 면', bowl: true },
-  uni: { name: '성게 군함', ing: 'uni', price: 13, plate: '#1fbf8f', desc: '김으로 감싼 바다의 버터' },
-  unagi: { name: '장어 초밥', ing: 'eel', price: 14, plate: '#2b2b2b', desc: '달콤 짭짤한 소스의 장어' },
-  dessert: { name: '딸기 모찌', ing: 'berry', price: 10, plate: '#ff7ab8', desc: '말랑한 찹쌀떡 디저트' },
-  ikura: { name: '연어알 군함', ing: 'roe', price: 15, plate: '#c0c7d6', desc: '톡톡 터지는 연어알' },
-  star: { name: '은하 젤리', ing: 'star', price: 18, plate: '#9b6bff', desc: '무중력에서 굳힌 별빛 젤리' },
+  salmon: { name: '연어 초밥', ing: 'salmon', price: 10, plate: '#ff9a3c', desc: '기름진 연어를 얹은 대표 메뉴' },
+  tamago: { name: '달걀 초밥', ing: 'egg', price: 14, plate: '#ffd23f', desc: '달콤한 두툼 계란말이 초밥' },
+  tuna: { name: '참치 초밥', ing: 'tuna', price: 20, plate: '#e2394f', desc: '진한 붉은살 참치' },
+  ebi: { name: '새우튀김', ing: 'shrimp', price: 18, plate: '#4fb0ff', desc: '바삭한 튀김옷의 왕새우' },
+  udon: { name: '우동 그릇', ing: 'noodle', price: 22, plate: '#7a5cff', desc: '따끈한 국물의 쫄깃한 면', bowl: true },
+  uni: { name: '성게 군함', ing: 'uni', price: 26, plate: '#1fbf8f', desc: '김으로 감싼 바다의 버터' },
+  unagi: { name: '장어 초밥', ing: 'eel', price: 28, plate: '#2b2b2b', desc: '달콤 짭짤한 소스의 장어' },
+  dessert: { name: '딸기 모찌', ing: 'berry', price: 20, plate: '#ff7ab8', desc: '말랑한 찹쌀떡 디저트' },
+  ikura: { name: '연어알 군함', ing: 'roe', price: 30, plate: '#c0c7d6', desc: '톡톡 터지는 연어알' },
+  star: { name: '은하 젤리', ing: 'star', price: 36, plate: '#9b6bff', desc: '무중력에서 굳힌 별빛 젤리' },
 };
 export const MENU_ORDER = ['salmon', 'tamago', 'tuna', 'ebi', 'udon', 'uni', 'unagi', 'dessert', 'ikura', 'star'];
 
@@ -73,22 +74,23 @@ export const STAGES = [
     start: { menus: ['salmon'], seats: ['A-R-0', 'A-R-1'] },
     unlocks: [
       { id: 's1', t: 'seats', seats: ['A-L-0', 'A-L-1'], cost: 15 },
-      { id: 'sink', t: 'sink', cost: 35 },
-      { id: 'st_tamago', t: 'station', menu: 'tamago', cost: 60 },
-      { id: 'upg', t: 'upgrade', cost: 90 },
-      { id: 's2', t: 'seats', seats: ['A-R-2', 'A-L-2'], cost: 120 },
-      { id: 'run1', t: 'staff', role: 'runner', cost: 170 },
-      { id: 'ext', t: 'extend', cost: 240 },
-      { id: 's3', t: 'seats', seats: ['A-R-3', 'A-R-4'], cost: 300 },
+      { id: 'sink', t: 'sink', cost: 30 },
+      { id: 'st_tamago', t: 'station', menu: 'tamago', cost: 50 },
+      { id: 'upg', t: 'upgrade', cost: 70 },
+      { id: 's2', t: 'seats', seats: ['A-R-2', 'A-L-2'], cost: 100 },
+      { id: 'run1', t: 'staff', role: 'runner', cost: 150 },
+      { id: 'haul1', t: 'staff', role: 'hauler', cost: 200 },
+      { id: 'ext', t: 'extend', cost: 260 },
+      { id: 's3', t: 'seats', seats: ['A-R-3', 'A-R-4'], cost: 320 },
       { id: 'st_tuna', t: 'station', menu: 'tuna', cost: 400 },
-      { id: 'haul1', t: 'staff', role: 'hauler', cost: 500 },
-      { id: 's4', t: 'seats', seats: ['A-L-3', 'A-L-4'], cost: 650 },
-      { id: 'run2', t: 'staff', role: 'runner', cost: 800 },
-      { id: 'next', t: 'next', cost: 1300 },
+      { id: 's4', t: 'seats', seats: ['A-L-3', 'A-L-4'], cost: 500 },
+      { id: 'run2', t: 'staff', role: 'runner', cost: 650 },
+      { id: 'next', t: 'next', cost: 1000 },
     ],
   },
   {
     id: 'mall',
+    costMul: 0.75,
     name: '쇼핑몰 푸드코트',
     sub: '북적이는 주말의 쇼핑몰',
     priceMul: 3,
@@ -119,6 +121,7 @@ export const STAGES = [
   },
   {
     id: 'beach',
+    costMul: 0.75,
     name: '바닷가 스시바',
     sub: '파도 소리 들리는 해변',
     priceMul: 8,
@@ -149,6 +152,7 @@ export const STAGES = [
   },
   {
     id: 'ryokan',
+    costMul: 0.75,
     name: '고급 료칸',
     sub: '대나무 숲 속 오마카세',
     priceMul: 20,
@@ -179,6 +183,7 @@ export const STAGES = [
   },
   {
     id: 'space',
+    costMul: 0.75,
     name: '우주 정거장',
     sub: '궤도 위 무중력 회전초밥',
     priceMul: 50,
@@ -208,6 +213,16 @@ export const STAGES = [
     ],
   },
 ];
+
+// 비용 배율 적용 (보기 좋은 숫자로 반올림)
+for (const st of STAGES) {
+  if (!st.costMul) continue;
+  for (const u of st.unlocks) {
+    const c = u.cost * st.costMul;
+    const step = c >= 10000 ? 500 : c >= 1000 ? 50 : 5;
+    u.cost = Math.max(step, Math.round(c / step) * step);
+  }
+}
 
 // 식당 테마 색상
 export const THEMES = {

@@ -83,14 +83,22 @@ export class UI {
     // 돈 카운트업
     const target = Math.floor(g.run.money);
     const diff = target - this.shownMoney;
-    if (Math.abs(diff) < 1) this.shownMoney = target;
+    if (this.moneyHold > performance.now()) {
+      /* 보상 비행 중에는 잠시 대기 */
+    } else if (Math.abs(diff) < 1) this.shownMoney = target;
     else this.shownMoney += diff * Math.min(1, dt * 12) + Math.sign(diff) * 0.5;
     const mt = fmt(Math.max(0, Math.round(this.shownMoney)));
     if (this._mt !== mt) {
       $('#h-money').textContent = mt;
       this._mt = mt;
     }
-    const pt = fmt(p.pearls);
+    if (this.shownPearls === undefined) this.shownPearls = p.pearls;
+    if (!(this.pearlHold > performance.now())) {
+      const dp = p.pearls - this.shownPearls;
+      if (Math.abs(dp) < 1) this.shownPearls = p.pearls;
+      else this.shownPearls += dp * Math.min(1, dt * 8) + Math.sign(dp) * 0.3;
+    }
+    const pt = fmt(Math.round(this.shownPearls));
     if (this._pt !== pt) {
       $('#h-pearls').textContent = pt;
       this._pt = pt;
@@ -162,6 +170,82 @@ export class UI {
       rb.classList.add('on');
       rb.firstChild.style.width = `${(g.rush.t / (g.rush.type === 'vip' ? 20 : 25)) * 100}%`;
     } else rb.classList.remove('on');
+  }
+
+  // 보상 아이콘이 버튼에서 HUD 로 날아가는 연출
+  flyReward(from, kind = 'pearl', n = 8) {
+    const app = document.getElementById('app');
+    const ar = app.getBoundingClientRect();
+    const fr = from.getBoundingClientRect ? from.getBoundingClientRect() : from;
+    const sx = fr.left + fr.width / 2 - ar.left;
+    const sy = fr.top + fr.height / 2 - ar.top;
+    const tgt = kind === 'pearl' ? $('.pill.pearls .ic') : $('#h-money-pill .ic');
+    const tr = tgt.getBoundingClientRect();
+    const tx = tr.left + tr.width / 2 - ar.left;
+    const ty = tr.top + tr.height / 2 - ar.top;
+    let layer = document.getElementById('fx-top');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = 'fx-top';
+      app.appendChild(layer);
+    }
+    const hold = 520;
+    if (kind === 'pearl') this.pearlHold = performance.now() + hold;
+    else this.moneyHold = performance.now() + hold;
+    for (let i = 0; i < n; i++) {
+      const el = document.createElement('div');
+      el.className = 'flyi';
+      el.innerHTML = kind === 'pearl' ? SVG.pearl : SVG.coin;
+      layer.appendChild(el);
+      const ox = sx + (Math.random() - 0.5) * 60;
+      const oy = sy + (Math.random() - 0.5) * 40;
+      const cx = (ox + tx) / 2 + (Math.random() - 0.5) * 120;
+      const cy = Math.min(oy, ty) - 60 - Math.random() * 80;
+      const delay = i * 45;
+      const dur = 520 + Math.random() * 120;
+      const t0 = performance.now() + delay;
+      const tick = () => {
+        const t = (performance.now() - t0) / dur;
+        if (t < 0) return requestAnimationFrame(tick);
+        if (t >= 1) {
+          el.remove();
+          audio.play('coin');
+          const pill = kind === 'pearl' ? $('.pill.pearls') : $('#h-money-pill');
+          pill.classList.remove('bump');
+          void pill.offsetWidth;
+          pill.classList.add('bump');
+          return;
+        }
+        // 처음엔 퍼졌다가 곡선으로 빨려 들어감
+        const e = t * t;
+        const x = (1 - e) * (1 - e) * ox + 2 * (1 - e) * e * cx + e * e * tx;
+        const y = (1 - e) * (1 - e) * oy + 2 * (1 - e) * e * cy + e * e * ty;
+        const sc = t < 0.15 ? 0.4 + t * 5 : 1.15 - t * 0.4;
+        el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${sc})`;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+  }
+
+  // 튜토리얼: 목표 위를 가리키며 톡톡 치는 손가락
+  updatePointer(target, on) {
+    let el = document.getElementById('h-point');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'h-point';
+      el.className = 'point';
+      el.innerHTML = `<i></i>${SVG.hand}`;
+      this.hud.appendChild(el);
+    }
+    if (!on || !target) {
+      el.classList.remove('show');
+      return;
+    }
+    project(target.x, 0.1, target.z, tmp);
+    const vis = tmp.x > 20 && tmp.x < this.app.W() - 20 && tmp.y > 120 && tmp.y < this.app.H() - 40;
+    el.classList.toggle('show', vis);
+    if (vis) el.style.transform = `translate(${tmp.x}px, ${tmp.y}px)`;
   }
 
   flashMoney() {
@@ -288,8 +372,8 @@ export class UI {
         b.el.innerHTML = html;
         b.pat = b.el.querySelector('.pat');
       }
-      project(c.x, 2.05, c.z, tmp);
-      b.el.style.transform = `translate(${tmp.x}px, ${tmp.y}px) translate(-50%, -100%)`;
+      project(c.x, 1.9, c.z, tmp);
+      b.el.style.transform = `translate(${tmp.x + c.seat.out * 16}px, ${tmp.y}px) translate(-50%, -100%)`;
       const pr = c.state === 'wait' ? Math.max(0, c.pat / c.patMax) : 1;
       if (b.pat) {
         b.pat.style.setProperty('--p', pr.toFixed(3));
@@ -395,6 +479,8 @@ export class UI {
       });
     this.panel = { el: wrap, onClose, cls };
     this.app.setPaused(true, 'panel');
+    // 일시정지 메뉴에서는 BGM 도 멈춤
+    audio.holdBgm(cls === 'pause' || cls === 'confirm');
     audio.play('open');
     return wrap;
   }
@@ -406,6 +492,7 @@ export class UI {
     el.classList.remove('show');
     setTimeout(() => el.remove(), 180);
     this.app.setPaused(false, 'panel');
+    audio.holdBgm(this.app.pauseReasons.has('title'));
     if (onClose && !silent) onClose();
   }
 
@@ -559,10 +646,10 @@ export class UI {
       b.addEventListener('click', () => {
         const r = this.app.meta.claimMission(+b.dataset.i);
         if (r) {
-          audio.play('coin');
+          this.flyReward(b, 'pearl', Math.min(12, 4 + Math.floor(r / 3)));
           this.app.save();
           this.openMissions();
-          this.toast(`진주 +${r}`);
+          this.toast(`진주 +${r}`, 'good');
         }
       })
     );
@@ -590,9 +677,14 @@ export class UI {
       <button class="big-btn" id="a-claim" ${avail ? '' : 'disabled'}>${avail ? '오늘 보상 받기' : '내일 또 만나요'}</button>`,
       'attend'
     );
-    $('#a-claim', w).onclick = () => {
+    $('#a-claim', w).onclick = (e) => {
+      const btn = e.currentTarget;
       const r = this.app.claimAttend();
-      if (r) this.openAttend();
+      if (r) {
+        if (r.pearls) this.flyReward(btn, 'pearl', 8);
+        if (r.money) this.flyReward(btn, 'coin', 8);
+        this.openAttend();
+      }
     };
   }
 
@@ -683,9 +775,9 @@ export class UI {
       b.addEventListener('click', () => {
         const r = meta.claimAch(b.dataset.id);
         if (r) {
-          audio.play('coin');
+          this.flyReward(b, 'pearl', Math.min(12, 4 + Math.floor(r / 3)));
           this.app.save();
-          this.toast(`진주 +${r}`);
+          this.toast(`진주 +${r}`, 'good');
           this.openAch();
         }
       })
@@ -736,11 +828,13 @@ export class UI {
       null,
       { noClose: true, noBackdrop: true }
     );
-    $('#o-2x', w).onclick = () => {
+    $('#o-2x', w).onclick = (e) => {
+      this.flyReward(e.currentTarget, 'coin', 14);
       this.close(true);
       onClaim(2);
     };
-    $('#o-1x', w).onclick = () => {
+    $('#o-1x', w).onclick = (e) => {
+      this.flyReward(e.currentTarget, 'coin', 8);
       this.close(true);
       onClaim(1);
     };
@@ -753,12 +847,12 @@ export class UI {
       `<div class="res-top"><div class="stamp">${final ? '전설의 셰프' : '영업 성공'}</div></div>
       <h2>${sum.name} 졸업!</h2>
       <div class="stats res">
-        <div><span>총 수익</span><b>${fmt(sum.earned)}</b></div>
-        <div><span>접대한 손님</span><b>${fmt(sum.cust)}명</b></div>
-        <div><span>최종 별점</span><b>${sum.stars.toFixed(1)}</b></div>
-        <div><span>최고 콤보</span><b>${sum.bestCombo}</b></div>
-        <div><span>영업 시간</span><b>${Math.max(1, Math.round(sum.time / 60))}분</b></div>
-        <div><span>보상</span><b><span class="ic">${SVG.pearl}</span>${sum.pearls}</b></div>
+        <div><span>총 수익</span><b data-n="${sum.earned}" data-f="k">0</b></div>
+        <div><span>접대한 손님</span><b data-n="${sum.cust}" data-s="명">0</b></div>
+        <div><span>최종 별점</span><b data-n="${sum.stars}" data-d="1">0</b></div>
+        <div><span>최고 콤보</span><b data-n="${sum.bestCombo}">0</b></div>
+        <div><span>영업 시간</span><b data-n="${Math.max(1, Math.round(sum.time / 60))}" data-s="분">0</b></div>
+        <div class="rw"><span>보상</span><b><span class="ic">${SVG.pearl}</span><em data-n="${sum.pearls}">0</em></b></div>
       </div>
       ${final ? '<p class="sub">우주 최고의 회전초밥집을 완성했어요! 계속 영업하며 기록을 늘려보세요.</p>' : `<p class="sub">다음 식당: <b>${next.name}</b><br>${next.sub}</p>`}
       <button class="big-btn" id="r-next">${final ? '계속 영업하기' : '새 식당으로 이전!'}</button>`,
@@ -766,6 +860,33 @@ export class UI {
       null,
       { noClose: true, noBackdrop: true }
     );
+    // 숫자 카운트업 -> 보상 진주가 HUD 로 날아감
+    const els = [...w.querySelectorAll('[data-n]')];
+    const t0 = performance.now() + 350;
+    let flown = false;
+    const tick = () => {
+      if (!w.isConnected) return;
+      let allDone = true;
+      els.forEach((el, i) => {
+        const st = t0 + i * 180;
+        const k = Math.max(0, Math.min(1, (performance.now() - st) / 700));
+        if (k < 1) allDone = false;
+        const e = 1 - Math.pow(1 - k, 3);
+        const v = +el.dataset.n * e;
+        const txt = el.dataset.f === 'k' ? fmt(v) : el.dataset.d ? v.toFixed(1) : String(Math.round(v));
+        el.textContent = txt + (el.dataset.s || '');
+        if (k > 0 && k < 1 && Math.random() < 0.25) audio.play('pay');
+      });
+      if (allDone && !flown) {
+        flown = true;
+        const rw = w.querySelector('.rw');
+        rw.classList.add('pop');
+        this.flyReward(rw, 'pearl', 10);
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
     $('#r-next', w).onclick = () => {
       this.close(true);
       onNext();

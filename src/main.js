@@ -189,6 +189,7 @@ const app = {
   toTitle() {
     this.save();
     this.setPaused(true, 'title');
+    audio.holdBgm(true);
     document.getElementById('app').classList.add('at-title');
     this.ui.showTitle(() => this.startPlay());
   },
@@ -197,11 +198,13 @@ const app = {
     audio.resume();
     audio.startBgm();
     this.setPaused(false, 'title');
+    audio.holdBgm(false);
     document.getElementById('app').classList.remove('at-title');
     if (!this.started) {
       this.started = true;
       this.checkOffline(this.p.lastSeen);
-      if (this.meta.attendAvailable() && this.p.stats.plates > 0 && !this.ui.panel) setTimeout(() => !this.ui.panel && this.ui.openAttend(), 400);
+      // 출석은 모달로 가로막지 않고, 잠시 플레이한 뒤 안내만 띄움
+      if (this.meta.attendAvailable() && this.p.stats.plates > 0) setTimeout(() => this.meta.attendAvailable() && this.ui.toast('오늘의 출석 보상이 있어요! 왼쪽 출석 버튼을 눌러요', 'good'), 12000);
     }
   },
 
@@ -293,13 +296,33 @@ const app = {
     ][t];
   },
   // 튜토리얼 이후 병목 안내
+  // 튜토리얼 이후: 병목이나 멈춰 있을 때 다음 할 일을 화살표로 안내
   hintTarget() {
     const g = this.game;
+    const c = g.chef;
+    const P = (o) => o && { x: o.x, z: o.z };
     if (g.rack.n === 0 && g.sink.built) {
-      if (g.chef.stack.some((i) => i.k === 'dirty')) return { x: g.sink.pad.x, z: g.sink.pad.z };
+      if (c.stack.some((i) => i.k === 'dirty')) return P(g.sink.pad);
       const s = g.seats.find((x) => x.dirty > 0 && !x.cust);
-      if (s) return { x: s.zone.x, z: s.zone.z };
+      if (s) return P(s.zone);
     }
+    if ((this.idleT || 0) < 3.5) return null;
+    const pad = g.pads[0];
+    if (pad && g.run.money + pad.paid >= pad.u.cost) return P(pad);
+    if (c.stack.some((i) => i.k === 'dish')) {
+      const b = g.belts.find((x) => x.built && x.free() > 0);
+      if (b) return P(b.feed);
+    }
+    const ms = g.seats.find((x) => x.money > 0);
+    if (ms) return P(ms.zone);
+    const ing = c.stack.find((i) => i.k === 'ing');
+    if (ing) return P(Object.values(g.stations).find((s) => s.built && s.ing === ing.id)?.padIn);
+    const dem = g.demand();
+    const st = Object.values(g.stations).find((s) => s.built && s.out > 0 && (dem[s.menu] || 0) > 0);
+    if (st) return P(st.padOut);
+    const need = Object.values(g.stations).find((s) => s.built && (dem[s.menu] || 0) > 0 && s.inp === 0);
+    if (need) return P(need.crate.pad);
+    if (c.stack.some((i) => i.k === 'dirty') && g.sink.built) return P(g.sink.pad);
     return null;
   },
 };
@@ -359,6 +382,9 @@ function boot() {
   app.game.loadStage();
   window.__game = app;
   window.__gfx = gfx;
+  window.__input = input;
+  window.__audio = audio;
+  window.__UPG = UPGRADES;
 
   initInput(document.getElementById('gl'));
   input.onFirst = () => audio.resume();
@@ -404,7 +430,10 @@ function loop(now) {
     const sub = Math.max(1, Math.ceil(dtRaw / 0.05));
     const steps = sub * (app.speed > 1 ? app.speed : 1);
     const t1 = performance.now();
-    for (let i = 0; i < steps; i++) g.update(dtRaw / sub);
+    for (let i = 0; i < steps; i++) {
+      if (app.bot) app.bot(dtRaw / sub);
+      g.update(dtRaw / sub);
+    }
     autoQuality(dtRaw);
     perf.upd = (perf.upd || 0) * 0.9 + (performance.now() - t1) * 0.1;
     app.p.stats.playSec += dtRaw;
@@ -429,10 +458,15 @@ function loop(now) {
   app.ui.updateWorld();
   updatePops(dtRaw);
   if (!paused) {
+    app.idleT = input.active ? 0 : (app.idleT || 0) + dtRaw;
     const tt = app.tutText();
     app.ui.tut(tt, app.p.tut === 0 && !input.active);
     app.ui.updateEdge(g.guide);
-  } else app.ui.updateEdge(null);
+    app.ui.updatePointer(g.guide, !!tt && app.p.tut > 0);
+  } else {
+    app.ui.updateEdge(null);
+    app.ui.updatePointer(null, false);
+  }
   const tr = performance.now();
   gfx.renderer.render(gfx.scene, gfx.camera);
   const te = performance.now();

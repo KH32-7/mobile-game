@@ -275,7 +275,8 @@ export class Game {
   }
 
   platesTotal() {
-    return CFG.plates + (this.run.upg.plates || 0) * CFG.platesPerLvl;
+    const seats = this.seats ? this.seats.filter((x) => x.unlocked).length : 2;
+    return CFG.plates + seats * CFG.platesPerSeat + (this.run.upg.plates || 0) * CFG.platesPerLvl;
   }
   countPlatesUsed() {
     let n = this.sink.q;
@@ -499,6 +500,7 @@ export class Game {
           const s = this.seats.find((x) => x.id === id);
           if (!s) continue;
           s.unlocked = true;
+          this.rack.n += CFG.platesPerSeat;
           pops.push(this.addStool(s));
         }
         break;
@@ -562,6 +564,7 @@ export class Game {
           const s = this.seats.find((x) => x.id === id);
           if (s) {
             s.unlocked = true;
+            this.rack.n += CFG.platesPerSeat;
             pops.push(this.addStool(s));
           }
         }
@@ -1066,18 +1069,44 @@ export class Game {
 
   spawnInterval() {
     const stars = this.stars();
-    let iv = (CFG.cust.interval / this.stage.cust) * (1.5 - ((stars - 1) / 4) * 0.8);
+    const seats = Math.max(2, this.seats.filter((s) => s.unlocked).length);
+    // 좌석이 늘수록 손님이 더 자주 옴 (좌석당 평균 회전 주기 기준)
+    let iv = (CFG.cust.seatCycle / seats / this.stage.cust) * (1.5 - ((stars - 1) / 4) * 0.8);
+    iv = Math.max(1.2, iv);
     if (this.rush && this.rush.t > 0) iv *= 0.45;
     return iv;
   }
 
+  queueSpot(i) {
+    const L = this.lay;
+    return { x: L.door.x + 1.5, z: L.door.z - 1.0 - i * 0.85 };
+  }
+
   updateCustomers(dt) {
+    // 줄 선 손님 먼저 자리 배정
+    const queued = this.customers.filter((c) => c.state === 'toQueue' || c.state === 'queue');
+    if (queued.length) {
+      const free = this.freeSeats();
+      if (free.length) {
+        const c = queued[0];
+        const seat = pick(free);
+        c.seat = seat;
+        seat.reserved = true;
+        c.state = 'enter';
+        c.path = this.nav.path(c.x, c.z, seat.stand.x, seat.stand.z);
+      }
+    }
     this.spawnT -= dt;
     if (this.spawnT <= 0) {
       const free = this.freeSeats();
-      if (free.length) {
+      const qn = this.customers.filter((c) => c.state === 'toQueue' || c.state === 'queue').length;
+      if (free.length && !qn) {
         this.spawnCustomer(pick(free), {});
         this.spawnT = this.spawnInterval() * rand(0.75, 1.25);
+      } else if (!free.length && qn < 3 && this.run.cust > 4) {
+        this.spawnCustomer(null, {});
+        this.spawnT = this.spawnInterval() * rand(1.2, 1.8);
+        if (qn === 2) this.warn('queue', '손님이 줄을 섰어요! 좌석을 늘리거나 빨리 치워요', 0, 0);
       } else this.spawnT = 1;
     }
     for (let i = this.customers.length - 1; i >= 0; i--) {
@@ -1093,7 +1122,7 @@ export class Game {
   spawnCustomer(seat, opt) {
     const menus = this.builtMenus();
     if (!menus.length) return null;
-    seat.reserved = true;
+    if (seat) seat.reserved = true;
     const L = this.lay;
     let orders;
     if (opt.vip) {
@@ -1137,7 +1166,14 @@ export class Game {
       bob: 0,
       scale: opt.vip ? 1.08 : rand(0.92, 1.05),
     };
-    c.path = [{ x: L.door.x, z: L.door.z - 0.6 }, ...this.nav.path(L.door.x, L.door.z - 0.6, seat.stand.x, seat.stand.z)];
+    if (seat) c.path = [{ x: L.door.x, z: L.door.z - 0.6 }, ...this.nav.path(L.door.x, L.door.z - 0.6, seat.stand.x, seat.stand.z)];
+    else {
+      c.state = 'toQueue';
+      c.qPat = 28;
+      const qi = this.customers.filter((o) => o.state === 'toQueue' || o.state === 'queue').length;
+      const sp = this.queueSpot(qi);
+      c.path = [{ x: L.door.x, z: L.door.z - 0.6 }, sp];
+    }
     this.customers.push(c);
     this.run.cust++;
     return c;
@@ -1172,6 +1208,24 @@ export class Game {
   updateCustomer(c, dt) {
     const seat = c.seat;
     switch (c.state) {
+      case 'toQueue':
+      case 'queue': {
+        c.qPat -= dt;
+        const qi = this.customers.filter((o) => o.state === 'toQueue' || o.state === 'queue').indexOf(c);
+        const sp = this.queueSpot(Math.max(0, qi));
+        if (c.state === 'queue') c.path = Math.hypot(sp.x - c.x, sp.z - c.z) > 0.05 ? [sp] : [];
+        if (this.walk(c, dt, CFG.cust.walk)) {
+          c.state = 'queue';
+          c.ry = Math.PI;
+        }
+        if (c.qPat <= 0) {
+          const L = this.lay;
+          c.state = 'leave';
+          c.path = [{ x: L.door.x, z: L.door.z + 2.5 }];
+          this.hooks.emote && this.hooks.emote(c, 'angry');
+        }
+        break;
+      }
       case 'enter':
         if (this.walk(c, dt, CFG.cust.walk)) {
           c.state = 'sit';
@@ -1720,7 +1774,7 @@ export class Game {
   drawCustomer(c) {
     const I = this.inst;
     const sitting = c.state === 'wait' || c.state === 'eat' || c.state === 'fetch' || (c.state === 'sit' && c.sitT > 0.3);
-    const walking = c.state === 'enter' || c.state === 'leave';
+    const walking = (c.state === 'enter' || c.state === 'leave' || c.state === 'toQueue' || c.state === 'queue') && c.path.length > 0;
     const bounce = walking ? Math.abs(Math.sin(c.walkT * 10)) * 0.08 : 0;
     const y = sitting ? 0.42 : bounce;
     const sc = c.scale;

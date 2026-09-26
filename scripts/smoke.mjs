@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdirSync, existsSync } from 'node:fs';
 
-const PORT = Number(process.env.PORT || 4821);
+const PORT = Number(process.env.PORT || 4827);
 const BASE = `http://localhost:${PORT}/`;
 const SHOTS = 'shots';
 mkdirSync(SHOTS, { recursive: true });
@@ -18,7 +18,7 @@ async function ensureServer() {
   } catch {
     /* 서버 없음 */
   }
-  server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
+  server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
   for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 200));
     try {
@@ -312,7 +312,37 @@ async function main() {
     assert(await p2.g(() => __game.p.stage === 1), '새로고침 후 2호점 유지');
     await p2.context().close();
 
-    // ---------- 3. 다른 해상도 레이아웃 ----------
+    // ---------- 3. 사운드 믹스 계측 (OfflineAudioContext) + 일시정지 시 BGM 정지 ----------
+    {
+      const p5 = await newPage(browser);
+      await p5.goto(BASE);
+      await p5.waitForTimeout(900);
+      await p5.tapSel('#t-start');
+      await p5.waitForTimeout(600);
+      const r = await p5.g(() => __audio.measure());
+      const main = ['pick', 'clack', 'coin', 'cash', 'unlock', 'happy', 'angry', 'combo', 'rush', 'error'];
+      const quiet = ['step', 'pay', 'eat', 'wash'];
+      for (const n of main) log('  sfx', n, JSON.stringify(r.sfx[n]));
+      for (const n of quiet) log('  sfx', n, JSON.stringify(r.sfx[n]));
+      log('  bgm', JSON.stringify(r.bgm));
+      const peak = Math.max(...Object.values(r.sfx).map((x) => x.peakDb), r.bgm.peakDb);
+      assert(peak <= -2.5, `마스터 피크 약 -3dBFS 이하 (${peak}dB)`);
+      assert(main.every((n) => r.sfx[n].rmsDb >= -25 && r.sfx[n].rmsDb <= -19.5), '주요 효과음 RMS -24~-20dB 범위');
+      assert(quiet.every((n) => r.sfx[n].rmsDb >= -35), '작은 효과음도 RMS -35dB 이상');
+      assert(r.bgm.lowRatio <= 0.6, `BGM 150Hz 이하 에너지 비중 60% 이하 (${(r.bgm.lowRatio * 100).toFixed(0)}%)`);
+      const running = await p5.g(() => __audio.bgmPlaying);
+      if (running) {
+        await p5.tapSel('#b-pause');
+        await p5.waitForTimeout(300);
+        assert(!(await p5.g(() => __audio.bgmPlaying)), '일시정지 메뉴에서 BGM 정지');
+        await p5.tapSel('#p-resume');
+        await p5.waitForTimeout(300);
+        assert(await p5.g(() => __audio.bgmPlaying), '재개하면 BGM 다시 재생');
+      } else log('오디오 컨텍스트가 실행되지 않아 BGM 정지 검사는 건너뜀');
+      await p5.context().close();
+    }
+
+    // ---------- 4. 다른 해상도 레이아웃 ----------
     for (const [w, h] of [
       [360, 640],
       [430, 932],
@@ -324,10 +354,36 @@ async function main() {
       await p3.tapSel('#t-start');
       await p3.waitForTimeout(800);
       await shot(p3, `21-game-${w}x${h}`);
+      // 주요 패널이 화면 안에 들어오는지 확인
+      await p3.g(() => {
+        const g = __game.game;
+        g.addMoney(99999);
+        let i = 0;
+        while (!g.upgradeBuilt && i++ < 10) g.doUnlock(g.pads[0]);
+      });
+      await p3.waitForTimeout(300);
+      for (const [open, sel, name] of [
+        [() => __game.ui.openUpgrade(), '.modal .buy', 'upgrade'],
+        [() => __game.ui.openMissions(), '.modal .claim', 'missions'],
+        [() => __game.ui.openAttend(), '#a-claim', 'attend'],
+        [() => __game.ui.openPause(), '#p-wipe', 'pause'],
+        [() => __game.ui.openOffline(1234, 5400, true, () => {}), '#o-1x', 'offline'],
+      ]) {
+        await p3.evaluate(open);
+        await p3.waitForTimeout(400);
+        await shot(p3, `22-${name}-${w}x${h}`);
+        const bb = await p3.locator(sel).last().boundingBox();
+        const sheet = await p3.locator('.modal .sheet').boundingBox();
+        // 시트가 스크롤되는 경우 마지막 요소가 스크롤 영역 안에 있으면 됨
+        const ok = bb && sheet && bb.x >= 0 && bb.x + bb.width <= w + 1 && sheet.y >= 0 && sheet.y + sheet.height <= h + 1;
+        assert(ok, `${w}x${h} ${name} 패널 버튼이 화면 안에 있음`);
+        await p3.evaluate(() => __game.ui.close(true));
+        await p3.waitForTimeout(200);
+      }
       await p3.context().close();
     }
 
-    // ---------- 4. 손상 저장 데이터 ----------
+    // ---------- 5. 손상 저장 데이터 ----------
     const p4 = await newPage(browser, 390, 844, () => {
       try {
         if (!sessionStorage.getItem('x')) {
