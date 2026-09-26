@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CFG, ENEMY_DEFS } from './config.js';
 import { ENEMY_MODELS, MISC } from './models.js';
 import { patchFlash, patchHoleClip } from './holeclip.js';
-import { BlobShadows, makeFaller, stepFaller } from './world.js';
+import { BlobShadows, makeFaller, stepFaller, blobTexture } from './world.js';
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -31,14 +31,18 @@ export class Enemies {
       const mesh = new THREE.InstancedMesh(geo, mat, cap);
       mesh.frustumCulled = false;
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      for (let i = 0; i < cap; i++) mesh.setMatrixAt(i, HIDE);
+      for (let i = 0; i < cap; i++) {
+        mesh.setMatrixAt(i, HIDE);
+        mesh.setColorAt(i, new THREE.Color(1, 1, 1));
+      }
       scene.add(mesh);
       this.meshes[t] = mesh;
       this.flash[t] = fa;
       this.free[t] = [];
     }
     this.shadowSlots = total;
-    this.shadows = new BlobShadows(scene, total, game.world.shadowTex);
+    this.shadows = new BlobShadows(scene, total, blobTexture());
+    this._tint = new THREE.Color();
 
     // 적 투사체 (쓰레기 봉투)
     this.projCap = 80;
@@ -137,6 +141,10 @@ export class Enemies {
       spawnT: 0,
     };
     e.shadowI = this.shadowIndex(e);
+    const mesh = this.meshes[type];
+    this._tint.set((this.game.mods && this.game.mods.tint) || '#ffffff');
+    mesh.setColorAt(slot, this._tint);
+    mesh.instanceColor.needsUpdate = true;
     this.list.push(e);
     if (type === 'boss') this.boss = e;
     if (type === 'mini') this.mini = e;
@@ -160,23 +168,28 @@ export class Enemies {
     const g = this.game;
     const S = CFG.spawn;
     const p = Math.min(1.3, t / CFG.run.length);
-    const sizeMul = 1 + p * S.sizeGrow;
-    const hpMul = 1 + p * S.hpGrow;
+    const M = g.mods || {};
+    const sizeMul = (1 + p * S.sizeGrow) * (M.sizeE || 1);
+    const hpMul = (1 + p * S.hpGrow) * (M.hpE || 1);
+    const W = M.weights || { dasher: 1, thrower: 1, giant: 1 };
     const dist = g.camDist * 0.95 + 8;
     if (this.boss) {
       // 보스전 중에는 졸개만 소량
       this.spawnAcc += dt * 0.8;
     } else {
-      this.spawnAcc += dt * (S.baseRate + p * S.rateGrow);
+      this.spawnAcc += dt * (S.baseRate + p * S.rateGrow) * (M.rateE || 1);
     }
     while (this.spawnAcc >= 1) {
       this.spawnAcc -= 1;
       if (this.list.length >= S.maxAlive) break;
       const r = Math.random();
+      const pd = t > 35 ? (0.16 + p * 0.1) * W.dasher : 0;
+      const pt = t > 70 ? (0.16 + p * 0.05) * W.thrower : 0;
+      const pg = t > 105 ? (0.06 + p * 0.06) * W.giant : 0;
       let type = 'sweeper';
-      if (t > 35 && r < 0.18 + p * 0.1) type = 'dasher';
-      else if (t > 70 && r < 0.36 + p * 0.1) type = 'thrower';
-      else if (t > 105 && r < 0.36 + p * 0.1 + 0.07 + p * 0.06) type = 'giant';
+      if (r < pd) type = 'dasher';
+      else if (r < pd + pt) type = 'thrower';
+      else if (r < pd + pt + pg) type = 'giant';
       const [x, z] = this.spawnPos(hole, dist);
       this.spawn(type, x, z, sizeMul * (0.85 + Math.random() * 0.3), hpMul);
     }
@@ -200,6 +213,7 @@ export class Enemies {
   damage(e, amount, kx = 0, kz = 0, silent = false) {
     if (e.dead) return;
     const g = this.game;
+    amount *= g.powerMul || 1;
     e.hp -= amount;
     e.flash = 1;
     e.kx += kx;
@@ -230,12 +244,12 @@ export class Enemies {
     this.shadows.hide(e.shadowI);
     const mesh = this.meshes[e.type];
     const fa = this.flash[e.type];
-    this.fallers.push(
-      makeFaller(mesh, e.slot, e.x - hole.x, e.z - hole.z, e.rot, e.size, e.size, hole.r, () => {
-        this.free[e.type].push(e.slot);
-        fa.array[e.slot] = 0;
-      })
-    );
+    const f = makeFaller(mesh, e.slot, e.x - hole.x, e.z - hole.z, e.rot, e.size, e.size, hole.r, () => {
+      this.free[e.type].push(e.slot);
+      fa.array[e.slot] = 0;
+    });
+    f.enemyType = e.type;
+    this.fallers.push(f);
     g.onKill(e, true);
     if (e === this.boss) this.boss = null;
     if (e === this.mini) this.mini = null;
@@ -510,7 +524,14 @@ export class Enemies {
     this.markMesh.instanceMatrix.needsUpdate = true;
     this.fillMesh.instanceMatrix.needsUpdate = true;
 
-    // 행렬 갱신
+    // 행렬 갱신 (사용 중인 최대 슬롯까지만 그림)
+    const maxSlot = this._maxSlot || (this._maxSlot = {});
+    for (const t2 of TYPES) maxSlot[t2] = -1;
+    for (const f of this.fallers) {
+      const tt = f.enemyType;
+      if (tt && f.slot > maxSlot[tt]) maxSlot[tt] = f.slot;
+    }
+    for (const e of list) if (e.slot > maxSlot[e.type]) maxSlot[e.type] = e.slot;
     for (const e of list) {
       const mesh = this.meshes[e.type];
       const pop = Math.min(1, e.spawnT * 4);
@@ -526,6 +547,7 @@ export class Enemies {
       if (stepFaller(this.fallers[n], dt, hole, g.world.wellDepth)) this.fallers.splice(n, 1);
     }
     for (const t2 of TYPES) {
+      this.meshes[t2].count = maxSlot[t2] + 1;
       this.meshes[t2].instanceMatrix.needsUpdate = true;
       this.flash[t2].needsUpdate = true;
     }

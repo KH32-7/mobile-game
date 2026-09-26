@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { CFG, ENEMY_DEFS, UPGRADES } from './config.js';
+import { CFG, ENEMY_DEFS, MAPS, SKINS, diffMul } from './config.js';
+import { Meta } from './meta.js';
+import { MetaUI } from './metaui.js';
 import { World } from './world.js';
 import { Enemies } from './enemies.js';
 import { Skills } from './skills.js';
@@ -8,7 +10,7 @@ import { UI } from './ui.js';
 import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { Save } from './save.js';
-import { holeU } from './holeclip.js';
+import { holeU, applySkin } from './holeclip.js';
 import { params, DEBUG } from './rng.js';
 
 const vibrate = (ms) => {
@@ -23,6 +25,7 @@ export class Game {
   constructor(app, canvas, uiRoot) {
     this.app = app;
     this.save = Save.load();
+    Meta.refreshDay();
     Audio.setMuted(!!this.save.muted);
     this.audio = Audio;
 
@@ -37,9 +40,13 @@ export class Game {
     sun.position.set(30, 60, 25);
     this.scene.add(hemi, sun);
 
-    const seed = parseInt(params.get('seed') || '20260926', 10);
-    this.world = new World(this.scene, seed);
+    this.baseSeed = parseInt(params.get('seed') || '20260926', 10);
+    this.world = new World(this.scene, this.baseSeed, this.save.maps[this.save.sel.map].unlocked ? this.save.sel.map : 'city');
+    this.applyMapLook(this.world.themeId);
+    this.applySkin();
+    this.mods = {};
     this.ui = new UI(uiRoot);
+    this.metaUI = new MetaUI(this, uiRoot);
     this.fx = new FX(this.scene, this.camera, this.ui.$('#dmg-layer'));
     this.enemies = new Enemies(this.scene, this);
     this.skills = new Skills(this.scene, this);
@@ -89,7 +96,9 @@ export class Game {
         fn();
       });
     };
-    tap('#btnStart', () => this.startRun());
+    tap('#btnStart', () => {
+      if (this.save.maps[this.save.sel.map].unlocked) this.startRun({ daily: false });
+    });
     tap('#btnPause', () => this.pause());
     tap('#btnResume', () => this.resume());
     tap('#btnRestart', () => this.startRun());
@@ -107,25 +116,23 @@ export class Game {
     ui.setMuteIcon(this.save.muted);
   }
 
-  buyUpgrade(id) {
-    const u = UPGRADES.find((x) => x.id === id);
-    const l = this.save.upg[id] || 0;
-    if (!u || l >= u.max) return;
-    const cost = u.cost[l];
-    if (this.save.coins < cost) {
-      this.ui.toast('코인이 부족해!');
-      return;
-    }
-    Audio.init();
-    Audio.levelUp();
-    this.save.coins -= cost;
-    this.save.upg[id] = l + 1;
-    Save.save();
-    this.renderTitle();
+  applySkin() {
+    applySkin(SKINS[this.save.skins.sel] || SKINS.void);
   }
 
-  renderTitle() {
-    this.ui.renderTitle(this.save, (id) => this.buyUpgrade(id));
+  applyMapLook(id) {
+    const sky = MAPS[id].sky;
+    this.scene.background.set(sky);
+    this.scene.fog.color.set(sky);
+  }
+
+  // 맵(테마) 또는 시드가 다르면 월드 재생성
+  setWorld(map, seed = this.baseSeed) {
+    if (this.world.themeId === map && this.world.seed === seed) return;
+    this.world.dispose();
+    this.world = new World(this.scene, seed, map);
+    this.applyMapLook(map);
+    this.world.setHole(this.hole.x, this.hole.z, this.hole.r);
   }
 
   showTitle() {
@@ -142,24 +149,66 @@ export class Game {
     this.skills.reset();
     this.fx.clear();
     Object.assign(this.hole, { x: 0, z: 0, vx: 0, vz: 0, r: 1.2, targetR: 1.2 });
-    this.renderTitle();
+    Meta.refreshDay();
+    const sel = this.save.sel.map;
+    this.setWorld(this.save.maps[sel].unlocked ? sel : this.world.themeId);
+    this.metaUI.renderTitle();
+    this.metaUI.maybePopup();
   }
 
   // ---------- 런 ----------
-  startRun() {
+  startRun(opts = {}) {
     const ui = this.ui;
-    ['#title', '#pause', '#result', '#levelup'].forEach((s) => ui.hide(s));
+    const sv = this.save;
+    // 데일리 챌린지 / 일반 런 설정
+    let map = sv.sel.map;
+    let diff = sv.sel.diff;
+    let seed = this.baseSeed;
+    let mod = null;
+    if (opts.daily === undefined && this.lastRun) opts = this.lastRun;
+    this.lastRun = { daily: !!opts.daily };
+    if (opts.daily) {
+      const ch = Meta.dailyChallenge();
+      map = ch.map;
+      diff = ch.diff;
+      seed = ch.seed;
+      mod = ch.mod;
+    } else if (!sv.maps[map].unlocked) {
+      map = 'city';
+      diff = 1;
+    }
+    this.run = { map, diff, daily: !!opts.daily, mod };
+    const dm = diffMul(diff);
+    const md = mod || {};
+    this.mods = {
+      hpE: dm.hp * (md.hpE || 1),
+      dmgE: dm.dmg,
+      rateE: dm.rate * (md.rate || 1),
+      sizeE: md.enemySize || 1,
+      xp: md.xp || 1,
+      growth: md.growth || 1,
+      coin: dm.coin * (md.coin || 1),
+      weights: MAPS[map].weights,
+      tint: MAPS[map].enemyTint,
+    };
+    ['#title', '#pause', '#result', '#levelup', '#sheet', '#modal'].forEach((s) => ui.hide(s));
     ui.show('#hud');
+    this.setWorld(map, seed);
     this.world.reset();
     this.enemies.reset();
     this.skills.reset();
     this.fx.clear();
-    const up = this.save.upg;
-    const r0 = CFG.hole.startR * (1 + (up.size || 0) * 0.08);
-    const hp = CFG.hole.hp + (up.hp || 0) * 15;
+    const up = sv.upg;
+    const r0 = CFG.hole.startR * (1 + (up.size || 0) * 0.05) * (md.startR || 1);
+    const hp = Math.round((CFG.hole.hp + (up.hp || 0) * 10) * (md.hp || 1));
     this.hole = { x: 0, z: 0, vx: 0, vz: 0, r: r0, targetR: r0, hp, maxHp: hp, invuln: 0 };
-    this.upSpeed = 1 + (up.speed || 0) * 0.06;
-    this.upXp = 1 + (up.xp || 0) * 0.1;
+    this.upSpeed = (1 + (up.speed || 0) * 0.04) * (md.speed || 1);
+    this.upXp = (1 + (up.xp || 0) * 0.06) * this.mods.xp;
+    this.coinMul = 1 + (up.coin || 0) * 0.08;
+    this.powerMul = 1 + (up.power || 0) * 0.06;
+    this.armorMul = 1 - (up.armor || 0) * 0.03;
+    this.rerolls = up.reroll || 0;
+    this.revives = up.revive || 0;
     this.time = DEBUG && params.get('t') ? parseFloat(params.get('t')) : 0;
     this.level = 1;
     this.xp = 0;
@@ -167,7 +216,7 @@ export class Game {
     this.pendingLevels = 0;
     this.combo = 0;
     this.lastSwallowT = -9;
-    this.stats = { swallowed: 0, kills: 0, maxR: r0, damage: 0, maxCombo: 0 };
+    this.stats = { swallowed: 0, kills: 0, maxR: r0, damage: 0, maxCombo: 0, miniKills: 0 };
     this.bonusCoins = 0;
     this.miniSpawned = this.time > CFG.run.miniAt + 5;
     this.bossSpawned = false;
@@ -177,6 +226,7 @@ export class Game {
     this.cleared = false;
     this.camDist = CFG.cam.dist + r0 * CFG.cam.distPerR;
     this.state = 'play';
+    this.noLevelUp = false;
     this.input.enabled = true;
     this.input.release();
     ui.renderSkillbar(this.skills);
@@ -187,6 +237,12 @@ export class Game {
     Audio.startMusic();
     this.tutorialT = 0;
     if (!this.save.tutorialDone) ui.show('#tutorial');
+    if (mod && mod.startSkill) {
+      for (let i = 0; i < mod.startSkill[1]; i++) this.skills.apply({ kind: 'skill', id: mod.startSkill[0] });
+      ui.renderSkillbar(this.skills);
+    }
+    if (this.run.daily) ui.banner(`데일리 챌린지<small>${mod.name}: ${mod.desc}</small>`, 'level');
+    else if (diff > 1) ui.toast(`${MAPS[map].name} 난이도 ${diff}`);
     if (DEBUG && params.has('hp')) this.hole.hp = parseFloat(params.get('hp'));
     if (DEBUG && params.has('lvl')) {
       const n = parseInt(params.get('lvl'), 10);
@@ -218,7 +274,7 @@ export class Game {
     const h = this.hole;
     if (this.state !== 'play') return false;
     if (h.invuln > 0 || this.god) return false;
-    h.hp -= amount;
+    h.hp -= amount * this.mods.dmgE * this.armorMul;
     h.invuln = CFG.hole.iframe;
     this.ui.hurt();
     Audio.hurt();
@@ -228,8 +284,27 @@ export class Game {
     holeU.uHoleHurt.value = 1;
     this.fx.burst(h.x, 0.5, h.z, 10, 0.7, ['#ff5d6c', '#ffffff']);
     if (h.hp <= 0) {
-      h.hp = 0;
-      this.die();
+      if (this.revives > 0) {
+        this.revives--;
+        h.hp = h.maxHp * 0.5;
+        h.invuln = 2.5;
+        this.ui.banner('재탄생!<small>HP 50%로 부활</small>', 'size');
+        this.flashScreen('#e8d8ff');
+        this.fx.ring(h.x, h.z, h.r * 4 + 8, '#c79bff', 0.8);
+        for (const e of [...this.enemies.list]) {
+          const dx = e.x - h.x;
+          const dz = e.z - h.z;
+          const d = Math.hypot(dx, dz) || 1;
+          if (d < h.r * 4 + 10) {
+            e.kx += (dx / d) * 25;
+            e.kz += (dz / d) * 25;
+          }
+        }
+        Audio.sizeUp();
+      } else {
+        h.hp = 0;
+        this.die();
+      }
     }
     return true;
   }
@@ -246,7 +321,7 @@ export class Game {
 
   grow(size, k) {
     const h = this.hole;
-    const add = k * size * size * this.skills.growthMul();
+    const add = k * size * size * this.skills.growthMul() * (this.mods.growth || 1);
     h.targetR = Math.min(CFG.hole.maxR, Math.sqrt(h.targetR * h.targetR + add));
     this.stats.maxR = Math.max(this.stats.maxR, h.targetR);
     const tiers = CFG.sizeTiers;
@@ -294,6 +369,7 @@ export class Game {
       this.fx.burst(e.x, 0.6, e.z, 8 + e.size * 4, e.size * 0.6, ['#7ff8ff', '#ffffff', '#c79bff']);
       if (e.type === 'boss') this.win();
       else if (e.type === 'mini') {
+        this.stats.miniKills++;
         this.ui.banner('대장 트럭 꿀꺽!', 'size');
         this.shake(1);
         this.hitStop(0.12);
@@ -302,6 +378,7 @@ export class Game {
       this.gainXp(xp * 0.6);
       Audio.hit();
       if (e.type === 'mini') {
+        this.stats.miniKills++;
         this.ui.banner('대장 트럭 격파!', 'size');
         this.shake(1);
         this.hitStop(0.12);
@@ -353,19 +430,28 @@ export class Game {
   }
 
   finish() {
-    const s = this.save;
     const st = this.stats;
     const C = CFG.coins;
-    const coins = Math.floor((this.time * C.perSec + st.kills * C.perKill + st.swallowed * C.perSwallow + (this.cleared ? C.clear : 0)) * this.skills.coinMul()) + this.bonusCoins;
-    s.coins += coins;
-    s.runs++;
-    const newBest = this.time > s.best.time;
-    s.best.time = Math.max(s.best.time, this.time);
-    s.best.size = Math.max(s.best.size, st.maxR * 2);
-    s.best.kills = Math.max(s.best.kills, st.kills);
-    s.best.swallowed = Math.max(s.best.swallowed, st.swallowed);
-    if (this.cleared) s.best.cleared = true;
-    Save.save();
+    const run = this.run;
+    const coins =
+      Math.floor((this.time * C.perSec + st.kills * C.perKill + st.swallowed * C.perSwallow + (this.cleared ? C.clear : 0)) * this.skills.coinMul() * this.coinMul * this.mods.coin) + this.bonusCoins;
+    const mapBest = run.daily ? this.save.daily.challenge.best : this.save.maps[run.map].best.time;
+    const newBest = this.time > mapBest;
+    const meta = Meta.recordRun({
+      map: run.map,
+      diff: run.diff,
+      daily: run.daily,
+      time: this.time,
+      swallowed: st.swallowed,
+      kills: st.kills,
+      size: st.maxR * 2,
+      maxCombo: st.maxCombo,
+      level: this.level,
+      cleared: this.cleared,
+      miniKills: st.miniKills,
+      evolutions: Object.keys(this.skills.evo).length,
+      coins,
+    });
     this.state = 'result';
     this.ui.hide('#hud');
     this.ui.hide('#tutorial');
@@ -379,7 +465,11 @@ export class Game {
       maxCombo: st.maxCombo,
       coins,
       newBest,
-      bestTime: s.best.time,
+      bestTime: Math.max(mapBest, this.time),
+      daily: run.daily,
+      mapName: MAPS[run.map].name,
+      diff: run.diff,
+      meta,
     });
   }
 
@@ -388,8 +478,13 @@ export class Game {
     this.input.release();
     Audio.levelUp();
     vibrate(25);
-    const choices = this.skills.choices(3);
-    this.ui.showLevelUp(choices, this.skills, (c) => {
+    const pick = (choices) => this.ui.showLevelUp(choices, this.skills, onPick, this.rerolls, () => {
+      if (this.rerolls <= 0) return;
+      this.rerolls--;
+      Audio.select();
+      pick(this.skills.choices(3));
+    });
+    const onPick = (c) => {
       Audio.select();
       this.skills.apply(c);
       this.ui.renderSkillbar(this.skills);
@@ -397,7 +492,8 @@ export class Game {
       this.state = 'play';
       this.last = performance.now();
       this.fx.ring(this.hole.x, this.hole.z, this.hole.r * 2.5, '#7ce0ff', 0.5);
-    });
+    };
+    pick(this.skills.choices(3));
   }
 
   // ---------- 타임라인 ----------
@@ -410,7 +506,7 @@ export class Game {
       Audio.warn();
       const [x, z] = this.enemies.spawnPos(h, this.camDist * 0.8);
       const p = t / CFG.run.length;
-      this.enemies.spawn('mini', x, z, 1 + p * 0.5, 1 + p);
+      this.enemies.spawn('mini', x, z, 1 + p * 0.5, (1 + p) * this.mods.hpE);
     }
     if (!this.bossWarned && t >= CFG.run.bossAt - 3) {
       this.bossWarned = true;
@@ -421,7 +517,7 @@ export class Game {
     if (!this.bossSpawned && t >= CFG.run.bossAt) {
       this.bossSpawned = true;
       const [x, z] = this.enemies.spawnPos(h, this.camDist * 0.75);
-      this.enemies.spawn('boss', x, z, 1, 1);
+      this.enemies.spawn('boss', x, z, 1, this.mods.hpE);
       Audio.setIntensity(1);
       this.shake(1.5);
     }
@@ -444,6 +540,7 @@ export class Game {
     h.vz += (jy * maxSp - h.vz) * Math.min(1, a * dt);
     h.x += h.vx * dt;
     h.z += h.vz * dt;
+    this.traveled = (this.traveled || 0) + Math.hypot(h.vx, h.vz) * dt;
     const H = CFG.map.half;
     if (Math.abs(h.x) > H) {
       h.x = Math.sign(h.x) * (H + (Math.abs(h.x) - H) * Math.exp(-dt * 12));
@@ -508,6 +605,7 @@ export class Game {
 
   loop(t) {
     requestAnimationFrame((tt) => this.loop(tt));
+    const realDt = Math.min(0.25, Math.max(0, (t - this.last) / 1000));
     let dt = Math.min(0.05, (t - this.last) / 1000);
     this.last = t;
     if (!(dt > 0)) dt = 0.016;
@@ -521,10 +619,10 @@ export class Game {
           this.update(dt);
         }
       }
-      if (this.state === 'play' && this.pendingLevels > 0) this.openLevelUp();
+      if (this.state === 'play' && this.pendingLevels > 0 && !this.noLevelUp) this.openLevelUp();
       this.ui.updateHUD(this);
     } else if (this.state === 'dying') {
-      this.endT += dt;
+      this.endT += realDt;
       h.targetR = Math.max(0.05, h.r * 0.9);
       h.r *= Math.exp(-dt * 2.5);
       holeU.uTime.value += dt;
@@ -532,7 +630,7 @@ export class Game {
       this.enemies.update(dt * 0.3, h, this.time);
       if (this.endT > 1.6) this.finish();
     } else if (this.state === 'clearing') {
-      this.endT += dt;
+      this.endT += realDt;
       holeU.uTime.value += dt;
       this.world.update(dt * 0.5, h, 1, null);
       this.enemies.update(dt * 0.5, h, this.time);
@@ -569,6 +667,14 @@ export class Game {
     if (b) this.enemies.damage(b, b.maxHp * frac);
   }
   debugKill() {
+    if (this.state === 'levelup' || this.state === 'paused') {
+      this.ui.hide('#levelup');
+      this.ui.hide('#pause');
+      this.pendingLevels = 0;
+      this.state = 'play';
+    }
+    this.noLevelUp = true;
+    this.revives = 0;
     this.god = false;
     this.hole.invuln = 0;
     this.hurt(99999, null);
@@ -579,6 +685,11 @@ export class Game {
   }
   debugXp(n) {
     this.gainXp(n);
+  }
+  debugCoins(n) {
+    this.save.coins += n;
+    Save.save();
+    this.metaUI.renderTitle();
   }
 }
 

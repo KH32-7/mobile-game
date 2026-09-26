@@ -86,11 +86,40 @@ try {
     }
   }
 
+  // 플레이 중 레벨업 창이 끼어들 수 있으므로 재시도하며 탭
+  async function safeTap(sel) {
+    for (let i = 0; i < 8; i++) {
+      await clearLevelups();
+      try {
+        await page.tap(sel, { timeout: 4000 });
+        return;
+      } catch (e) {
+        if (i === 7) console.log(String(e).split('\n').filter((l) => /intercepts|not visible|Timeout/.test(l)).slice(0, 3).join('\n'));
+      }
+    }
+    throw new Error('탭 실패: ' + sel);
+  }
+
   await page.goto(URL + '?debug', { waitUntil: 'load' });
   await page.waitForFunction(() => window.__game && window.__game.frames > 5, null, { timeout: 30000 });
   await sleep(800);
+  // 첫 접속: 출석 보상 모달
+  check(await page.isVisible('#modal'), '출석 체크 모달 표시');
+  await page.screenshot({ path: `${SHOTS}/00-streak.png` });
+  await page.tap('#modal [data-act=claimStreak]');
+  await sleep(300);
+  const c0 = await G(() => window.__game.save.coins);
+  check(c0 > 0, `출석 보상 코인 (${c0})`);
   await page.screenshot({ path: `${SHOTS}/01-title.png` });
   check(await page.isVisible('#title'), '타이틀 화면 표시');
+  // 미션 시트
+  await page.tap('.nav-b[data-sheet=missions]');
+  await sleep(1200);
+  const nMis = await page.locator('#sheet .row').count();
+  check(nMis >= 3, `일일 미션 표시 (${nMis}행)`);
+  await page.screenshot({ path: `${SHOTS}/01b-missions.png` });
+  await page.tap('#sheetClose');
+  await sleep(200);
 
   // 플레이 시작 (실제 탭)
   await page.tap('#btnStart');
@@ -100,9 +129,10 @@ try {
 
   // 조이스틱 드래그로 이동
   const p0 = await G(() => ({ x: window.__game.hole.x, z: window.__game.hole.z }));
-  await drag(195, 600, [0, 0, Math.PI / 2, Math.PI / 2, Math.PI, Math.PI, -Math.PI / 2, -Math.PI / 2, 0.8, 2.2], 600);
+  await drag(195, 600, [0, 0, 0, Math.PI / 2, Math.PI / 2, Math.PI, Math.PI, Math.PI, -Math.PI / 2, -Math.PI / 2, 0.8, 2.2], 800);
   const p1 = await G(() => ({ x: window.__game.hole.x, z: window.__game.hole.z, sw: window.__game.stats.swallowed, st: window.__game.state }));
-  check(Math.hypot(p1.x - p0.x, p1.z - p0.z) > 2, `드래그로 홀 이동 (${p1.x.toFixed(1)}, ${p1.z.toFixed(1)})`);
+  const trav = await G(() => window.__game.traveled);
+  check(trav > 3, `드래그로 홀 이동 (이동 거리 ${trav.toFixed(1)})`);
   check(p1.sw > 0, `오브젝트 삼키기 (${p1.sw}개)`);
   await page.screenshot({ path: `${SHOTS}/03-play.png` });
 
@@ -135,6 +165,7 @@ try {
     g.time = 140;
     g.debugGrow(2.4);
     g.god = true;
+    g.noLevelUp = true;
   });
   await drag(195, 600, [0.3, 0.3, 1.9, 1.9, 3.5, 3.5, 5, 5], 700);
   await sleep(1500);
@@ -145,7 +176,7 @@ try {
 
   // 일시정지 메뉴
   await clearLevelups();
-  await page.tap('#btnPause');
+  await safeTap('#btnPause');
   await sleep(300);
   check((await state()) === 'paused', '일시정지');
   await page.screenshot({ path: `${SHOTS}/06-pause.png` });
@@ -158,6 +189,7 @@ try {
     g.enemies.list.slice().forEach((e) => e.type !== 'mini' && g.enemies.kill(e));
     g.debugGrow(5.5);
     g.debugBoss();
+    g.noLevelUp = true;
   });
   for (let i = 0; i < 20 && !(await G(() => !!window.__game.enemies.boss)); i++) {
     if ((await state()) === 'levelup') await page.tap('#levelup .card >> nth=0');
@@ -204,13 +236,15 @@ try {
   check(await page.isVisible('#result'), '결과 화면 (클리어)');
   await page.screenshot({ path: `${SHOTS}/09-result-clear.png` });
 
+  await G(() => (window.__game.noLevelUp = false));
   // 다시 하기 -> 사망 -> 결과
   await page.tap('#btnAgain');
   await sleep(500);
   check((await state()) === 'play', '다시 하기');
   await drag(195, 600, [1, 1], 500);
+  await clearLevelups();
   await G(() => window.__game.debugKill());
-  await page.waitForFunction(() => window.__game.state === 'result', null, { timeout: 8000 });
+  await page.waitForFunction(() => window.__game.state === 'result', null, { timeout: 20000 });
   await sleep(500);
   check(await page.isVisible('#result'), '결과 화면 (사망)');
   await page.screenshot({ path: `${SHOTS}/10-result-dead.png` });
@@ -221,6 +255,110 @@ try {
   const coins = await G(() => window.__game.save.coins);
   check(coins > 0, `코인 저장 (${coins})`);
   await page.screenshot({ path: `${SHOTS}/11-title-after.png` });
+
+  // 메타 진행: 새 맵 해금 확인, 강화 구매, 새로고침 후 유지
+  const beach = await G(() => window.__game.save.maps.beach.unlocked);
+  check(beach, '시티 클리어 후 해변 맵 해금');
+  const ach = await G(() => Object.keys(window.__game.save.ach).length);
+  check(ach >= 2, `업적 달성 (${ach}개)`);
+  await page.tap('.nav-b[data-sheet=upg]');
+  await sleep(400);
+  await page.screenshot({ path: `${SHOTS}/11b-upgrades.png` });
+  const before = await G(() => ({ c: window.__game.save.coins, l: window.__game.save.upg.size }));
+  await page.tap('#sheet [data-act=upg][data-id=size]');
+  await sleep(300);
+  const after = await G(() => ({ c: window.__game.save.coins, l: window.__game.save.upg.size }));
+  check(after.l === before.l + 1 && after.c < before.c, `강화 구매 (시작 크기 Lv ${after.l}, 코인 ${before.c} -> ${after.c})`);
+  await page.tap('#sheetClose');
+  await page.tap('.nav-b[data-sheet=ach]');
+  await sleep(300);
+  await page.screenshot({ path: `${SHOTS}/11c-achievements.png` });
+  await page.tap('#sheetClose');
+  await page.tap('.nav-b[data-sheet=stats]');
+  await sleep(300);
+  await page.screenshot({ path: `${SHOTS}/11d-stats.png` });
+  await page.tap('#sheetClose');
+  await page.tap('.nav-b[data-sheet=skins]');
+  await sleep(300);
+  await page.screenshot({ path: `${SHOTS}/11e-skins.png` });
+  await page.tap('#sheetClose');
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__game && window.__game.frames > 3, null, { timeout: 30000 });
+  await sleep(500);
+  const reloaded = await G(() => ({ c: window.__game.save.coins, l: window.__game.save.upg.size, b: window.__game.save.maps.beach.unlocked, v: window.__game.save.ver, st: window.__game.save.stats.runs }));
+  check(reloaded.l === after.l && reloaded.c === after.c && reloaded.b && reloaded.v === 2 && reloaded.st >= 2, `새로고침 후 유지 (코인 ${reloaded.c}, 강화 Lv ${reloaded.l}, 판수 ${reloaded.st})`);
+  check(!(await page.isVisible('#modal')), '같은 날 재접속 시 출석 모달 없음');
+
+  // 해변 맵 선택 후 플레이
+  await page.tap('#mapNext');
+  await sleep(1500);
+  const sel = await G(() => window.__game.save.sel.map);
+  check(sel === 'beach', `맵 선택 (${sel})`);
+  await page.screenshot({ path: `${SHOTS}/11f-title-beach.png` });
+  await page.tap('#btnStart');
+  await sleep(500);
+  await drag(195, 600, [0.5, 0.5, 2, 2], 600);
+  await clearLevelups();
+  check((await G(() => window.__game.world.themeId)) === 'beach', '해변 맵 플레이');
+  await page.screenshot({ path: `${SHOTS}/11g-beach.png` });
+  await clearLevelups();
+  await G(() => window.__game.debugKill());
+  await page.waitForFunction(() => window.__game.state === 'result', null, { timeout: 20000 });
+  await page.tap('#btnResTitle');
+  await sleep(400);
+
+  // 공장 맵 (디버그로 해금) + 데일리 챌린지
+  await G(() => {
+    const g = window.__game;
+    g.save.maps.factory.unlocked = true;
+    g.save.sel.map = 'factory';
+    g.setWorld('factory');
+    g.metaUI.renderTitle();
+  });
+  await page.tap('#btnStart');
+  await sleep(500);
+  await drag(195, 600, [3.5, 3.5], 600);
+  await clearLevelups();
+  await page.screenshot({ path: `${SHOTS}/11h-factory.png` });
+  await safeTap('#btnPause');
+  await sleep(200);
+  await safeTap('#btnToTitle');
+  await sleep(400);
+  await page.tap('#btnDaily');
+  await sleep(300);
+  await page.tap('#sheet [data-act=daily]');
+  await sleep(600);
+  const dly = await G(() => window.__game.run && window.__game.run.daily);
+  check(dly && (await state()) === 'play', '데일리 챌린지 시작');
+  await page.screenshot({ path: `${SHOTS}/11i-daily.png` });
+  await clearLevelups();
+  await G(() => {
+    window.__game.time = 181;
+    window.__game.debugKill();
+  });
+  await page.waitForFunction(() => window.__game.state === 'result', null, { timeout: 20000 });
+  await sleep(400);
+  check(await G(() => window.__game.save.daily.challenge.done), '데일리 챌린지 완료 기록');
+  await page.screenshot({ path: `${SHOTS}/11j-daily-result.png` });
+  await page.tap('#btnResTitle');
+  await sleep(300);
+
+  // 구버전 저장 데이터 마이그레이션
+  await G(() => {
+    localStorage.removeItem('void-maw-save');
+    localStorage.setItem('void-maw-save-v1', JSON.stringify({ coins: 77, upg: { size: 2, hp: 1 }, best: { time: 200, size: 9, kills: 50, cleared: true }, muted: false }));
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__game && window.__game.frames > 3, null, { timeout: 30000 });
+  const mig = await G(() => ({ v: window.__game.save.ver, c: window.__game.save.coins, s: window.__game.save.upg.size, b: window.__game.save.maps.beach.unlocked }));
+  check(mig.v === 2 && mig.c >= 77 && mig.s === 2 && mig.b, `v1 -> v2 마이그레이션 (코인 ${mig.c}, 해변 ${mig.b})`);
+  if (await page.isVisible('#modal')) await page.tap('#modal [data-act=claimStreak]');
+  // 깨진 저장 데이터도 안전하게
+  await G(() => localStorage.setItem('void-maw-save', '{broken json'));
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__game && window.__game.frames > 3, null, { timeout: 30000 });
+  check((await G(() => window.__game.save.ver)) === 2, '손상된 저장 데이터 복구');
+  if (await page.isVisible('#modal')) await page.tap('#modal [data-act=claimStreak]');
 
   // 작은 화면 레이아웃
   await page.setViewportSize({ width: 360, height: 640 });

@@ -225,6 +225,247 @@ export const PROP_TYPES = {
   },
 };
 
+// ---------------- 해변 ----------------
+Object.assign(PROP_TYPES, {
+  ball: {
+    size: 0.3,
+    geo: () => build([part(ico(0.3, 1), '#ffffff', 0, 0.3), part(box(0.62, 0.62, 0.1), '#ff6b8a', 0, 0.3), part(box(0.1, 0.62, 0.62), '#4db8ff', 0, 0.3)]),
+  },
+  buoy: {
+    size: 0.3,
+    geo: () => build([part(cyl(0.3, 0.3, 0.3, 8), '#ff6b6b', 0, 0.15), part(cyl(0.31, 0.31, 0.1, 8), '#ffffff', 0, 0.2), part(cone(0.12, 0.4, 5), '#ffd84d', 0, 0.5)]),
+  },
+  surf: {
+    size: 0.55,
+    tint: ['#ff9aa2', '#a0e7ff', '#fff3a0', '#c7ceea'],
+    geo: () => build([part(box(0.5, 0.08, 1.8), '#ffffff', 0, 0.05), part(box(0.1, 0.09, 1.6), '#ff7aa8', 0, 0.06)]),
+  },
+  chair: {
+    size: 0.7,
+    tint: ['#ffffff', '#b5ead7', '#ffdac1', '#c7ceea'],
+    geo: () =>
+      build([
+        part(box(0.7, 0.08, 1.1), '#ffffff', 0, 0.3, 0.1),
+        part(box(0.7, 0.08, 0.7), '#ffffff', 0, 0.55, -0.6, -0.6),
+        part(box(0.06, 0.3, 0.06), '#d9c0a0', 0.3, 0.15, 0.5),
+        part(box(0.06, 0.3, 0.06), '#d9c0a0', -0.3, 0.15, 0.5),
+        part(box(0.06, 0.3, 0.06), '#d9c0a0', 0.3, 0.15, -0.3),
+        part(box(0.06, 0.3, 0.06), '#d9c0a0', -0.3, 0.15, -0.3),
+      ]),
+  },
+  umbrella: {
+    size: 0.85,
+    tint: ['#ffffff', '#ffe0f0', '#e0f4ff', '#fff6d0'],
+    geo: () =>
+      build([
+        part(cyl(0.05, 0.05, 2.2, 5), '#f4efe6', 0, 1.1),
+        part(cone(1.3, 0.55, 8), '#ff8fab', 0, 2.3),
+        part(cone(1.32, 0.5, 8), '#ffffff', 0, 2.26, 0, 0, Math.PI / 8, 0, 1, 1, 1),
+      ]),
+  },
+  castle: {
+    size: 0.8,
+    geo: () =>
+      build([
+        part(box(1.3, 0.5, 1.3), '#f2d49b', 0, 0.25),
+        part(cyl(0.25, 0.3, 0.9, 6), '#f5d9a5', 0.5, 0.45, 0.5),
+        part(cyl(0.25, 0.3, 0.9, 6), '#f5d9a5', -0.5, 0.45, 0.5),
+        part(cyl(0.25, 0.3, 0.9, 6), '#f5d9a5', 0.5, 0.45, -0.5),
+        part(cyl(0.25, 0.3, 0.9, 6), '#f5d9a5', -0.5, 0.45, -0.5),
+        part(cone(0.35, 0.7, 6), '#eccb8a', 0, 0.85),
+        part(box(0.04, 0.3, 0.2), '#ff6b8a', 0, 1.35, 0.1),
+      ]),
+  },
+  rock: {
+    size: 1.0,
+    geo: () => build([part(ico(0.9, 0), '#b8b0c8', 0, 0.45, 0, 0.4, 0.3, 0, 1.1, 0.7, 1), part(ico(0.5, 0), '#c9c2d6', 0.6, 0.3, 0.3)]),
+  },
+  palm: {
+    size: 0.9,
+    geo: () => {
+      const p = [
+        part(cyl(0.12, 0.16, 1.4, 6), '#c49a6c', 0, 0.7, 0, 0, 0, 0.08),
+        part(cyl(0.1, 0.12, 1.4, 6), '#b88d5f', 0.12, 2.05, 0, 0, 0, 0.16),
+        part(ico(0.25, 0), '#8a6b4a', 0.25, 2.8, 0),
+      ];
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        p.push(part(box(1.4, 0.06, 0.45), k % 2 ? '#6fcf7f' : '#86dc8f', 0.25 + Math.cos(a) * 0.7, 2.75, Math.sin(a) * 0.7, 0, -a, -0.35));
+      }
+      return build(p);
+    },
+  },
+  cart: {
+    size: 1.0,
+    tint: ['#ffe5ec', '#e0f4ff', '#fff6d0'],
+    geo: () =>
+      build([
+        part(box(1.6, 0.9, 0.9), '#ffffff', 0, 0.75),
+        part(cyl(0.3, 0.3, 0.1, 8), '#4a4760', 0.5, 0.3, 0.46, Math.PI / 2),
+        part(cyl(0.3, 0.3, 0.1, 8), '#4a4760', -0.5, 0.3, 0.46, Math.PI / 2),
+        part(cyl(0.04, 0.04, 1.2, 4), '#dddddd', 0, 1.8),
+        part(cone(0.9, 0.4, 8), '#7ad0ff', 0, 2.4),
+        part(ico(0.25, 0), '#ffb7d0', 0.4, 1.35, 0),
+      ]),
+  },
+  lifeguard: {
+    size: 1.5,
+    geo: () =>
+      build([
+        part(box(0.12, 2.2, 0.12), '#f4efe6', 0.7, 1.1, 0.7),
+        part(box(0.12, 2.2, 0.12), '#f4efe6', -0.7, 1.1, 0.7),
+        part(box(0.12, 2.2, 0.12), '#f4efe6', 0.7, 1.1, -0.7),
+        part(box(0.12, 2.2, 0.12), '#f4efe6', -0.7, 1.1, -0.7),
+        part(box(1.7, 1.0, 1.7), '#ff6b6b', 0, 2.7),
+        part(box(1.9, 0.12, 1.9), '#ffffff', 0, 3.25),
+        part(box(1.1, 0.4, 0.06), '#3d4466', 0, 2.8, 0.86),
+      ]),
+  },
+  boat: {
+    size: 2.2,
+    tint: ['#ffffff', '#ffe0e8', '#e0f0ff'],
+    geo: () =>
+      build([
+        part(box(4, 0.8, 1.6), '#ffffff', 0, 0.4),
+        part(cone(0.8, 1.2, 4), '#ffffff', 2.4, 0.4, 0, 0, Math.PI / 4, -Math.PI / 2, 1, 1, 1.4),
+        part(box(4.1, 0.14, 1.64), '#4db8ff', 0, 0.2),
+        part(box(1.4, 0.8, 1.2), '#f4f1ff', -0.6, 1.2),
+        part(box(1.42, 0.3, 1.22), '#3d4466', -0.6, 1.3),
+      ]),
+  },
+  hut: {
+    size: 2.6,
+    tint: ['#fff1e6', '#e2f7ff', '#ffeef5', '#f0ffe6'],
+    geo: () =>
+      build([
+        part(box(3.4, 2.2, 3.2), '#ffffff', 0, 1.1),
+        part(box(3.42, 0.35, 3.22), '#7ad0ff', 0, 0.5),
+        part(box(3.42, 0.35, 3.22), '#7ad0ff', 0, 1.5),
+        part(cone(2.8, 1.5, 4), '#f2c48d', 0, 2.95, 0, 0, Math.PI / 4, 0),
+        part(box(0.9, 1.3, 0.06), '#8a6a5a', 0, 0.65, 1.61),
+      ]),
+  },
+  hotel: {
+    size: 5.2,
+    tint: ['#ffe5ec', '#e0f4ff', '#fff6d0', '#e8ffe8'],
+    geo: () => {
+      const p = [part(box(9, 7, 6), '#ffffff', 0, 3.5), part(box(9.4, 0.4, 6.4), '#f4f1ff', 0, 7.2), part(box(3, 1.5, 2), '#ff9fb3', 2.5, 8, 0)];
+      for (let f = 0; f < 3; f++) {
+        const y = 1.6 + f * 2;
+        p.push(part(box(8.2, 0.9, 0.06), '#48507a', 0, y, 3.01));
+        p.push(part(box(8.6, 0.12, 0.8), '#ffffff', 0, y - 0.6, 3.4));
+        p.push(part(box(8.2, 0.9, 0.06), '#48507a', 0, y, -3.01));
+      }
+      return build(p);
+    },
+  },
+});
+
+// ---------------- 공장 ----------------
+Object.assign(PROP_TYPES, {
+  crate: {
+    size: 0.45,
+    geo: () => build([part(box(0.8, 0.8, 0.8), '#e0b07a', 0, 0.4), part(box(0.82, 0.1, 0.82), '#c48f58', 0, 0.4), part(box(0.1, 0.82, 0.82), '#c48f58', 0, 0.4)]),
+  },
+  barrel: {
+    size: 0.35,
+    tint: ['#ff9f43', '#4db8ff', '#7fd18b', '#ff6b8a'],
+    geo: () => build([part(cyl(0.32, 0.32, 0.9, 8), '#ffffff', 0, 0.45), part(cyl(0.34, 0.34, 0.08, 8), '#dddddd', 0, 0.3), part(cyl(0.34, 0.34, 0.08, 8), '#dddddd', 0, 0.65)]),
+  },
+  pallet: {
+    size: 0.85,
+    geo: () =>
+      build([
+        part(box(1.5, 0.14, 1.2), '#d4a574', 0, 0.07),
+        part(box(1.3, 0.6, 1.0), '#9fd8ff', 0, 0.44),
+        part(box(1.32, 0.08, 1.02), '#ffffff', 0, 0.5),
+      ]),
+  },
+  forklift: {
+    size: 1.2,
+    geo: () =>
+      build([
+        part(box(1.5, 0.7, 1.1), '#ffc43d', 0, 0.6),
+        part(box(0.9, 1.0, 1.0), '#ffd66b', -0.2, 1.4),
+        part(box(0.8, 0.6, 0.06), '#3d4466', -0.2, 1.5, 0.51),
+        part(box(0.1, 2, 0.1), '#555566', 0.85, 1.0, 0.3),
+        part(box(0.1, 2, 0.1), '#555566', 0.85, 1.0, -0.3),
+        part(box(0.8, 0.06, 0.12), '#555566', 1.25, 0.2, 0.3),
+        part(box(0.8, 0.06, 0.12), '#555566', 1.25, 0.2, -0.3),
+        part(cyl(0.25, 0.25, 0.15, 8), '#2e2b3a', 0.45, 0.25, 0.56, Math.PI / 2),
+        part(cyl(0.25, 0.25, 0.15, 8), '#2e2b3a', -0.45, 0.25, 0.56, Math.PI / 2),
+        part(cyl(0.25, 0.25, 0.15, 8), '#2e2b3a', 0.45, 0.25, -0.56, Math.PI / 2),
+        part(cyl(0.25, 0.25, 0.15, 8), '#2e2b3a', -0.45, 0.25, -0.56, Math.PI / 2),
+      ]),
+  },
+  pipe: {
+    size: 1.4,
+    geo: () => build([part(cyl(0.45, 0.45, 2.8, 10), '#b9c2d6', 0, 0.45, 0, 0, 0, Math.PI / 2), part(cyl(0.52, 0.52, 0.2, 10), '#8f98ad', 1.3, 0.45, 0, 0, 0, Math.PI / 2), part(cyl(0.52, 0.52, 0.2, 10), '#8f98ad', -1.3, 0.45, 0, 0, 0, Math.PI / 2)]),
+  },
+  truck: {
+    size: 2.8,
+    tint: ['#ffffff', '#ffe0b5', '#d0e8ff', '#e8d4ff'],
+    geo: () =>
+      build([
+        part(box(3.8, 2.0, 1.9), '#ffffff', -0.8, 1.4),
+        part(box(1.5, 1.4, 1.8), '#ff8f5a', 1.9, 1.1),
+        part(box(0.06, 0.6, 1.5), '#3d4466', 2.66, 1.4),
+        part(cyl(0.4, 0.4, 0.25, 8), '#2e2b3a', 1.9, 0.4, 0.85, Math.PI / 2),
+        part(cyl(0.4, 0.4, 0.25, 8), '#2e2b3a', 1.9, 0.4, -0.85, Math.PI / 2),
+        part(cyl(0.4, 0.4, 0.25, 8), '#2e2b3a', -1.6, 0.4, 0.85, Math.PI / 2),
+        part(cyl(0.4, 0.4, 0.25, 8), '#2e2b3a', -1.6, 0.4, -0.85, Math.PI / 2),
+      ]),
+  },
+  container: {
+    size: 3.0,
+    tint: ['#ff8f8f', '#7fc8ff', '#8fe0a0', '#ffc46b', '#c8a0ff'],
+    geo: () => {
+      const p = [part(box(6, 2.5, 2.4), '#ffffff', 0, 1.25)];
+      for (let k = -5; k <= 5; k++) p.push(part(box(0.12, 2.3, 2.46), '#e8e8e8', k * 0.52, 1.25));
+      return build(p);
+    },
+  },
+  silo: {
+    size: 2.6,
+    tint: ['#ffffff', '#e8f4ff', '#fff4e0'],
+    geo: () =>
+      build([
+        part(cyl(2.2, 2.2, 6, 12), '#ffffff', 0, 3),
+        part(sph(2.2, 12, 4, 0, Math.PI / 2), '#e8e6f5', 0, 6),
+        part(cyl(2.25, 2.25, 0.2, 12), '#ff8f5a', 0, 2),
+        part(cyl(2.25, 2.25, 0.2, 12), '#ff8f5a', 0, 4),
+        part(box(0.15, 6.5, 0.4), '#8f98ad', 2.25, 3.2),
+      ]),
+  },
+  warehouse: {
+    size: 4.6,
+    tint: ['#e8e6f5', '#fff0e0', '#e0f0ff', '#f0ffe8'],
+    geo: () =>
+      build([
+        part(box(8, 3.6, 6), '#ffffff', 0, 1.8),
+        part(cyl(3.1, 3.1, 8.1, 10, 1, false), '#c8c4e0', 0, 3.6, 0, 0, 0, Math.PI / 2, 1, 1, 0.97),
+        part(box(3, 2.6, 0.06), '#8f98ad', 0, 1.3, 3.01),
+        part(box(1.4, 0.6, 0.06), '#48507a', 2.8, 2.6, 3.01),
+        part(box(1.4, 0.6, 0.06), '#48507a', -2.8, 2.6, 3.01),
+      ]),
+  },
+  plant: {
+    size: 5.4,
+    tint: ['#ffe0d0', '#e0e8ff', '#f4f0ff'],
+    geo: () =>
+      build([
+        part(box(8, 5, 7), '#ffffff', 0, 2.5),
+        part(box(8.2, 0.4, 7.2), '#e0dcef', 0, 5.2),
+        part(cyl(0.8, 1.0, 9, 10), '#d8d0c8', 2.5, 7.5, -1.5),
+        part(cyl(0.85, 0.85, 0.5, 10), '#ff6b6b', 2.5, 11.5, -1.5),
+        part(cyl(0.6, 0.7, 6, 10), '#d8d0c8', -2, 6.5, 1.5),
+        part(cyl(0.65, 0.65, 0.4, 10), '#ff6b6b', -2, 9.3, 1.5),
+        part(box(6, 1, 0.06), '#48507a', 0, 3.5, 3.51),
+        part(box(2.4, 2.4, 0.06), '#8f98ad', -2, 1.2, 3.51),
+      ]),
+  },
+});
+
 // ---------------- 적 (바닥 반지름 1 기준, +z 가 정면) ----------------
 export const ENEMY_MODELS = {
   sweeper: () =>

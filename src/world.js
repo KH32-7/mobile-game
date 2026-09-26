@@ -59,23 +59,110 @@ export class BlobShadows {
   }
 }
 
+const THEMES = {
+  city: {
+    bg: '#c3e8b0',
+    road: '#9d98b8',
+    lane: '#f6f2ff',
+    walk: '#f1e8da',
+    walkEdge: '#ddd1c0',
+    cross: '#fbf9ff',
+    fence: '#ffc2dc',
+    inner: { park: '#b3e3a0', residential: '#cbeeb4', commercial: '#ece0f2', downtown: '#e3def0', parking: '#c9c6da' },
+    lamp: 'lamp',
+    side: ['tree', 'tree', 'sakura', 'hydrant', 'trash', 'bench', 'cone', 'bush', 'trash'],
+    start: ['cone', 'cone', 'cone', 'trash', 'hydrant'],
+  },
+  beach: {
+    bg: '#f7e3b5',
+    road: '#d9b48a',
+    lane: '#c49a6c',
+    walk: '#fbeccb',
+    walkEdge: '#ecd5a8',
+    cross: null,
+    fence: '#7fd3ff',
+    inner: { sand: '#f5dca8', resort: '#bfeccd', huts: '#f2d49b', dune: '#efd29a', sea: '#7fd3ff' },
+    lamp: 'palm',
+    side: ['umbrella', 'chair', 'ball', 'surf', 'castle', 'trash', 'ball', 'buoy'],
+    start: ['ball', 'ball', 'buoy', 'castle', 'surf'],
+  },
+  factory: {
+    bg: '#d9d4cc',
+    road: '#8f8a94',
+    lane: '#ffd23f',
+    walk: '#e6e0d6',
+    walkEdge: '#cfc6b8',
+    cross: '#ffd23f',
+    fence: '#ffb347',
+    inner: { yard: '#cfc8bd', containers: '#c4c0c8', plant: '#d8d0c4', tanks: '#cbd5d0', lot: '#b8b4c0' },
+    lamp: 'lamp',
+    side: ['barrel', 'crate', 'cone', 'barrel', 'pallet', 'hydrant', 'crate', 'trash'],
+    start: ['barrel', 'crate', 'cone', 'crate', 'barrel'],
+  },
+};
+
 export class World {
-  constructor(scene, seed) {
+  constructor(scene, seed, theme = 'city') {
     this.scene = scene;
+    this.themeId = THEMES[theme] ? theme : 'city';
+    this.theme = THEMES[this.themeId];
+    this.seed = seed;
     this.rng = makeRng(seed);
     this.shadowTex = blobTexture();
     this.fallers = [];
     this.wobbling = new Set();
     this.sliding = [];
     this.respawnTimer = 0;
+    this.objects = [];
     this.buildGround();
     this.buildWell();
     this.layoutProps();
     this.buildProps();
   }
 
+  add(o) {
+    this.scene.add(o);
+    this.objects.push(o);
+  }
+
+  dispose() {
+    for (const o of this.objects) {
+      this.scene.remove(o);
+      o.traverse((c) => {
+        if (c.geometry) c.geometry.dispose();
+        if (c.material) {
+          if (c.material.map) c.material.map.dispose();
+          c.material.dispose();
+        }
+      });
+    }
+    this.shadowTex.dispose();
+    this.objects = [];
+  }
+
+  pickKind(cx, cz, bz) {
+    const rng = this.rng;
+    const ring = Math.max(Math.abs(cx), Math.abs(cz));
+    const r = rng();
+    if (this.themeId === 'beach') {
+      if (bz === 0) return 'sea';
+      if (ring < 20) return r < 0.6 ? 'sand' : 'dune';
+      if (ring < 60) return r < 0.35 ? 'sand' : r < 0.6 ? 'huts' : r < 0.8 ? 'dune' : 'resort';
+      return r < 0.45 ? 'resort' : r < 0.7 ? 'huts' : 'sand';
+    }
+    if (this.themeId === 'factory') {
+      if (ring < 20) return r < 0.6 ? 'yard' : 'lot';
+      if (ring < 60) return r < 0.3 ? 'yard' : r < 0.55 ? 'containers' : r < 0.75 ? 'tanks' : r < 0.9 ? 'lot' : 'plant';
+      return r < 0.4 ? 'plant' : r < 0.65 ? 'containers' : r < 0.85 ? 'tanks' : 'yard';
+    }
+    if (ring < 20) return r < 0.5 ? 'park' : 'residential';
+    if (ring < 60) return r < 0.35 ? 'residential' : r < 0.65 ? 'commercial' : r < 0.82 ? 'parking' : 'park';
+    return r < 0.45 ? 'downtown' : r < 0.7 ? 'commercial' : r < 0.85 ? 'parking' : 'residential';
+  }
+
   // ---------- 바닥 ----------
   buildGround() {
+    const T = this.theme;
     const S = 2048;
     const c = document.createElement('canvas');
     c.width = c.height = S;
@@ -84,49 +171,60 @@ export class World {
     const X = (x) => (x + GH) * k;
     const { half, pitch, roadW, blockHalf } = CFG.map;
     this.blockKinds = [];
-    // 도로 전체
-    g.fillStyle = '#c3e8b0';
+    g.fillStyle = T.bg;
     g.fillRect(0, 0, S, S);
-    g.fillStyle = '#9d98b8';
+    g.fillStyle = T.road;
     g.fillRect(X(-half - roadW / 2), X(-half - roadW / 2), (half * 2 + roadW) * k, (half * 2 + roadW) * k);
-    // 차선
-    g.strokeStyle = '#f6f2ff';
-    g.lineWidth = 0.25 * k;
-    g.setLineDash([2 * k, 2 * k]);
-    for (let i = 0; i <= 6; i++) {
-      const p = -half + i * pitch;
-      g.beginPath();
-      g.moveTo(X(p), X(-half - 4));
-      g.lineTo(X(p), X(half + 4));
-      g.stroke();
-      g.beginPath();
-      g.moveTo(X(-half - 4), X(p));
-      g.lineTo(X(half + 4), X(p));
-      g.stroke();
+    if (this.themeId === 'beach') {
+      // 보드워크 판자
+      g.strokeStyle = 'rgba(120,80,40,0.25)';
+      g.lineWidth = 0.08 * k;
+      for (let t = -half - 4; t <= half + 4; t += 0.8) {
+        for (let i = 0; i <= 6; i++) {
+          const p = -half + i * pitch;
+          g.beginPath();
+          g.moveTo(X(p - 4), X(t));
+          g.lineTo(X(p + 4), X(t));
+          g.stroke();
+          g.beginPath();
+          g.moveTo(X(t), X(p - 4));
+          g.lineTo(X(t), X(p + 4));
+          g.stroke();
+        }
+      }
+    } else {
+      g.strokeStyle = T.lane;
+      g.lineWidth = 0.25 * k;
+      g.setLineDash(this.themeId === 'factory' ? [] : [2 * k, 2 * k]);
+      for (let i = 0; i <= 6; i++) {
+        const p = -half + i * pitch;
+        for (const o of this.themeId === 'factory' ? [-3.3, 3.3] : [0]) {
+          g.beginPath();
+          g.moveTo(X(p + o), X(-half - 4));
+          g.lineTo(X(p + o), X(half + 4));
+          g.stroke();
+          g.beginPath();
+          g.moveTo(X(-half - 4), X(p + o));
+          g.lineTo(X(half + 4), X(p + o));
+          g.stroke();
+        }
+      }
+      g.setLineDash([]);
     }
-    g.setLineDash([]);
-    // 블록
-    const rng = this.rng;
     for (let bx = 0; bx < 6; bx++) {
       for (let bz = 0; bz < 6; bz++) {
         const cx = -half + pitch / 2 + bx * pitch;
         const cz = -half + pitch / 2 + bz * pitch;
-        const ring = Math.max(Math.abs(cx), Math.abs(cz));
-        let kind;
-        const r = rng();
-        if (ring < 20) kind = r < 0.5 ? 'park' : 'residential';
-        else if (ring < 60) kind = r < 0.35 ? 'residential' : r < 0.65 ? 'commercial' : r < 0.82 ? 'parking' : 'park';
-        else kind = r < 0.45 ? 'downtown' : r < 0.7 ? 'commercial' : r < 0.85 ? 'parking' : 'residential';
+        const kind = this.pickKind(cx, cz, bz);
         this.blockKinds.push({ cx, cz, kind });
-        // 인도
-        g.fillStyle = '#f1e8da';
+        if (kind === 'sea') continue;
+        g.fillStyle = T.walk;
         g.fillRect(X(cx - blockHalf), X(cz - blockHalf), blockHalf * 2 * k, blockHalf * 2 * k);
-        g.strokeStyle = '#ddd1c0';
+        g.strokeStyle = T.walkEdge;
         g.lineWidth = 0.15 * k;
         g.strokeRect(X(cx - blockHalf + 0.1), X(cz - blockHalf + 0.1), (blockHalf * 2 - 0.2) * k, (blockHalf * 2 - 0.2) * k);
         const ih = blockHalf - 2.6;
-        const inner = { park: '#b3e3a0', residential: '#cbeeb4', commercial: '#ece0f2', downtown: '#e3def0', parking: '#c9c6da' }[kind];
-        g.fillStyle = inner;
+        g.fillStyle = T.inner[kind];
         g.fillRect(X(cx - ih), X(cz - ih), ih * 2 * k, ih * 2 * k);
         if (kind === 'park') {
           g.fillStyle = '#efe4cf';
@@ -135,7 +233,7 @@ export class World {
           g.beginPath();
           g.arc(X(cx), X(cz), 3.4 * k, 0, Math.PI * 2);
           g.fill();
-        } else if (kind === 'parking') {
+        } else if (kind === 'parking' || kind === 'lot') {
           g.strokeStyle = '#f7f5ff';
           g.lineWidth = 0.15 * k;
           for (let i = -3; i <= 3; i++) {
@@ -146,7 +244,7 @@ export class World {
               g.stroke();
             }
           }
-        } else if (kind === 'commercial' || kind === 'downtown') {
+        } else if (kind === 'commercial' || kind === 'downtown' || kind === 'containers' || kind === 'plant') {
           g.strokeStyle = 'rgba(255,255,255,0.5)';
           g.lineWidth = 0.08 * k;
           for (let i = -ih; i <= ih; i += 2) {
@@ -159,26 +257,68 @@ export class World {
             g.lineTo(X(cx + ih), X(cz + i));
             g.stroke();
           }
+        } else if (kind === 'resort') {
+          g.fillStyle = '#8fe0ff';
+          g.fillRect(X(cx - 6), X(cz + 4), 12 * k, 4.5 * k);
+          g.strokeStyle = '#ffffff';
+          g.lineWidth = 0.3 * k;
+          g.strokeRect(X(cx - 6), X(cz + 4), 12 * k, 4.5 * k);
+        } else if (kind === 'yard' || kind === 'tanks') {
+          g.strokeStyle = 'rgba(255,210,63,0.8)';
+          g.lineWidth = 0.3 * k;
+          g.strokeRect(X(cx - ih + 0.6), X(cz - ih + 0.6), (ih * 2 - 1.2) * k, (ih * 2 - 1.2) * k);
+        } else if (kind === 'sand' || kind === 'dune') {
+          g.fillStyle = 'rgba(255,255,255,0.35)';
+          for (let i = 0; i < 40; i++) {
+            g.beginPath();
+            g.arc(X(cx + this.rng.range(-ih, ih)), X(cz + this.rng.range(-ih, ih)), this.rng.range(0.1, 0.3) * k, 0, Math.PI * 2);
+            g.fill();
+          }
         }
       }
     }
     // 횡단보도
-    g.fillStyle = '#fbf9ff';
-    for (let i = 0; i <= 6; i++) {
-      for (let j = 0; j <= 6; j++) {
-        const px = -half + i * pitch;
-        const pz = -half + j * pitch;
-        for (let s = -3; s <= 3; s++) {
-          const o = s * 1.0;
-          if (j < 6) g.fillRect(X(px + o - 0.3), X(pz + 4.4), 0.6 * k, 2 * k);
-          if (j > 0) g.fillRect(X(px + o - 0.3), X(pz - 6.4), 0.6 * k, 2 * k);
-          if (i < 6) g.fillRect(X(px + 4.4), X(pz + o - 0.3), 2 * k, 0.6 * k);
-          if (i > 0) g.fillRect(X(px - 6.4), X(pz + o - 0.3), 2 * k, 0.6 * k);
+    if (T.cross) {
+      g.fillStyle = T.cross;
+      for (let i = 0; i <= 6; i++) {
+        for (let j = 0; j <= 6; j++) {
+          const px = -half + i * pitch;
+          const pz = -half + j * pitch;
+          for (let s = -3; s <= 3; s++) {
+            const o = s * 1.0;
+            if (j < 6) g.fillRect(X(px + o - 0.3), X(pz + 4.4), 0.6 * k, 2 * k);
+            if (j > 0) g.fillRect(X(px + o - 0.3), X(pz - 6.4), 0.6 * k, 2 * k);
+            if (i < 6) g.fillRect(X(px + 4.4), X(pz + o - 0.3), 2 * k, 0.6 * k);
+            if (i > 0) g.fillRect(X(px - 6.4), X(pz + o - 0.3), 2 * k, 0.6 * k);
+          }
         }
       }
     }
-    // 맵 경계: 부드러운 울타리 느낌 띠
-    g.strokeStyle = '#ffd6e8';
+    // 바다 (해변 맵 북쪽)
+    this.seaZ = -1e9;
+    if (this.themeId === 'beach') {
+      this.seaZ = -64;
+      const grd = g.createLinearGradient(0, X(-GH), 0, X(-64));
+      grd.addColorStop(0, '#5ec4f5');
+      grd.addColorStop(0.85, '#8fdcff');
+      grd.addColorStop(1, '#bff0ff');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, S, X(-64));
+      g.strokeStyle = 'rgba(255,255,255,0.7)';
+      g.lineWidth = 0.35 * k;
+      for (let w = 0; w < 5; w++) {
+        const zz = -66 - w * 7;
+        g.beginPath();
+        for (let x = -GH; x <= GH; x += 1) {
+          const y = zz + Math.sin(x * 0.35 + w) * 0.6;
+          if (x === -GH) g.moveTo(X(x), X(y));
+          else g.lineTo(X(x), X(y));
+        }
+        g.stroke();
+      }
+    }
+    // 맵 경계 띠
+    g.strokeStyle = T.fence;
     g.lineWidth = 1.2 * k;
     g.strokeRect(X(-half - 6), X(-half - 6), (half * 2 + 12) * k, (half * 2 + 12) * k);
 
@@ -189,31 +329,31 @@ export class World {
     geo.rotateX(-Math.PI / 2);
     const mat = patchHoleClip(new THREE.MeshLambertMaterial({ map: tex }), true);
     this.ground = new THREE.Mesh(geo, mat);
-    this.scene.add(this.ground);
+    this.add(this.ground);
 
-    // 바깥 잔디
     const og = new THREE.RingGeometry(GH * 1.414, 700, 24, 1);
     og.rotateX(-Math.PI / 2);
-    const outer = new THREE.Mesh(og, patchHoleClip(new THREE.MeshLambertMaterial({ color: '#c3e8b0' })));
+    const outerCol = this.themeId === 'beach' ? '#f7e3b5' : T.bg;
+    const outer = new THREE.Mesh(og, patchHoleClip(new THREE.MeshLambertMaterial({ color: outerCol })));
     const og2 = new THREE.PlaneGeometry(GH * 2.83, GH * 2.83);
     og2.rotateX(-Math.PI / 2);
-    const outer2 = new THREE.Mesh(og2, patchHoleClip(new THREE.MeshLambertMaterial({ color: '#c3e8b0' })));
+    const outer2 = new THREE.Mesh(og2, patchHoleClip(new THREE.MeshLambertMaterial({ color: outerCol })));
     outer2.position.y = -0.05;
-    this.scene.add(outer, outer2);
+    this.add(outer);
+    this.add(outer2);
 
-    // 맵 가장자리 울타리 기둥 (시각적 경계)
     const posts = [];
     for (let t = -half - 6; t <= half + 6; t += 4) {
       posts.push([t, -half - 6], [t, half + 6], [-half - 6, t], [half + 6, t]);
     }
     const pg = new THREE.CylinderGeometry(0.35, 0.4, 1.4, 6);
     pg.translate(0, 0.7, 0);
-    const pm = new THREE.InstancedMesh(pg, new THREE.MeshLambertMaterial({ color: '#ffc2dc', flatShading: true }), posts.length);
+    const pm = new THREE.InstancedMesh(pg, new THREE.MeshLambertMaterial({ color: T.fence, flatShading: true }), posts.length);
     posts.forEach(([x, z], i) => {
       _m.makeTranslation(x, 0, z);
       pm.setMatrixAt(i, _m);
     });
-    this.scene.add(pm);
+    this.add(pm);
   }
 
   // ---------- 우물 ----------
@@ -224,7 +364,7 @@ export class World {
     geo.translate(0, -0.5, 0);
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
-      uniforms: { uTime: holeU.uTime, uHurt: holeU.uHoleHurt },
+      uniforms: { uTime: holeU.uTime, uHurt: holeU.uHoleHurt, uWell: holeU.uWellCol, uSwirl: holeU.uSwirlCol, uRim: holeU.uRimCol, uRainbow: holeU.uRainbow },
       vertexShader: `
         varying float vY; varying float vAng;
         void main(){
@@ -233,15 +373,21 @@ export class World {
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }`,
       fragmentShader: `
-        uniform float uTime; uniform float uHurt;
+        uniform float uTime; uniform float uHurt; uniform vec3 uWell; uniform vec3 uSwirl; uniform vec3 uRim; uniform float uRainbow;
         varying float vY; varying float vAng;
         void main(){
           float d = vY;
-          vec3 top = mix(vec3(0.36, 0.16, 0.58), vec3(0.55, 0.12, 0.2), uHurt);
+          vec3 top = mix(uWell, vec3(0.55, 0.12, 0.2), uHurt);
           vec3 c = mix(top, vec3(0.0), smoothstep(0.0, 0.5, d));
           float sw = sin(vAng * 5.0 + d * 18.0 - uTime * 3.0) * 0.5 + 0.5;
-          c += vec3(0.35, 0.15, 0.6) * sw * (1.0 - smoothstep(0.0, 0.35, d)) * 0.45;
-          c += vec3(0.75, 0.5, 1.0) * exp(-d * 40.0) * 0.7;
+          vec3 swc = uSwirl;
+          if (uRainbow > 0.5) {
+            swc = 0.5 + 0.5 * cos(vec3(0.0, 2.1, 4.2) + vAng * 2.0 + uTime * 1.5 + d * 8.0);
+            float star = step(0.985, fract(sin(dot(floor(vec2(vAng * 30.0, d * 60.0)), vec2(12.9898, 78.233))) * 43758.5453));
+            c += vec3(star) * (1.0 - smoothstep(0.1, 0.6, d));
+          }
+          c += swc * sw * (1.0 - smoothstep(0.0, 0.35, d)) * 0.5;
+          c += uRim * exp(-d * 40.0) * 0.7;
           gl_FragColor = vec4(c, 1.0);
         }`,
     });
@@ -250,7 +396,7 @@ export class World {
     const bottom = new THREE.Mesh(new THREE.CircleGeometry(1.05, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x000000 }));
     bottom.position.y = -1;
     this.well.add(bottom);
-    this.scene.add(this.well);
+    this.add(this.well);
   }
 
   setHole(x, z, r) {
@@ -265,12 +411,33 @@ export class World {
   // ---------- 소품 배치 ----------
   layoutProps() {
     const rng = this.rng;
+    const T = this.theme;
+    const th = this.themeId;
     const L = [];
     const add = (t, x, z, rot = rng() * Math.PI * 2, s = 1) => L.push({ t, x, z, rot, s });
     const { half, pitch, blockHalf } = CFG.map;
-    const side = ['tree', 'tree', 'sakura', 'hydrant', 'trash', 'bench', 'cone', 'bush', 'trash'];
+    const corners = [
+      [-4.5, -4.5],
+      [4.5, -4.5],
+      [-4.5, 4.5],
+      [4.5, 4.5],
+    ];
     for (const b of this.blockKinds) {
       const { cx, cz, kind } = b;
+      const ih = blockHalf - 3.2;
+      const scatter = (types, n, avoid = 0, sc = [0.85, 1.15]) => {
+        for (let i = 0; i < n; i++) {
+          const x = cx + rng.range(-ih, ih);
+          const z = cz + rng.range(-ih, ih);
+          if (avoid && Math.abs(x - cx) < avoid && Math.abs(z - cz) < avoid) continue;
+          add(rng.pick(types), x, z, undefined, rng.range(sc[0], sc[1]));
+        }
+      };
+      if (kind === 'sea') {
+        for (let i = 0; i < 3; i++) add('boat', cx + rng.range(-8, 8), cz + rng.range(-8, 8), rng.range(-0.4, 0.4));
+        scatter(['buoy', 'buoy', 'ball'], 12);
+        continue;
+      }
       // 인도 소품
       const e = blockHalf - 1.2;
       for (let edge = 0; edge < 4; edge++) {
@@ -282,15 +449,14 @@ export class World {
           else if (edge === 2) (x = cx - e), (z = cz + u + jitter), (rot = Math.PI / 2);
           else (x = cx + e), (z = cz + u + jitter), (rot = -Math.PI / 2);
           const idx = Math.round((u + e) / 3.4);
-          if (idx % 3 === 0) add('lamp', x, z, rot + Math.PI / 2);
+          if (idx % 3 === 0) add(T.lamp, x, z, rot + Math.PI / 2);
           else {
-            const t = rng.pick(side);
-            if (t === 'bench') add('bench', x, z, rot);
+            const t = rng.pick(T.side);
+            if (t === 'bench' || t === 'chair') add(t, x, z, rot);
             else add(t, x, z, undefined, rng.range(0.9, 1.1));
           }
         }
       }
-      const ih = blockHalf - 3.2;
       if (kind === 'park') {
         if (rng() < 0.7) add('fountain', cx, cz, 0);
         for (let i = 0; i < 10; i++) {
@@ -305,12 +471,7 @@ export class World {
         add('trash', cx + 1.7, cz + 6);
         add('kiosk', cx + 5.5, cz + 5.5, Math.PI);
       } else if (kind === 'residential') {
-        for (const [ox, oz] of [
-          [-4.5, -4.5],
-          [4.5, -4.5],
-          [-4.5, 4.5],
-          [4.5, 4.5],
-        ]) {
+        for (const [ox, oz] of corners) {
           if (rng() < 0.85) add('house', cx + ox, cz + oz, oz < 0 ? Math.PI : 0, rng.range(0.9, 1.05));
           else add('tree', cx + ox, cz + oz, undefined, 1.3);
         }
@@ -329,59 +490,91 @@ export class World {
       } else if (kind === 'downtown') {
         const ring = Math.max(Math.abs(cx), Math.abs(cz));
         add(ring > 70 && rng() < 0.6 ? 'tower' : 'building', cx, cz, rng.int(0, 3) * (Math.PI / 2));
-        for (const [ox, oz] of [
-          [-7, -7],
-          [7, -7],
-          [-7, 7],
-          [7, 7],
-        ])
-          add(rng() < 0.5 ? 'kiosk' : 'bush', cx + ox, cz + oz, undefined, 0.9);
-      } else if (kind === 'parking') {
+        for (const [ox, oz] of corners) add(rng() < 0.5 ? 'kiosk' : 'bush', cx + ox * 1.55, cz + oz * 1.55, undefined, 0.9);
+      } else if (kind === 'parking' || kind === 'lot') {
+        const veh = th === 'factory' ? ['car', 'forklift', 'car'] : ['car'];
         for (let i = -3; i <= 3; i++) {
           for (const row of [-5.2, 0, 5.2]) {
-            if (rng() < 0.75) add('car', cx + i * 2.8, cz + row, Math.PI / 2 + (rng() < 0.5 ? Math.PI : 0) + rng.range(-0.05, 0.05));
+            if (rng() < 0.75) add(rng.pick(veh), cx + i * 2.8, cz + row, Math.PI / 2 + (rng() < 0.5 ? Math.PI : 0) + rng.range(-0.05, 0.05));
           }
         }
-        if (rng() < 0.6) add('bus', cx, cz - 8.4, 0);
+        if (rng() < 0.6) add(th === 'factory' ? 'truck' : 'bus', cx, cz - 8.4, 0);
+      } else if (kind === 'sand') {
+        for (let i = 0; i < 6; i++) {
+          const x = cx + rng.range(-ih + 1, ih - 1);
+          const z = cz + rng.range(-ih + 1, ih - 1);
+          add('umbrella', x, z);
+          add('chair', x + 1.1, z + 0.3, rng.range(-0.3, 0.3));
+        }
+        scatter(['ball', 'castle', 'surf', 'ball'], 8);
+        if (rng() < 0.5) add('lifeguard', cx + 6.5, cz - 6.5, 0);
+      } else if (kind === 'dune') {
+        scatter(['rock', 'palm', 'castle', 'ball', 'palm'], 11);
+      } else if (kind === 'huts') {
+        for (const [ox, oz] of corners) if (rng() < 0.85) add('hut', cx + ox, cz + oz, rng.int(0, 3) * (Math.PI / 2), rng.range(0.9, 1.05));
+        add('cart', cx, cz - 1.5, rng() * 6);
+        add('cart', cx + 1, cz + 2, rng() * 6);
+        add('palm', cx - 1, cz + 0.5);
+      } else if (kind === 'resort') {
+        add('hotel', cx, cz - 3.5, 0, rng.range(0.9, 1));
+        for (let i = -2; i <= 2; i++) add('chair', cx + i * 2.2, cz + 3.2, Math.PI);
+        add('palm', cx - 7.5, cz + 6);
+        add('palm', cx + 7.5, cz + 6);
+        add('umbrella', cx + 3.3, cz + 3.5);
+      } else if (kind === 'yard') {
+        for (let i = 0; i < 5; i++) {
+          const x = cx + rng.range(-ih + 1, ih - 1);
+          const z = cz + rng.range(-ih + 1, ih - 1);
+          for (let a = 0; a < 4; a++) add('crate', x + (a % 2) * 0.85, z + Math.floor(a / 2) * 0.85, 0);
+        }
+        scatter(['barrel', 'barrel', 'pallet', 'cone'], 10);
+        add('forklift', cx + rng.range(-4, 4), cz + rng.range(-4, 4));
+      } else if (kind === 'containers') {
+        const rows = [-5.5, -2.7, 2.7, 5.5];
+        for (const rz of rows) if (rng() < 0.8) add('container', cx + rng.range(-2, 2), cz + rz, rng() < 0.5 ? 0 : Math.PI, 1);
+        scatter(['crate', 'barrel'], 5);
+      } else if (kind === 'plant') {
+        add(rng() < 0.55 ? 'plant' : 'warehouse', cx, cz, rng.int(0, 3) * (Math.PI / 2));
+        for (const [ox, oz] of corners) add(rng() < 0.5 ? 'barrel' : 'pallet', cx + ox * 1.6, cz + oz * 1.6);
+      } else if (kind === 'tanks') {
+        for (const [ox, oz] of corners) if (rng() < 0.75) add('silo', cx + ox, cz + oz, rng() * 6, rng.range(0.85, 1));
+        add('pipe', cx, cz, rng() < 0.5 ? 0 : Math.PI / 2);
       }
     }
     // 도로 위 차량
+    const road = th === 'factory' ? ['truck', 'car', 'forklift', 'car'] : th === 'beach' ? ['car', 'cart', 'car'] : ['car', 'car', 'car', 'bus'];
     for (let i = 0; i <= 6; i++) {
       const p = -half + i * pitch;
       for (let t = -half; t < half; t += 5) {
         const tt = t + 2.5;
         const near = Math.abs(((tt + half) % pitch) - 0) < 7 || Math.abs(((tt + half) % pitch) - pitch) < 7;
         if (near) continue;
-        if (rng() < 0.4) {
+        if (rng() < 0.4 && tt > this.seaZ + 2) {
           const lane = rng() < 0.5 ? -2 : 2;
-          const bus = rng() < 0.12;
-          add(bus ? 'bus' : 'car', p + lane, tt, Math.PI / 2 + (lane > 0 ? 0 : Math.PI));
+          add(rng.pick(road), p + lane, tt, Math.PI / 2 + (lane > 0 ? 0 : Math.PI));
         }
-        if (rng() < 0.4) {
+        if (rng() < 0.4 && p > this.seaZ + 2) {
           const lane = rng() < 0.5 ? -2 : 2;
-          const bus = rng() < 0.12;
-          add(bus ? 'bus' : 'car', tt, p + lane, lane > 0 ? Math.PI : 0);
+          add(rng.pick(road), tt, p + lane, lane > 0 ? Math.PI : 0);
         }
       }
     }
-    // 시작 지점 주변: 즉시 삼킬 수 있는 작은 것들
+    // 시작 지점: 즉시 삼킬 수 있는 작은 것들
     for (let i = 0; i < 18; i++) {
       const a = (i / 18) * Math.PI * 2;
       const r = 3.2 + (i % 2) * 1.2;
-      add('cone', Math.cos(a) * r, Math.sin(a) * r);
+      add(th === 'city' ? 'cone' : rng.pick(T.start), Math.cos(a) * r, Math.sin(a) * r);
     }
-    for (let i = 0; i < 8; i++) add(rng() < 0.5 ? 'trash' : 'hydrant', rng.range(-7, 7), rng.range(-7, 7));
-    // 시작 지점 반경 2.2 안은 비움
-    this.layout = L.filter((p) => Math.hypot(p.x, p.z) > 2.2 || p.t === 'cone');
-    this.layout = this.layout.filter((p) => Math.hypot(p.x, p.z) > 2.2);
+    for (let i = 0; i < 8; i++) add(rng.pick(T.start), rng.range(-7, 7), rng.range(-7, 7));
+    this.layout = L.filter((p) => p.s > 0 && Math.hypot(p.x, p.z) > 2.2 && PROP_TYPES[p.t]);
   }
 
   buildProps() {
-    const types = Object.keys(PROP_TYPES);
-    this.typeIndex = {};
-    this.meshes = [];
     const counts = {};
     for (const p of this.layout) counts[p.t] = (counts[p.t] || 0) + 1;
+    const types = Object.keys(counts);
+    this.typeIndex = {};
+    this.meshes = [];
     const N = this.layout.length;
     this.N = N;
     this.pType = new Uint8Array(N);
@@ -393,30 +586,26 @@ export class World {
     this.pSize = new Float32Array(N);
     this.pState = new Uint8Array(N); // 0 정지, 1 끌려옴, 2 추락, 3 사라짐
     this.pGone = new Float32Array(N);
-    this.pWob = new Float32Array(N);
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const rng = this.rng;
     const slotCounter = {};
     types.forEach((t, ti) => {
       this.typeIndex[t] = ti;
       const def = PROP_TYPES[t];
-      const cnt = counts[t] || 0;
-      const mesh = new THREE.InstancedMesh(def.geo(), mat, Math.max(1, cnt));
-      mesh.count = cnt;
+      const cnt = counts[t];
+      const mesh = new THREE.InstancedMesh(def.geo(), mat, cnt);
       mesh.frustumCulled = false;
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      if (def.tint) {
-        for (let i = 0; i < cnt; i++) mesh.setColorAt(i, new THREE.Color(rng.pick(def.tint)));
-      }
+      if (def.tint) for (let i = 0; i < cnt; i++) mesh.setColorAt(i, new THREE.Color(rng.pick(def.tint)));
       this.meshes.push(mesh);
-      this.scene.add(mesh);
+      this.add(mesh);
       slotCounter[t] = 0;
     });
     this.shadows = new BlobShadows(this.scene, N, this.shadowTex);
+    this.objects.push(this.shadows.mesh);
     this.grid = Array.from({ length: GRID_N * GRID_N }, () => []);
     this.layout.forEach((p, i) => {
-      const ti = this.typeIndex[p.t];
-      this.pType[i] = ti;
+      this.pType[i] = this.typeIndex[p.t];
       this.pSlot[i] = slotCounter[p.t]++;
       this.pX[i] = p.x;
       this.pZ[i] = p.z;
@@ -432,10 +621,10 @@ export class World {
     this.reset();
   }
 
+
   reset() {
     for (let i = 0; i < this.N; i++) {
       this.pState[i] = 0;
-      this.pWob[i] = 0;
       this.pX[i] = this.layout[i].x;
       this.pZ[i] = this.layout[i].z;
       this.writeStatic(i);

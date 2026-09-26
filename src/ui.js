@@ -1,4 +1,4 @@
-import { SKILLS, EVOLUTIONS, UPGRADES, SKILL_MAX } from './config.js';
+import { SKILLS, EVOLUTIONS, SKILL_MAX } from './config.js';
 
 const S = (inner) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 export const ICONS = {
@@ -46,34 +46,18 @@ export class UI {
         </div>
         <div id="combo"></div>
         <div id="banner"></div>
-        <div id="toast"></div>
         <div id="skillbar"></div>
       </div>
       <div id="tutorial" class="hidden">
         <div class="finger"><div class="dot"></div></div>
         <div class="tip">화면 아무 곳이나 누르고 드래그해서 이동<br><b>홀보다 작은 건 전부 삼킬 수 있어!</b></div>
       </div>
-      <div id="title" class="screen">
-        <div class="title-wrap">
-          <div class="logo">
-            <div class="logo-hole"></div>
-            <h1>보이드 모</h1>
-            <div class="sub">VOID MAW</div>
-          </div>
-          <div class="tagline">도시를 삼키는 블랙홀이 되어<br>청소 로봇 군단에게서 5분 버티기</div>
-          <div class="best" id="bestBox"></div>
-          <button class="btn primary big" id="btnStart">플레이</button>
-          <div class="coins" id="coinBox"></div>
-          <div class="upgrades" id="upgBox"></div>
-          <div class="title-bottom">
-            <button class="btn icon" id="btnMute" aria-label="음소거"></button>
-          </div>
-        </div>
-      </div>
+      <div id="title" class="screen"></div>
       <div id="levelup" class="screen hidden">
         <div class="lu-title">레벨 업!</div>
         <div class="lu-sub">스킬을 하나 골라줘</div>
         <div class="cards"></div>
+        <button class="btn reroll hidden" id="btnReroll">다시 뽑기</button>
       </div>
       <div id="pause" class="screen hidden">
         <div class="panel">
@@ -91,10 +75,12 @@ export class UI {
           <div class="res-grid"></div>
           <div class="res-coins"></div>
           <div class="res-best"></div>
+          <div class="res-meta"></div>
           <button class="btn primary" id="btnAgain">다시 하기</button>
           <button class="btn" id="btnResTitle">타이틀로</button>
         </div>
       </div>
+      <div id="toast"></div>
     `;
     this.$ = (s) => root.querySelector(s);
     this.hud = this.$('#hud');
@@ -135,32 +121,6 @@ export class UI {
     this.$('#btnMute2').innerHTML = svg;
   }
 
-  renderTitle(save, onBuy) {
-    const b = save.best;
-    this.$('#bestBox').innerHTML = b.time
-      ? `<div><span>최장 생존</span><b>${fmtTime(b.time)}</b></div><div><span>최대 크기</span><b>${b.size.toFixed(1)}m</b></div><div><span>최다 처치</span><b>${b.kills}</b></div>${b.cleared ? '<div class="clear-badge">메카 격파!</div>' : ''}`
-      : `<div class="first">첫 플레이! 작은 것부터 삼켜보자</div>`;
-    this.$('#coinBox').innerHTML = `${ICONS.coin}<b>${save.coins}</b><span>코인</span>`;
-    const box = this.$('#upgBox');
-    box.innerHTML = `<div class="upg-title">영구 강화</div>` +
-      UPGRADES.map((u) => {
-        const l = save.upg[u.id] || 0;
-        const maxed = l >= u.max;
-        const cost = maxed ? 0 : u.cost[l];
-        const can = !maxed && save.coins >= cost;
-        const pips = Array.from({ length: u.max }, (_, i) => `<i class="${i < l ? 'on' : ''}"></i>`).join('');
-        return `<button class="upg btn ${can ? 'can' : ''}" data-id="${u.id}" ${maxed || !can ? 'aria-disabled="true"' : ''}>
-          <div class="upg-name">${u.name}</div>
-          <div class="pips">${pips}</div>
-          <div class="upg-desc">${u.desc(Math.max(1, l + (maxed ? 0 : 1)))}</div>
-          <div class="upg-cost">${maxed ? '최대' : `${ICONS.coin}${cost}`}</div>
-        </button>`;
-      }).join('');
-    box.querySelectorAll('.upg').forEach((el) => {
-      el.onclick = () => onBuy(el.dataset.id);
-    });
-  }
-
   updateHUD(g) {
     const h = g.hole;
     this.set('xp', this.xpFill, 'width', `${Math.min(100, (g.xp / g.xpNeed) * 100).toFixed(1)}%`);
@@ -196,8 +156,15 @@ export class UI {
       .join('') || '<div class="ps-empty">아직 스킬이 없음</div>';
   }
 
-  showLevelUp(choices, skills, onPick) {
+  showLevelUp(choices, skills, onPick, rerolls = 0, onReroll = null) {
     const el = this.$('#levelup');
+    const rb = this.$('#btnReroll');
+    rb.classList.toggle('hidden', !(rerolls > 0 && onReroll));
+    rb.textContent = `다시 뽑기 (${rerolls})`;
+    rb.onclick = (e) => {
+      e.stopPropagation();
+      if (onReroll) onReroll();
+    };
     const cards = el.querySelector('.cards');
     cards.innerHTML = choices
       .map((c, i) => {
@@ -250,7 +217,7 @@ export class UI {
 
   showResult(r) {
     const el = this.$('#result');
-    el.querySelector('.res-title').textContent = r.cleared ? '메카 격파! 도시 정화 완료' : '홀이 닫혔다...';
+    el.querySelector('.res-title').textContent = r.cleared ? '메카 격파! 정화 완료' : '홀이 닫혔다...';
     el.querySelector('.res-title').classList.toggle('win', r.cleared);
     el.querySelector('.res-grid').innerHTML = `
       <div><span>생존 시간</span><b>${fmtTime(r.time)}</b></div>
@@ -260,7 +227,13 @@ export class UI {
       <div><span>도달 레벨</span><b>${r.level}</b></div>
       <div><span>최고 콤보</span><b>x${r.maxCombo}</b></div>`;
     el.querySelector('.res-coins').innerHTML = `${ICONS.coin}<b>+${r.coins}</b> 코인 획득`;
-    el.querySelector('.res-best').innerHTML = r.newBest ? '<span class="nb">신기록!</span>' : `최장 생존 ${fmtTime(r.bestTime)}`;
+    el.querySelector('.res-best').innerHTML = (r.daily ? '<span class="daily-tag">데일리 챌린지</span> ' : `<span class="map-tag">${r.mapName} 난이도 ${r.diff}</span> `) + (r.newBest ? '<span class="nb">신기록!</span>' : `최고 ${fmtTime(r.bestTime)}`);
+    const meta = [];
+    for (const u of r.meta.unlocks) meta.push(`<div class="mi unlock">${u}</div>`);
+    if (r.meta.daily) meta.push(`<div class="mi unlock">데일리 챌린지 완료! +${r.meta.daily} 코인</div>`);
+    for (const a of r.meta.newAch) meta.push(`<div class="mi ach">업적 달성: ${a.name} +${a.reward}</div>`);
+    for (const m of r.meta.missions) meta.push(`<div class="mi mis">미션 완료: ${m}</div>`);
+    el.querySelector('.res-meta').innerHTML = meta.join('');
     el.classList.remove('hidden');
   }
 

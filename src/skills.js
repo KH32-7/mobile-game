@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CFG, SKILLS, EVOLUTIONS, SKILL_MAX } from './config.js';
 import { MISC } from './models.js';
+import { Save } from './save.js';
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -69,7 +70,9 @@ export class Skills {
       if (ok) pool.push({ kind: 'evo', id, w: 6 });
     }
     const full = this.ownedCount() >= MAX_OWNED;
+    const unlocked = Save.data.skills;
     for (const id of Object.keys(SKILLS)) {
+      if (!unlocked.includes(id) && !this.lv[id]) continue;
       const l = this.level(id);
       if (l >= SKILL_MAX) continue;
       if (l === 0 && full) continue;
