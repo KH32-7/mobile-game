@@ -1,6 +1,7 @@
 // Canvas 2D 렌더러 (모든 그래픽 절차적 생성)
 import { COLORS, STONE_COLOR, CONFIG } from './config.js';
 import { JOKER_BY_ID, RARITY_COLOR, fmt } from './jokers.js';
+import { SKINS } from './metadata.js';
 
 export const FONT = 'system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 const N = CONFIG.BOARD;
@@ -52,6 +53,7 @@ export function computeLayout(vw, vh, safe) {
   const rest = bottom - (y + board + trayH);
   y += Math.max(0, rest * 0.35);
   L.board = { x: Math.round(gx + (gw - board) / 2), y: Math.round(y), w: board, h: board }; y += board + Math.max(gap, rest * 0.3) + 4;
+  y = Math.min(y, bottom - trayH);
   L.tray = { x: gx + pad, y, w: gw - pad * 2, h: trayH };
   L.pause = { x: L.hud.x, y: L.hud.y + 2, w: 44, h: 44 };
   L.traySlot = (i) => ({ x: L.tray.x + (L.tray.w / 3) * i, y: L.tray.y, w: L.tray.w / 3, h: L.tray.h });
@@ -67,6 +69,12 @@ export class Renderer {
     this.blockCache = new Map();
     this.bg = null;
     this.dpr = 1;
+    this.theme = SKINS[0];
+  }
+
+  setTheme(skin) {
+    this.theme = skin || SKINS[0];
+    if (this.L) this.buildBg(this.L.vw, this.L.vh);
   }
 
   resize(vw, vh, dpr, L) {
@@ -82,14 +90,22 @@ export class Renderer {
 
   buildBg(vw, vh) {
     const L = this.L;
+    const T = this.theme;
+    this.bgPlain = this.buildBgLayer(vw, vh, false);
+    this.bg = this.buildBgLayer(vw, vh, true);
+  }
+
+  buildBgLayer(vw, vh, table) {
+    const L = this.L;
+    const T = this.theme;
     const c = document.createElement('canvas');
     c.width = Math.round(vw * this.dpr); c.height = Math.round(vh * this.dpr);
     const g = c.getContext('2d');
     g.scale(this.dpr, this.dpr);
     const grd = g.createRadialGradient(vw / 2, vh * 0.35, 20, vw / 2, vh * 0.4, Math.max(vw, vh) * 0.8);
-    grd.addColorStop(0, '#3a1760');
-    grd.addColorStop(0.55, '#1c0b33');
-    grd.addColorStop(1, '#0a0414');
+    grd.addColorStop(0, T.bg[0]);
+    grd.addColorStop(0.55, T.bg[1]);
+    grd.addColorStop(1, T.bg[2]);
     g.fillStyle = grd; g.fillRect(0, 0, vw, vh);
     // 다이아 패턴
     g.globalAlpha = 0.05; g.strokeStyle = '#ffffff'; g.lineWidth = 1;
@@ -100,11 +116,12 @@ export class Renderer {
     }
     g.globalAlpha = 1;
     // 펠트 테이블 (보드 + 트레이 영역)
-    const fx = L.gx + 4, fy = L.board.y - 10, fw = L.gw - 8, fh = L.tray.y + L.tray.h - fy + 8;
+    if (table) {
+    const fx = L.gx + 4, fy = Math.max(L.calc.y + L.calc.h + 3, L.board.y - 10), fw = L.gw - 8, fh = Math.min(vh - 4, L.tray.y + L.tray.h + 8) - fy;
     g.save();
     rr(g, fx, fy, fw, fh, 22);
     const fg = g.createRadialGradient(vw / 2, fy + fh * 0.4, 10, vw / 2, fy + fh * 0.4, fh);
-    fg.addColorStop(0, '#12603f'); fg.addColorStop(1, '#063322');
+    fg.addColorStop(0, T.felt[0]); fg.addColorStop(1, T.felt[1]);
     g.fillStyle = fg; g.fill();
     g.clip();
     // 펠트 노이즈
@@ -114,13 +131,14 @@ export class Renderer {
     }
     g.restore();
     rr(g, fx, fy, fw, fh, 22);
-    g.strokeStyle = '#d4a537'; g.lineWidth = 2; g.shadowColor = '#ffcf5a'; g.shadowBlur = 10; g.stroke();
+    g.strokeStyle = T.trim; g.lineWidth = 2; g.shadowColor = T.trim; g.shadowBlur = 10; g.stroke();
     g.shadowBlur = 0;
     rr(g, fx + 5, fy + 5, fw - 10, fh - 10, 18);
     g.strokeStyle = 'rgba(212,165,55,0.35)'; g.lineWidth = 1; g.stroke();
     // 트레이 구분선
     g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 1;
     g.beginPath(); g.moveTo(L.tray.x + 10, L.tray.y - 4); g.lineTo(L.tray.x + L.tray.w - 10, L.tray.y - 4); g.stroke();
+    }
     // 스캔라인
     g.fillStyle = 'rgba(0,0,0,0.10)';
     for (let y = 0; y < vh; y += 3) g.fillRect(0, y, vw, 1);
@@ -128,7 +146,7 @@ export class Renderer {
     const vg = g.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.3, vw / 2, vh / 2, Math.max(vw, vh) * 0.75);
     vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.55)');
     g.fillStyle = vg; g.fillRect(0, 0, vw, vh);
-    this.bg = c;
+    return c;
   }
 
   // 광택 젬 블록 스프라이트
@@ -245,8 +263,8 @@ export class Renderer {
     const { ctx, L } = this;
     const g = app.game;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (!app.inRun) { ctx.drawImage(this.bgPlain, 0, 0, L.vw, L.vh); this.drawTitleDeco(app, time); return; }
     ctx.drawImage(this.bg, 0, 0, L.vw, L.vh);
-    if (g.phase === 'title' && !app.inRun) { this.drawTitleDeco(app, time); return; }
     const [sx, sy] = app.fx.offset();
     ctx.save();
     ctx.translate(sx, sy);
@@ -260,7 +278,7 @@ export class Renderer {
     ctx.restore();
     this.drawDrag(app, time);
     this.drawBanner(app, time);
-    if (app.tutorial) this.drawTutorial(app, time);
+    if (app.tutorial && !app.banner) this.drawTutorial(app, time);
     if (app.fx.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${app.fx.flash * 0.35})`; ctx.fillRect(0, 0, L.vw, L.vh); }
   }
 
@@ -389,7 +407,7 @@ export class Renderer {
   drawJokers(app, time) {
     const { ctx, L } = this;
     const g = app.game;
-    for (let i = 0; i < CONFIG.JOKER_SLOTS; i++) {
+    for (let i = 0; i < g.jokerSlots; i++) {
       const r = L.jokerRect(i);
       const j = g.jokers[i];
       if (!j) {
@@ -471,7 +489,8 @@ export class Renderer {
     for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
       const x = b.x + c * cell, y = b.y + r * cell;
       rr(ctx, x + 1.5, y + 1.5, cell - 3, cell - 3, cell * 0.14);
-      ctx.fillStyle = (r + c) % 2 ? 'rgba(0,30,20,0.55)' : 'rgba(0,40,26,0.55)'; ctx.fill();
+      ctx.fillStyle = (r + c) % 2 ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.38)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1; ctx.stroke();
     }
     const drag = app.drag;
     const hl = drag && drag.valid ? drag.lines : null;
@@ -613,11 +632,11 @@ export class Renderer {
       const w = Math.max(r.w, ctx.measureText(b.text).width + 14);
       let x = r.x + r.w / 2 - w / 2;
       x = Math.max(L.gx + 4, Math.min(L.gx + L.gw - w - 4, x));
-      const y = r.y + r.h + 6 - Math.min(t * 40, 6);
+      const y = r.y - 32 - Math.min(t * 40, 6);
       ctx.globalAlpha = a;
       rr(ctx, x, y, w, 24, 8);
       ctx.fillStyle = b.color; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - 6, y + 1); ctx.lineTo(r.x + r.w / 2, y - 6); ctx.lineTo(r.x + r.w / 2 + 6, y + 1); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - 6, y + 23); ctx.lineTo(r.x + r.w / 2, y + 30); ctx.lineTo(r.x + r.w / 2 + 6, y + 23); ctx.fill();
       this.text(b.text, x + w / 2, y + 12.5, { size: 13, color: '#fff', weight: 900, align: 'center', stroke: 'rgba(0,0,0,0.35)', sw: 3 });
       ctx.globalAlpha = 1;
     }

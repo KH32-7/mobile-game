@@ -31,7 +31,7 @@ export const JOKERS = [
     onComboBreak: (g, j) => { j.v = 0; },
   },
   {
-    id: 'minimal', name: '미니멀리스트', rarity: 'common', glyph: '·', hue: 180, grow: true,
+    id: 'minimal', name: '미니멀리스트', rarity: 'common', glyph: '▪', hue: 180, grow: true,
     desc: (j) => `1~2칸 조각을 놓을 때마다 +15 칩 적립, 다음 줄 제거 때 사용 (적립 ${j.v || 0})`,
     onPlace: (g, j, piece) => { if (piece.size <= 2) { j.v = (j.v || 0) + 15; return '+15 적립'; } return null; },
     onScore: (g, j) => { if (!j.v) return null; const v = j.v; j.v = 0; return [chips(v)]; },

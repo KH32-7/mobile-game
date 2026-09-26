@@ -6,13 +6,16 @@ import { FX } from './fx.js';
 import { UI } from './ui.js';
 import { effectLabel, fmt } from './jokers.js';
 import { initAudio, sfx, setMuted, isMuted, startBgm, suspendAudio, resumeAudio } from './audio.js';
-import { load, save } from './storage.js';
+import { Meta, dateKey } from './meta.js';
+import { SKIN_BY_ID } from './metadata.js';
 
 const canvas = document.getElementById('cv');
 const renderer = new Renderer(canvas);
 const game = new Game();
-const rec = load();
+const meta = new Meta();
+const rec = meta.d;
 setMuted(!!rec.muted);
+renderer.setTheme(SKIN_BY_ID[rec.sel.skin]);
 
 const app = {
   game,
@@ -67,33 +70,61 @@ function refreshFit() {
   }
 }
 function banner(title, sub, color, life = 1.6) { app.banner = { title, sub, color, t: 0, life }; }
-function saveRec() { rec.muted = isMuted(); save(rec); }
+function saveRec() { rec.muted = isMuted(); meta.save(); }
+function flushToasts() { while (meta.toasts.length) { const t = meta.toasts.shift(); ui.toast(t.text, t.kind); } }
+let runStart = { ante: 0, hit: 0 };
 
 // ---------- UI 콜백 ----------
 const ui = new UI({
-  start: () => startRun(),
+  setup: () => { sfx.click(); ui.showSetup(meta); },
+  start: () => startRun({ stake: rec.sel.stake, deck: rec.sel.deck }),
+  daily: () => {
+    if (rec.daily.played) { sfx.invalid(); ui.toast('오늘의 데일리 런은 이미 도전함. 내일 다시!'); return; }
+    startRun({ daily: true });
+  },
+  continueRun: () => continueRun(),
+  unlock: (kind, id) => {
+    const ok = kind === 'joker' ? meta.unlockJoker(id) : kind === 'deck' ? meta.unlockDeck(id) : meta.unlockSkin(id);
+    if (ok) { sfx.buy(); vibrate(20); ui.toast('해금 완료!', 'ach'); } else { sfx.invalid(); ui.toast('토큰이 부족함'); }
+    ui.showCollection(meta);
+  },
+  skin: (id) => { rec.sel.skin = id; meta.save(); renderer.setTheme(SKIN_BY_ID[id]); sfx.click(); ui.showCollection(meta); },
+  abandon: () => {
+    game.gameOver('abandon');
+    meta.onRunEnd(game, false);
+    flushToasts();
+    app.inRun = false; app.paused = false;
+    ui.showSetup(meta);
+  },
   resume: () => resume(),
-  restart: () => startRun(),
+  restart: () => startRun(lastOpts),
   toTitle: () => toTitle(),
   toggleMute: () => {
     setMuted(!isMuted()); saveRec();
-    if (ui.current === 'title') ui.showTitle(rec, isMuted(), SEED_PARAM);
+    if (ui.current === 'title') ui.showTitle(meta, isMuted(), SEED_PARAM);
     else if (ui.current === 'pause') ui.showPause(isMuted());
   },
-  buy: (i) => { if (game.buy(i)) { sfx.buy(); vibrate(15); app.coinPulse = 1; ui.showShop(game); } },
-  sell: (i) => { if (game.sell(i)) { sfx.sell(); app.coinPulse = 1; ui.showShop(game); } },
-  reroll: () => { if (game.reroll()) { sfx.click(); ui.showShop(game); } else sfx.invalid(); },
-  move: (a, b) => { game.moveJoker(a, b); sfx.click(); },
+  buy: (i) => { if (game.buy(i)) { sfx.buy(); vibrate(15); app.coinPulse = 1; meta.onBuy(game); saveShop(); ui.showShop(game); } },
+  sell: (i) => { if (game.sell(i)) { sfx.sell(); app.coinPulse = 1; saveShop(); ui.showShop(game); } },
+  reroll: () => { if (game.reroll()) { sfx.click(); meta.onShop(game); saveShop(); ui.showShop(game); } else sfx.invalid(); },
+  move: (a, b) => { game.moveJoker(a, b); sfx.click(); saveShop(); },
   denied: () => sfx.invalid(),
   next: () => { sfx.click(); game.nextRound(); ui.hideAll(); beginRound(); },
-  endless: () => { sfx.click(); game.continueEndless(); ui.showShop(game); },
+  endless: () => { sfx.click(); game.continueEndless(); saveShop(); ui.showShop(game); },
 });
 
-function startRun() {
+function saveShop() { meta.saveRun(game.snapshot('shop')); }
+let lastOpts = { stake: 1, deck: 'basic' };
+
+function startRun(opts = {}) {
   initAudio();
   startBgm();
-  const seed = SEED_PARAM || Math.random().toString(36).slice(2, 10);
-  game.newRun(seed);
+  lastOpts = opts;
+  const daily = !!opts.daily;
+  const seed = daily ? 'daily-' + dateKey() : SEED_PARAM || Math.random().toString(36).slice(2, 10);
+  runStart = { ante: rec.stats.bestAnte, hit: rec.stats.bestHit };
+  game.newRun(seed, daily ? { stake: 1, deck: 'basic', daily: true, pool: meta.jokerPool(true) } : { stake: opts.stake || 1, deck: opts.deck || 'basic', pool: meta.jokerPool(false) });
+  meta.onRunStart(game);
   app.inRun = true;
   app.paused = false;
   app.fx.clear();
@@ -110,7 +141,8 @@ function beginRound() {
   app.timers = [];
   app.trayAnim = [-0.0, -0.12, -0.24];
   refreshFit();
-  if (game.ante > rec.bestAnte) { rec.bestAnte = game.ante; saveRec(); }
+  meta.onAnte(game.ante, game);
+  meta.saveRun(game.roundSnap);
   if (game.blind === 2) {
     banner('보스: ' + game.bossDef.name, game.bossDef.desc, game.bossDef.color, 2.4);
     sfx.boss(); vibrate(40);
@@ -121,12 +153,30 @@ function beginRound() {
   }
 }
 
+function continueRun() {
+  const snap = rec.run;
+  if (!snap) return;
+  initAudio();
+  startBgm();
+  try { game.restore(snap); } catch { meta.clearRun(); toTitle(); return; }
+  lastOpts = { ...game.opts };
+  runStart = { ante: rec.stats.bestAnte, hit: rec.stats.bestHit };
+  app.inRun = true;
+  app.paused = false;
+  app.fx.clear();
+  app.bubbles = []; app.clearing = []; app.jokerBounce = [];
+  ui.hideAll();
+  if (game.phase === 'shop') { refreshFit(); ui.showShop(game); }
+  else beginRound();
+}
+
 function toTitle() {
+  meta.refreshDaily();
   app.inRun = false;
   app.paused = false;
   game.phase = 'title';
   app.drag = null;
-  ui.showTitle(rec, isMuted(), SEED_PARAM);
+  ui.showTitle(meta, isMuted(), SEED_PARAM);
 }
 
 function pause() {
@@ -142,6 +192,7 @@ function doPlace(i, r, c) {
   const res = game.place(i, r, c);
   if (!res) return false;
   if (app.tutorial) { app.tutorial = false; rec.tutorialDone = true; saveRec(); }
+  if (res.cleared) meta.onClear(res, game);
   const cell = L.cell;
   sfx.place(res.piece.size);
   vibrate(8);
@@ -249,7 +300,6 @@ function updateSeq(dt) {
     k.totalShown = target;
     app.scoreHold = 0;
     app.scorePulse = 1;
-    if (s.res.total > rec.bestHit) { rec.bestHit = s.res.total; saveRec(); }
     s.stage = 'fade';
     s.timer = 0.35;
     return;
@@ -275,25 +325,29 @@ function afterPlace() {
     banner('라운드 클리어!', `${fmt(game.roundScore)} 점`, '#3ddc97', 1.4);
     app.fx.flash = 0.8;
     for (let i = 0; i < 24; i++) app.fx.burst(L.board.x + Math.random() * L.board.w, L.board.y + Math.random() * L.board.h, i % 7, 3, 300, L.cell * 0.3);
-    if (game.runBestHit > rec.bestHit) rec.bestHit = game.runBestHit;
-    if (game.phase === 'victory') rec.wins = (rec.wins || 0) + 1;
-    saveRec();
+    meta.onRoundClear(game);
+    let sum = null;
+    if (game.phase === 'victory') {
+      sum = meta.onRunEnd(game, true);
+      game.runStats = { rounds: 0, bosses: 0, lines: 0, gems: 0 }; // 엔드리스는 새로 정산
+    } else {
+      meta.onShop(game);
+      saveShop();
+    }
     later(1.5, () => {
       app.locked = false;
-      if (game.phase === 'victory') ui.showVictory(game, rec);
+      if (game.phase === 'victory') ui.showVictory(game, meta, sum);
       else ui.showShop(game);
     });
   } else if (r === 'over') {
     app.locked = true;
-    const newBest = { ante: false, hit: false };
-    if (game.ante > rec.bestAnte) { rec.bestAnte = game.ante; newBest.ante = true; }
-    if (game.runBestHit >= rec.bestHit && game.runBestHit > 0) { rec.bestHit = game.runBestHit; newBest.hit = true; }
-    saveRec();
+    const newBest = { ante: game.ante > runStart.ante, hit: game.runBestHit > runStart.hit };
+    const sum = meta.onRunEnd(game, false);
     sfx.gameOver();
     vibrate([60, 40, 120]);
     app.fx.shake(10, 0.5);
     banner(game.gameOverReason === 'stuck' ? '놓을 곳이 없음!' : '트레이 소진!', `${fmt(game.roundScore)} / ${fmt(game.target)}`, '#ff4d6d', 1.6);
-    later(1.7, () => { app.locked = false; ui.showOver(game, rec, newBest); });
+    later(1.7, () => { app.locked = false; ui.showOver(game, meta, sum, newBest); });
   } else if (r === 'newTray') {
     app.trayAnim = [0, -0.1, -0.2];
     sfx.newTray();
@@ -414,6 +468,7 @@ function update(dt) {
   if (app.banner) { app.banner.t += dt; if (app.banner.t > app.banner.life) app.banner = null; }
   if (app.drag && app.drag.scale < 1) { app.drag.scale = Math.min(1, app.drag.scale + dt * 8); updateDrag(); }
   updateSeq(dt);
+  if (meta.toasts.length) flushToasts();
   for (const t of app.timers) { t.t -= dt; if (t.t <= 0 && !t.done) { t.done = true; t.fn(); } }
   app.timers = app.timers.filter((t) => !t.done);
 }
@@ -433,12 +488,14 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 toTitle();
+setTimeout(flushToasts, 400);
 
 // ---------- 디버그/테스트 훅 ----------
 if (DEBUG) {
   window.__bj = {
-    game, app,
+    game, app, meta,
     layout: () => L,
+    toTitleForTest() { toTitle(); },
     // 조각 i 를 (r, c)에 놓으려면 손가락을 어디서 떼야 하는지
     dropPoint(i, r, c) {
       const p = game.tray[i];
@@ -462,7 +519,7 @@ if (DEBUG) {
       return best;
     },
     state() {
-      return { phase: game.phase, ui: ui.current || null, locked: app.locked, paused: app.paused, ante: game.ante, blind: game.blind, score: game.roundScore, target: game.target, coins: game.coins, jokers: game.jokers.map((j) => j.id), handsLeft: game.handsLeft, tray: game.tray.map((p) => (p ? p.shape.id : null)) };
+      return { tokens: rec.tokens, level: meta.level.lvl, hasRun: !!rec.run, phase: game.phase, ui: ui.current || null, locked: app.locked, paused: app.paused, ante: game.ante, blind: game.blind, score: game.roundScore, target: game.target, coins: game.coins, jokers: game.jokers.map((j) => j.id), handsLeft: game.handsLeft, tray: game.tray.map((p) => (p ? p.shape.id : null)) };
     },
   };
 }

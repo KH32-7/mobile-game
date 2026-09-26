@@ -50,11 +50,11 @@ export const CONFIG = {
   DEBUG_BONUS_COINS: 10,
 };
 
-export function targetFor(ante, blind) {
+export function targetFor(ante, blind, mult = 1) {
   let base;
   if (ante <= CONFIG.ANTE_BASE.length) base = CONFIG.ANTE_BASE[ante - 1];
   else base = CONFIG.ANTE_BASE[CONFIG.ANTE_BASE.length - 1] * Math.pow(CONFIG.ENDLESS_GROWTH, ante - CONFIG.ANTE_BASE.length);
-  let t = base * CONFIG.BLIND_MULT[blind];
+  let t = base * CONFIG.BLIND_MULT[blind] * mult;
   if (DEBUG && params.get('debug') !== 'hard') t *= CONFIG.DEBUG_TARGET_SCALE;
   if (DEBUG && params.get('debug') === 'hard') t *= 100;
   t = Math.max(10, t);

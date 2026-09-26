@@ -15,23 +15,82 @@ export class Game {
     this.board = new Array(N * N).fill(null);
     this.tray = [null, null, null];
     this.jokers = [];
-    this.stats = { bestHit: 0 };
+    this.opts = { stake: 1, deck: 'basic', pool: null, daily: false };
+    this.runStats = { rounds: 0, bosses: 0, lines: 0, gems: 0 };
+    this.applyOpts();
   }
 
   // ---------- 런 ----------
-  newRun(seed) {
+  // opts: { stake, deck, pool(조커 id 배열), daily }
+  newRun(seed, opts = {}) {
     this.seedStr = String(seed);
     this.rng = new RNG(this.seedStr);
+    this.opts = { stake: 1, deck: 'basic', pool: null, daily: false, ...opts };
+    this.applyOpts();
     this.ante = 1;
     this.blind = 0; // 0 스몰, 1 빅, 2 보스
-    this.coins = CONFIG.START_COINS + (DEBUG ? CONFIG.DEBUG_BONUS_COINS : 0);
+    this.coins = CONFIG.START_COINS + (this.opts.deck === 'rich' ? 6 : 0) + (DEBUG ? CONFIG.DEBUG_BONUS_COINS : 0);
     this.jokers = [];
     this.endless = false;
     this.runBestHit = 0;
     this.totalLines = 0;
+    this.runStats = { rounds: 0, bosses: 0, lines: 0, gems: 0 };
     this.lastBoss = null;
+    if (this.opts.deck === 'joker') {
+      const commons = this.poolIds().filter((id) => JOKER_BY_ID[id].rarity === 'common');
+      if (commons.length) this.jokers.push({ id: this.rng.pick(commons), v: 0, price: CONFIG.PRICE.common });
+    }
     this.pickBoss();
     this.startRound();
+  }
+
+  applyOpts() {
+    const o = this.opts;
+    this.jokerSlots = CONFIG.JOKER_SLOTS - (o.deck === 'spare' ? 1 : 0);
+    this.comboGrace = CONFIG.COMBO_GRACE + (o.deck === 'combo' ? 1 : 0);
+    this.gemBonus = o.deck === 'gem' ? CONFIG.GEM_PIECE_CHANCE : 0;
+    this.handsBonus = (o.deck === 'spare' ? 1 : 0) - (o.stake >= 4 ? 1 : 0);
+    this.stakeTargetMult = o.stake >= 5 ? 1.6 : o.stake >= 3 ? 1.3 : 1;
+  }
+
+  poolIds() { return this.opts.pool && this.opts.pool.length ? this.opts.pool.filter((id) => JOKER_BY_ID[id]) : JOKERS.map((j) => j.id); }
+
+  targetOf(ante, blind) { return targetFor(ante, blind, this.stakeTargetMult); }
+
+  // ---------- 이어하기 스냅샷 ----------
+  snapshot(kind) {
+    return JSON.parse(JSON.stringify({
+      v: 1, kind, seedStr: this.seedStr, rngS: this.rng.s, opts: this.opts,
+      ante: this.ante, blind: this.blind, coins: this.coins, jokers: this.jokers.map((j) => ({ id: j.id, v: j.v || 0, price: j.price })),
+      endless: this.endless, runBestHit: this.runBestHit, totalLines: this.totalLines, runStats: this.runStats,
+      lastBoss: this.lastBoss, boss: this.boss,
+      shop: kind === 'shop' ? this.shop : null, rerollCost: this.rerollCost, rewards: kind === 'shop' ? this.rewards : null,
+    }));
+  }
+
+  restore(s) {
+    this.seedStr = s.seedStr;
+    this.rng = new RNG(this.seedStr);
+    this.rng.s = s.rngS;
+    this.opts = { stake: 1, deck: 'basic', pool: null, daily: false, ...s.opts };
+    this.applyOpts();
+    this.ante = s.ante; this.blind = s.blind; this.coins = s.coins;
+    this.jokers = (s.jokers || []).filter((j) => JOKER_BY_ID[j.id]).map((j) => ({ id: j.id, v: j.v || 0, price: j.price || 4 }));
+    this.endless = !!s.endless; this.runBestHit = s.runBestHit || 0; this.totalLines = s.totalLines || 0;
+    this.runStats = { rounds: 0, bosses: 0, lines: 0, gems: 0, ...(s.runStats || {}) };
+    this.lastBoss = s.lastBoss; this.boss = s.boss || 'lock';
+    if (s.kind === 'shop' && Array.isArray(s.shop)) {
+      this.shop = s.shop.filter((o) => JOKER_BY_ID[o.id]);
+      this.rerollCost = s.rerollCost || CONFIG.REROLL_BASE;
+      this.rewards = null;
+      this.board.fill(null);
+      this.tray = [null, null, null];
+      this.target = this.targetOf(this.ante, this.blind);
+      this.roundScore = 0; this.handsLeft = 0;
+      this.phase = 'shop';
+    } else {
+      this.startRound();
+    }
   }
 
   pickBoss() {
@@ -45,14 +104,15 @@ export class Game {
   get blindName() { return this.blind === 2 ? this.bossDef.name : CONFIG.BLIND_NAMES[this.blind]; }
 
   startRound() {
+    this.roundSnap = this.snapshot('round');
     this.phase = 'play';
     this.board.fill(null);
-    this.target = targetFor(this.ante, this.blind);
+    this.target = this.targetOf(this.ante, this.blind);
     this.roundScore = 0;
     this.combo = 0;
     this.missStreak = 0;
     this.placedCount = 0;
-    this.handsLeft = CONFIG.HANDS - (this.curse === 'poor' ? 2 : 0);
+    this.handsLeft = CONFIG.HANDS + this.handsBonus - (this.curse === 'poor' ? 2 : 0);
     this.gameOverReason = null;
     this.shop = null;
     this.jokers.forEach((j, i) => { j.disabled = this.curse === 'seal' && i === 0; });
@@ -88,6 +148,7 @@ export class Game {
     const gems = {};
     let gemChance = CONFIG.GEM_PIECE_CHANCE;
     if (this.hasPassive('gemChance')) gemChance += 0.3;
+    gemChance += this.gemBonus || 0;
     const gemEntries = Object.entries(CONFIG.GEM_WEIGHTS);
     let tries = gemChance > 0.4 ? 2 : 1;
     for (let t = 0; t < tries; t++) {
@@ -175,7 +236,7 @@ export class Game {
     const { rows, cols, lines } = this.fullLines();
     if (!lines) {
       this.missStreak++;
-      if (this.combo > 0 && this.missStreak >= CONFIG.COMBO_GRACE) {
+      if (this.combo > 0 && this.missStreak >= this.comboGrace) {
         this.combo = 0;
         res.comboBroken = true;
         this.jokers.forEach((j) => { const d = JOKER_BY_ID[j.id]; if (d.onComboBreak) d.onComboBreak(this, j); });
@@ -271,6 +332,9 @@ export class Game {
     res.cleared = { rows, cols, cells };
     this.roundScore += total;
     this.totalLines += lines;
+    this.runStats.lines += lines;
+    this.runStats.gems += cells.filter((cl) => cl.gem).length;
+    res.boardEmpty = remainingAfter === 0;
     if (total > this.runBestHit) this.runBestHit = total;
 
     // 보드에서 제거
@@ -303,9 +367,9 @@ export class Game {
   }
 
   finishRound() {
-    const base = CONFIG.BLIND_REWARD[this.blind];
+    const base = this.opts.stake >= 2 && this.blind === 0 ? 0 : CONFIG.BLIND_REWARD[this.blind];
     const hands = this.handsLeft * CONFIG.COIN_PER_HAND;
-    const interest = Math.min(CONFIG.INTEREST_MAX, Math.floor(this.coins / CONFIG.INTEREST_STEP));
+    const interest = this.opts.stake >= 5 ? 0 : Math.min(CONFIG.INTEREST_MAX, Math.floor(this.coins / CONFIG.INTEREST_STEP));
     let jokerCoins = 0;
     for (const j of this.jokers) { const d = JOKER_BY_ID[j.id]; if (d.onRoundEnd && !j.disabled) jokerCoins += d.onRoundEnd(this, j); }
     const total = base + hands + interest + jokerCoins;
@@ -315,6 +379,8 @@ export class Game {
     this.wasFinal = !this.endless && this.blind === 2 && this.ante === CONFIG.FINAL_ANTE;
     this.phase = this.wasFinal ? 'victory' : 'shop';
     this.clearedAnte = this.ante;
+    this.runStats.rounds++;
+    if (this.blind === 2) this.runStats.bosses++;
     this.clearedBlind = this.blind;
     this.advance();
     this.openShop();
@@ -340,7 +406,7 @@ export class Game {
     const offers = [];
     for (let i = 0; i < CONFIG.SHOP_SIZE; i++) {
       const taken = new Set([...owned, ...offers.map((o) => o.id)]);
-      const pool = JOKERS.filter((j) => !taken.has(j.id));
+      const pool = this.poolIds().map((id) => JOKER_BY_ID[id]).filter((j) => !taken.has(j.id));
       if (!pool.length) break;
       const d = this.rng.weighted(pool.map((j) => [j, CONFIG.RARITY_WEIGHT[j.rarity]]));
       offers.push({ id: d.id, price: CONFIG.PRICE[d.rarity], sold: false });
@@ -350,7 +416,7 @@ export class Game {
 
   buy(i) {
     const o = this.shop && this.shop[i];
-    if (!o || o.sold || this.coins < o.price || this.jokers.length >= CONFIG.JOKER_SLOTS) return false;
+    if (!o || o.sold || this.coins < o.price || this.jokers.length >= this.jokerSlots) return false;
     this.coins -= o.price;
     o.sold = true;
     this.jokers.push({ id: o.id, v: 0, price: o.price });
