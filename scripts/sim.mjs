@@ -1,14 +1,13 @@
-// 밸런스 시뮬레이션: 탐욕 봇이 조커 없이/있이 몇 앤티까지 가는지 측정
-// 사용: node scripts/sim.mjs [runs] [withJokers]
+// 밸런스 시뮬레이션: 탐욕 배치 봇 + 합리적 구매 봇
+// 사용: node scripts/sim.mjs [runs] [mode]  mode: 0 = 조커 없음, 1 = 합리적 구매, 2 = 1과 같지만 앤티별 도달 분포 출력
 import { Game } from '../src/game.js';
 import { JOKER_BY_ID } from '../src/jokers.js';
 
-const runs = +(process.argv[2] || 30);
-const withJokers = process.argv[3] === '1';
+const runs = +(process.argv[2] || 40);
+const mode = +(process.argv[3] || 1);
 const N = 8;
 
 function evalBoard(g) {
-  // 빈칸 연결성 휴리스틱: 고립된 빈칸과 거친 경계에 벌점
   let pen = 0;
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
     const f = !!g.board[r * N + c];
@@ -27,10 +26,10 @@ function bestMove(g) {
       const snap = g.board.slice();
       for (const [dr, dc] of p.shape.cells) g.board[(r + dr) * N + c + dc] = { color: 0 };
       const { rows, cols, lines } = g.fullLines();
-      const clearSet = new Set();
-      rows.forEach((rr) => { for (let x = 0; x < N; x++) clearSet.add(rr * N + x); });
-      cols.forEach((cc) => { for (let x = 0; x < N; x++) clearSet.add(x * N + cc); });
-      for (const k of clearSet) if (!g.board[k].stone) g.board[k] = null;
+      const cs = new Set();
+      rows.forEach((rr) => { for (let x = 0; x < N; x++) cs.add(rr * N + x); });
+      cols.forEach((cc) => { for (let x = 0; x < N; x++) cs.add(x * N + cc); });
+      for (const k of cs) if (!g.board[k].stone) g.board[k] = null;
       const s = lines * 40 + lines * lines * 10 + evalBoard(g) + p.shape.size * 0.5;
       g.board = snap;
       if (!best || s > best.s) best = { s, i, r, c };
@@ -39,10 +38,46 @@ function bestMove(g) {
   return best;
 }
 
-let anteSum = 0; const hist = {};
+const RV = { common: 1, uncommon: 2, rare: 3.2, legendary: 5 };
+const EV = { foil: 0.5, holo: 0.8, poly: 1.5, neg: 2 };
+const val = (o) => RV[JOKER_BY_ID[o.id].rarity] + (o.ed ? EV[o.ed] : 0);
+
+function shopBot(g) {
+  const s = g.shop;
+  // 바우처
+  if (g.voucherOffer && !g.voucherOffer.sold && g.coins >= 12) g.buyVoucher();
+  for (let pass = 0; pass < 3; pass++) {
+    // 조커
+    const offers = s.jokers.map((o, i) => ({ o, i })).filter((x) => !x.o.sold).sort((a, b) => val(b.o) - val(a.o));
+    for (const { o, i } of offers) {
+      if (g.coins < o.price) continue;
+      if (g.jokers.length < g.jokerSlots || o.ed === 'neg') { g.buyJoker(i); continue; }
+      let wi = 0;
+      g.jokers.forEach((j, k) => { if (val(j) < val(g.jokers[wi])) wi = k; });
+      if (val(o) > val(g.jokers[wi]) + 0.8 && g.coins + g.sellValue(g.jokers[wi]) >= o.price) { g.sell(wi); g.buyJoker(i); }
+    }
+    // 팩
+    s.packs.forEach((p, i) => {
+      if (p.sold || g.coins < p.price + 3) return;
+      if (p.id === 'pk_joker' && g.jokers.length >= g.jokerSlots) return;
+      g.buyPack(i);
+      const ch = g.packOpen.choices;
+      let k = 0;
+      if (g.packOpen.kind === 'joker') ch.forEach((c, n) => { if (val(c) > val(ch[k])) k = n; });
+      else if (g.packOpen.kind === 'planet') { const d = ch.findIndex((c) => c.id === 'p_double'); k = d >= 0 ? d : 0; }
+      if (!g.choosePack(k)) g.skipPack();
+    });
+    // 행성/보석 카드
+    s.cards.forEach((c, i) => { if (!c.sold && g.coins >= c.price + 4) g.buyCard(i); });
+    if (g.coins >= g.rerollCost + 12 && g.jokers.some((j) => JOKER_BY_ID[j.id].rarity === 'common')) g.reroll();
+    else break;
+  }
+}
+
+let anteSum = 0, wins = 0; const hist = {};
 for (let run = 0; run < runs; run++) {
   const g = new Game();
-  g.newRun('sim' + run);
+  g.newRun('sim' + run, { stake: 1 });
   let guard = 0;
   while (guard++ < 100000) {
     if (g.phase === 'play') {
@@ -50,20 +85,15 @@ for (let run = 0; run < runs; run++) {
       if (!m) { g.gameOver('stuck'); continue; }
       g.place(m.i, m.r, m.c);
       g.resolve();
-    } else if (g.phase === 'shop' || g.phase === 'victory') {
-      if (g.phase === 'victory') break;
-      if (withJokers) {
-        for (let k = 0; k < 3; k++) {
-          const i = g.shop.findIndex((o) => !o.sold && o.price <= g.coins);
-          if (i >= 0 && g.jokers.length < 5) g.buy(i);
-        }
-      }
+    } else if (g.phase === 'shop') {
+      if (mode >= 1) shopBot(g);
       g.nextRound();
     } else break;
   }
-  const reached = g.phase === 'victory' ? 9 : g.ante;
+  const won = g.phase === 'victory';
+  if (won) wins++;
+  const reached = won ? 9 : g.ante;
   anteSum += reached;
-  const key = reached + '-' + g.blind;
-  hist[key] = (hist[key] || 0) + 1;
+  hist[reached] = (hist[reached] || 0) + 1;
 }
-console.log('avg ante', (anteSum / runs).toFixed(2), JSON.stringify(Object.fromEntries(Object.entries(hist).sort())));
+console.log(`mode ${mode} runs ${runs} avg ante ${(anteSum / runs).toFixed(2)} win ${((wins / runs) * 100).toFixed(1)}%`, JSON.stringify(hist));

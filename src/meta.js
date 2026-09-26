@@ -4,15 +4,18 @@ import { JOKERS, JOKER_BY_ID } from './jokers.js';
 import { RNG } from './rng.js';
 import {
   STARTER_JOKERS, UNLOCK_COST, DECKS, DECK_BY_ID, STAKES, SKINS, SKIN_BY_ID, ACHIEVEMENTS, MISSIONS, MISSION_BY_ID,
+  WEEKLY, WEEKLY_BY_ID, WEEKLY_CHEST, CALENDAR,
 } from './metadata.js';
+import { BOSS_BY_ID } from './bosses.js';
 
-export const META_VERSION = 2;
+export const META_VERSION = 3;
 const KEY = 'blockJoker.meta';
 const OLD_KEY = 'blockJoker.v1';
 
 const STAT_KEYS = [
   'runs', 'wins', 'roundsCleared', 'bossesBeaten', 'totalLines', 'gemsCleared', 'jokersBought', 'bestHit', 'bestRoundScore',
   'maxCombo', 'maxLines', 'bestAnte', 'dailyRuns', 'tokensEarned', 'allClears', 'maxJokers', 'maxCoins', 'bestStreak',
+  'maxLineLv', 'maxVouchers', 'legendsOwned', 'showdowns', 'editions', 'planetsUsed',
 ];
 
 function defaults() {
@@ -26,11 +29,16 @@ function defaults() {
     unlocked: { jokers: STARTER_JOKERS.slice(), decks: ['basic'], skins: ['neon'] },
     discovered: [],
     stakeUnlocked: 1,
-    stakeRecords: {}, // { [lv]: { bestAnte, bestHit, won } }
+    stakeRecords: {},
+    deckWins: {}, // { deckId: 승리한 최고 스테이크 }
     sel: { stake: 1, deck: 'basic', skin: 'neon' },
-    achievements: {}, // { id: timestamp }
+    achievements: {},
     daily: { date: '', missions: [], played: false, best: 0, bestAnte: 0 },
-    streak: { last: '', count: 0 },
+    dailyHistory: {}, // { 'YYYY-MM-DD': { ante, hit, won, rule } }
+    weekly: { week: '', missions: [], chest: false },
+    streak: { last: '', count: 0, claimed: '' },
+    settings: { bgm: 0.7, sfx: 0.9, vib: true, speed: 1 },
+    coach: { calc: false, shop: false, bosses: [] },
     run: null,
     tutorialDone: false,
     muted: false,
@@ -39,12 +47,11 @@ function defaults() {
 
 const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
 const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
+const str = (v, d = '') => (typeof v === 'string' ? v : d);
 
-// 어떤 형태의 저장본이 와도 안전하게 현재 스키마로 맞춤
 export function migrate(raw) {
   const d = defaults();
   if (!isObj(raw)) return d;
-  // v1 (단순 기록) -> v2
   if (!raw.version || raw.version < 2) {
     d.stats.bestAnte = num(raw.bestAnte);
     d.stats.bestHit = num(raw.bestHit);
@@ -71,6 +78,7 @@ export function migrate(raw) {
       if (isObj(v)) d.stakeRecords[k] = { bestAnte: num(v.bestAnte), bestHit: num(v.bestHit), won: !!v.won };
     }
   }
+  if (isObj(raw.deckWins)) for (const [k, v] of Object.entries(raw.deckWins)) if (DECK_BY_ID[k]) d.deckWins[k] = num(v);
   if (isObj(raw.sel)) {
     d.sel.stake = Math.min(d.stakeUnlocked, Math.max(1, num(raw.sel.stake, 1)));
     d.sel.deck = d.unlocked.decks.includes(raw.sel.deck) ? raw.sel.deck : 'basic';
@@ -78,7 +86,7 @@ export function migrate(raw) {
   }
   if (isObj(raw.achievements)) for (const a of ACHIEVEMENTS) if (raw.achievements[a.id]) d.achievements[a.id] = num(raw.achievements[a.id], 1);
   if (isObj(raw.daily)) {
-    d.daily.date = typeof raw.daily.date === 'string' ? raw.daily.date : '';
+    d.daily.date = str(raw.daily.date);
     d.daily.played = !!raw.daily.played;
     d.daily.best = num(raw.daily.best);
     d.daily.bestAnte = num(raw.daily.bestAnte);
@@ -88,9 +96,32 @@ export function migrate(raw) {
         .map((m) => ({ id: m.id, n: num(m.n, MISSION_BY_ID[m.id].n), p: num(m.p), done: !!m.done }));
     }
   }
-  if (isObj(raw.streak)) d.streak = { last: typeof raw.streak.last === 'string' ? raw.streak.last : '', count: num(raw.streak.count) };
-  if (isObj(raw.run) && raw.run.v === 1) d.run = raw.run;
+  if (isObj(raw.dailyHistory)) {
+    for (const [k, v] of Object.entries(raw.dailyHistory)) if (isObj(v) && /^\d{4}-\d{2}-\d{2}$/.test(k)) d.dailyHistory[k] = { ante: num(v.ante), hit: num(v.hit), won: !!v.won, rule: str(v.rule) };
+  }
+  if (isObj(raw.weekly)) {
+    d.weekly.week = str(raw.weekly.week);
+    d.weekly.chest = !!raw.weekly.chest;
+    if (Array.isArray(raw.weekly.missions)) {
+      d.weekly.missions = raw.weekly.missions.filter((m) => isObj(m) && WEEKLY_BY_ID[m.id]).map((m) => ({ id: m.id, n: num(m.n, WEEKLY_BY_ID[m.id].n), p: num(m.p), done: !!m.done }));
+    }
+  }
+  if (isObj(raw.streak)) d.streak = { last: str(raw.streak.last), count: num(raw.streak.count), claimed: str(raw.streak.claimed, raw.version < 3 ? str(raw.streak.last) : '') };
+  if (isObj(raw.settings)) {
+    const s = raw.settings;
+    d.settings = {
+      bgm: Math.min(1, Math.max(0, num(s.bgm, 0.7))), sfx: Math.min(1, Math.max(0, num(s.sfx, 0.9))),
+      vib: s.vib !== false, speed: [1, 2, 4].includes(s.speed) ? s.speed : 1,
+    };
+  }
+  if (isObj(raw.coach)) {
+    d.coach.calc = !!raw.coach.calc;
+    d.coach.shop = !!raw.coach.shop;
+    d.coach.bosses = Array.isArray(raw.coach.bosses) ? raw.coach.bosses.filter((b) => BOSS_BY_ID[b]) : [];
+  }
+  if (isObj(raw.run) && (raw.run.v === 1 || raw.run.v === 2)) d.run = raw.run;
   d.tutorialDone = !!raw.tutorialDone;
+  if (d.tutorialDone && raw.version < 3) { d.coach.calc = true; d.coach.shop = true; }
   d.muted = !!raw.muted;
   return d;
 }
@@ -98,6 +129,13 @@ export function migrate(raw) {
 export function dateKey(dt = new Date()) {
   const y = dt.getFullYear(), m = String(dt.getMonth() + 1).padStart(2, '0'), day = String(dt.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+export function weekKey(dt = new Date()) {
+  const d = new Date(dt);
+  const wd = (d.getDay() + 6) % 7; // 월요일 = 0
+  d.setDate(d.getDate() - wd);
+  return dateKey(d);
 }
 
 export function levelInfo(xp) {
@@ -109,7 +147,7 @@ export function levelInfo(xp) {
 export class Meta {
   constructor() {
     this.d = this.load();
-    this.toasts = []; // UI에 띄울 알림 큐
+    this.toasts = [];
     this.now = () => new Date();
   }
 
@@ -151,10 +189,13 @@ export class Meta {
     }
   }
 
-  // ---------- 데일리 / 출석 ----------
+  // ---------- 데일리 / 주간 / 출석 ----------
+  // 날짜가 바뀌었으면 미션을 새로 뽑음. 반환: 출석 보상을 받을 수 있는지
   refreshDaily() {
-    const today = dateKey(this.now());
+    const now = this.now();
+    const today = dateKey(now);
     const dl = this.d.daily;
+    let changed = false;
     if (dl.date !== today) {
       const rng = new RNG('missions-' + today);
       const pool = rng.shuffle(MISSIONS.slice());
@@ -162,19 +203,49 @@ export class Meta {
       dl.played = false;
       dl.best = 0; dl.bestAnte = 0;
       dl.missions = pool.slice(0, 3).map((m) => ({ id: m.id, n: m.n, p: 0, done: false }));
+      changed = true;
     }
-    // 출석
+    const wk = weekKey(now);
+    const w = this.d.weekly;
+    if (w.week !== wk) {
+      const rng = new RNG('weekly-' + wk);
+      w.week = wk;
+      w.chest = false;
+      w.missions = rng.shuffle(WEEKLY.slice()).slice(0, 3).map((m) => ({ id: m.id, n: m.n, p: 0, done: false }));
+      changed = true;
+    }
+    const keys = Object.keys(this.d.dailyHistory).sort();
+    while (keys.length > 14) delete this.d.dailyHistory[keys.shift()];
+    if (changed) this.save();
+    return changed;
+  }
+
+  get calendarClaimable() { return this.d.streak.claimed !== dateKey(this.now()); }
+
+  // 이어지는 출석 수 (오늘 받으면 몇 일째인지)
+  nextStreak() {
     const st = this.d.streak;
-    let reward = 0;
-    if (st.last !== today) {
-      const y = new Date(this.now()); y.setDate(y.getDate() - 1);
-      st.count = st.last === dateKey(y) ? st.count + 1 : 1;
-      st.last = today;
-      reward = 3 + Math.min(st.count, 7) * 2;
-      this.addTokens(reward, `출석 ${st.count}일째`);
-      this.d.stats.bestStreak = Math.max(this.d.stats.bestStreak, st.count);
-      this.checkAchievements();
-    }
+    const today = dateKey(this.now());
+    if (st.claimed === today) return st.count;
+    const y = new Date(this.now()); y.setDate(y.getDate() - 1);
+    return st.last === dateKey(y) ? st.count + 1 : 1;
+  }
+
+  calendarDay() { return ((Math.max(1, this.nextStreak()) - 1) % 7) + 1; }
+
+  claimCalendar() {
+    if (!this.calendarClaimable) return 0;
+    const st = this.d.streak;
+    const today = dateKey(this.now());
+    st.count = this.nextStreak();
+    st.last = today;
+    st.claimed = today;
+    const day = ((st.count - 1) % 7) + 1;
+    const reward = CALENDAR[day - 1];
+    this.d.tokens += reward;
+    this.d.stats.tokensEarned += reward;
+    this.d.stats.bestStreak = Math.max(this.d.stats.bestStreak, st.count);
+    this.checkAchievements();
     this.save();
     return reward;
   }
@@ -189,15 +260,32 @@ export class Meta {
         this.addTokens(def.reward, `미션 완료: ${def.text(m.n)}`);
       }
     }
+    for (const m of this.d.weekly.missions) {
+      if (m.id !== id || m.done) continue;
+      const def = WEEKLY_BY_ID[m.id];
+      m.p = def.max ? Math.max(m.p, v) : m.p + v;
+      if (m.p >= m.n) { m.p = m.n; m.done = true; this.toast(`주간 미션 완료: ${def.text(m.n)}`, 'ach'); }
+    }
   }
 
   get missionsDone() { return this.d.daily.missions.filter((m) => m.done).length; }
+  get weeklyDone() { return this.d.weekly.missions.filter((m) => m.done).length; }
+  get chestReady() { return this.weeklyDone >= 3 && !this.d.weekly.chest; }
+
+  claimChest() {
+    if (!this.chestReady) return 0;
+    this.d.weekly.chest = true;
+    this.d.tokens += WEEKLY_CHEST;
+    this.d.stats.tokensEarned += WEEKLY_CHEST;
+    this.save();
+    return WEEKLY_CHEST;
+  }
 
   // ---------- 업적 ----------
   checkAchievements() {
     const ctx = {
       discovered: this.d.discovered.length,
-      maxStakeWon: Math.max(0, ...Object.entries(this.d.stakeRecords).filter(([, v]) => v.won).map(([k]) => +k)),
+      maxStakeWon: Math.max(0, ...Object.entries(this.d.stakeRecords).filter(([k, v]) => v.won && k !== 'daily').map(([k]) => +k)),
     };
     for (const a of ACHIEVEMENTS) {
       if (this.d.achievements[a.id]) continue;
@@ -211,11 +299,11 @@ export class Meta {
 
   // ---------- 런 이벤트 ----------
   onRunStart(game) {
-    this.d.stats.runs++;
     if (game.opts.daily) {
       this.d.daily.played = true;
       this.d.stats.dailyRuns++;
       this.missionProgress('daily', 1);
+      this.d.dailyHistory[this.d.daily.date] = { ante: 1, hit: 0, won: false, rule: game.opts.rule || '' };
     }
     this.checkAchievements();
     this.save();
@@ -239,7 +327,11 @@ export class Meta {
     if (lines >= 3) this.missionProgress('multi', 1);
     const rec = this.stakeRec(game);
     rec.bestHit = Math.max(rec.bestHit, res.total);
-    if (game.opts.daily) this.d.daily.best = Math.max(this.d.daily.best, res.total);
+    if (game.opts.daily) {
+      this.d.daily.best = Math.max(this.d.daily.best, res.total);
+      const h = this.d.dailyHistory[this.d.daily.date];
+      if (h) h.hit = Math.max(h.hit, res.total);
+    }
     this.checkAchievements();
   }
 
@@ -248,7 +340,11 @@ export class Meta {
     s.roundsCleared++;
     s.bestRoundScore = Math.max(s.bestRoundScore, game.roundScore);
     s.maxCoins = Math.max(s.maxCoins, game.coins);
-    if (game.clearedBlind === 2) { s.bossesBeaten++; this.missionProgress('boss', 1); }
+    if (game.clearedBlind === 2) {
+      s.bossesBeaten++;
+      this.missionProgress('boss', 1);
+      if (game.clearedAnte % 8 === 0) s.showdowns++;
+    }
     this.missionProgress('rounds', 1);
     this.onAnte(game.ante, game);
     this.checkAchievements();
@@ -259,19 +355,32 @@ export class Meta {
     this.d.stats.bestAnte = Math.max(this.d.stats.bestAnte, ante);
     const rec = this.stakeRec(game);
     rec.bestAnte = Math.max(rec.bestAnte, ante);
-    if (game.opts.daily) this.d.daily.bestAnte = Math.max(this.d.daily.bestAnte, ante);
+    if (game.opts.daily) {
+      this.d.daily.bestAnte = Math.max(this.d.daily.bestAnte, ante);
+      const h = this.d.dailyHistory[this.d.daily.date];
+      if (h) h.ante = Math.max(h.ante, ante);
+    }
   }
 
   onShop(game) {
     let changed = false;
-    for (const o of game.shop || []) if (!this.d.discovered.includes(o.id)) { this.d.discovered.push(o.id); o.isNew = true; changed = true; }
+    const ids = [...(game.shop ? game.shop.jokers : []), ...((game.packOpen && game.packOpen.choices) || []).filter((c) => c.kind === 'joker')];
+    for (const o of ids) if (!this.d.discovered.includes(o.id)) { this.d.discovered.push(o.id); o.isNew = true; changed = true; }
     if (changed) this.checkAchievements();
   }
 
-  onBuy(game) {
-    this.d.stats.jokersBought++;
-    this.d.stats.maxJokers = Math.max(this.d.stats.maxJokers, game.jokers.length);
-    this.missionProgress('buy', 1);
+  onBuy(game, item) {
+    const s = this.d.stats;
+    if (!item || item.kind === 'joker') {
+      s.jokersBought++;
+      this.missionProgress('buy', 1);
+      if (item && item.ed) s.editions++;
+    }
+    if (item && item.kind === 'planet') { s.planetsUsed++; this.missionProgress('planet', 1); }
+    s.maxJokers = Math.max(s.maxJokers, game.jokers.length);
+    s.maxLineLv = Math.max(s.maxLineLv, ...Object.values(game.lineLv));
+    s.maxVouchers = Math.max(s.maxVouchers, game.vouchers.length);
+    s.legendsOwned = Math.max(s.legendsOwned, game.jokers.filter((j) => JOKER_BY_ID[j.id].rarity === 'legendary').length);
     this.checkAchievements();
   }
 
@@ -281,11 +390,12 @@ export class Meta {
     return this.d.stakeRecords[k];
   }
 
-  // 런 종료 (패배, 승리, 포기). 토큰/경험치 정산
+  // 런 종료 (패배 또는 승리). 포기는 onRunAbandon
   onRunEnd(game, won) {
     const rs = game.runStats;
     const s = this.d.stats;
-    let tokens = rs.rounds + rs.bosses * 3 + (won ? 15 : 0);
+    s.runs++;
+    let tokens = rs.rounds + rs.bosses * 2 + (won ? 12 : 0);
     if (!game.opts.daily) tokens = Math.round(tokens * (1 + 0.25 * (game.opts.stake - 1)));
     else tokens += 3;
     tokens = Math.max(1, tokens);
@@ -296,11 +406,19 @@ export class Meta {
       s.wins++;
       const rec = this.stakeRec(game);
       rec.won = true;
-      if (!game.opts.daily && game.opts.stake >= this.d.stakeUnlocked && this.d.stakeUnlocked < STAKES.length) {
-        this.d.stakeUnlocked = game.opts.stake + 1;
-        stakeUnlocked = STAKES[this.d.stakeUnlocked - 1];
-        this.toast(`새 난이도 해금: ${stakeUnlocked.name} 스테이크`, 'ach');
+      if (!game.opts.daily) {
+        const dk = game.opts.deck;
+        this.d.deckWins[dk] = Math.max(this.d.deckWins[dk] || 0, game.opts.stake);
+        if (game.opts.stake >= this.d.stakeUnlocked && this.d.stakeUnlocked < STAKES.length) {
+          this.d.stakeUnlocked = game.opts.stake + 1;
+          stakeUnlocked = STAKES[this.d.stakeUnlocked - 1];
+          this.toast(`새 난이도 해금: ${stakeUnlocked.name} 스테이크`, 'ach');
+        }
       }
+    }
+    if (game.opts.daily) {
+      const h = this.d.dailyHistory[this.d.daily.date];
+      if (h) { h.ante = Math.max(h.ante, game.ante); h.won = h.won || won; }
     }
     this.d.tokens += tokens;
     s.tokensEarned += tokens;
@@ -311,6 +429,8 @@ export class Meta {
     this.save();
     return { tokens, xp, level: this.level, levelUp: this.level.lvl > before, stakeUnlocked };
   }
+
+  onRunAbandon() { this.d.run = null; this.save(); }
 
   // ---------- 해금 ----------
   jokerCost(id) { return UNLOCK_COST[JOKER_BY_ID[id].rarity]; }
@@ -341,9 +461,16 @@ export class Meta {
     return true;
   }
 
+  totalUnlockCost() {
+    let t = 0;
+    for (const j of JOKERS) if (!STARTER_JOKERS.includes(j.id)) t += this.jokerCost(j.id);
+    for (const dk of DECKS) t += dk.cost;
+    for (const sk of SKINS) t += sk.cost;
+    return t;
+  }
+
   jokerPool(daily) { return daily ? JOKERS.map((j) => j.id) : this.d.unlocked.jokers.slice(); }
 
-  // ---------- 이어하기 ----------
   saveRun(snap) { this.d.run = snap; this.save(); }
   clearRun() { this.d.run = null; this.save(); }
 }
