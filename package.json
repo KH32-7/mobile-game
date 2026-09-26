@@ -1,0 +1,17 @@
+{
+  "name": "rogue-putt",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "verify-gen": "node scripts/verify-gen.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1",
+    "vite": "^8.3.1"
+  }
+}
