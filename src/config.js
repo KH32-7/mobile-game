@@ -95,3 +95,18 @@ export const COLORS = {
   good: 0x2a8cff,
   bad: 0xff3b4f,
 };
+
+// 리더 스킨 컬렉션 (보석으로 해금, 작은 패시브 보너스)
+export const SKINS = [
+  { id: 'basic', name: '젤리', cost: 0, leader: 0xffc83a, crew: [0x3aa8ff, 0x52c0ff], hat: 'none', bonus: '기본 캐릭터', perk: {} },
+  { id: 'mint', name: '새싹 젤리', cost: 2, leader: 0x7affb8, crew: [0x2ac890, 0x5ae0b0], hat: 'leaf', bonus: '코인 +10%', perk: { coin: 0.1 } },
+  { id: 'bear', name: '곰 젤리', cost: 5, leader: 0xc88a5a, crew: [0xa8703f, 0xd09a6a], hat: 'ears', bonus: '시작 인원 +4', perk: { start: 4 } },
+  { id: 'bunny', name: '토끼 젤리', cost: 8, leader: 0xfff4fa, crew: [0xff9ac8, 0xffbadc], hat: 'bunny', bonus: '슈퍼점프 +3초', perk: { boots: 3 } },
+  { id: 'knight', name: '기사 젤리', cost: 10, leader: 0xc0c8d8, crew: [0x5a6ab0, 0x7a8ad0], hat: 'helmet', bonus: '시작 방패 +25%', perk: { shield: 0.25 } },
+  { id: 'devil', name: '자석 젤리', cost: 12, leader: 0xff5a6a, crew: [0xff7a5a, 0xff9a7a], hat: 'horn', bonus: '자석 +3초', perk: { magnet: 3 } },
+  { id: 'lucky', name: '행운 젤리', cost: 15, leader: 0x9aff5a, crew: [0x3ad06a, 0x6ae88a], hat: 'leaf', bonus: '좋은 게이트 +8%', perk: { luck: 0.08 } },
+  { id: 'ninja', name: '닌자 젤리', cost: 18, leader: 0x3a3a50, crew: [0x5a5a7a, 0x7a7a9a], hat: 'band', bonus: '확성기 +3초', perk: { recruit: 3 } },
+  { id: 'king', name: '왕 젤리', cost: 25, leader: 0xffd84a, crew: [0x8a5aff, 0xa87aff], hat: 'crown', bonus: '요새 보상 +30%', perk: { fort: 0.3 } },
+];
+
+export const REVIVE_COST = 2;

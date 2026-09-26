@@ -1,5 +1,5 @@
 // 아군 무리: 리더 + 스프링/꼬리 추종 멤버
-import { CFG, COLORS } from './config.js';
+import { CFG, SKINS } from './config.js';
 
 const HIST_N = 512;
 const HIST_STEP = 0.2;
@@ -15,6 +15,8 @@ export class Swarm {
     this.sliding = 0;
     this.form = { R: 0, hw: 0, rz: 0 };
     this.bounds = { minX: 0, maxX: 0, minRel: 0 };
+    this.skin = SKINS[0];
+    this.hat = null;
   }
 
   reset(n, dist, x = 0) {
@@ -88,7 +90,7 @@ export class Swarm {
     this.flyers.push({
       x: m.x, y: m.y + 0.2, z: -(dist + m.rel),
       vx: (dirX || (Math.random() - 0.5)) * (4 + Math.random() * 4), vy: 6 + Math.random() * 4, vz: 4 + Math.random() * 4,
-      rx: 0, rz: 0, vrx: (Math.random() - 0.5) * 18, vrz: (Math.random() - 0.5) * 18, life: 1.2, color: i === 0 ? COLORS.leader : COLORS.member,
+      rx: 0, rz: 0, vrx: (Math.random() - 0.5) * 18, vrz: (Math.random() - 0.5) * 18, life: 1.2, color: i === 0 ? this.skin.leader : this.skin.crew[0],
     });
     if (i === 0 && this.members.length) this.promoteLeader();
     this.syncRender(-this.form.rz * 2);
@@ -228,9 +230,11 @@ export class Swarm {
         sy *= 1.1; sx *= 0.93; pitch = -0.2;
       }
       const roll = Math.max(-0.5, Math.min(0.5, -m.vx * 0.05));
-      const col = leader ? COLORS.leader : (boots ? (m.alt ? 0x6aff8a : 0x4ae07a) : (m.alt ? COLORS.memberAlt : COLORS.member));
+      const col = leader ? this.skin.leader : (boots ? (m.alt ? 0x6aff8a : 0x4ae07a) : this.skin.crew[m.alt ? 1 : 0]);
       chars.push(m.x, y, -(dist + m.rel), 0, sx, sy, sz, col, roll, pitch);
+      if (leader && this.hat) this.hat.place(m.x, y, -(dist + m.rel), sx, sy, sz, roll, pitch, true);
     }
+    if (!n && this.hat) this.hat.place(0, 0, 0, 1, 1, 1, 0, 0, false);
     for (const f of this.flyers) {
       const s = Math.min(1, f.life * 2);
       chars.push(f.x, f.y, f.z, time * 3, s, s, s, f.color, f.rz, f.rx, false);

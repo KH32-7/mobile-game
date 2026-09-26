@@ -1,16 +1,19 @@
 // 게임 상태/규칙: 런 진행, 충돌, 게이트, 전투, 요새, 파워업, 결과
 import * as THREE from 'three';
-import { CFG, THEMES, COLORS } from './config.js';
+import { CFG, THEMES, COLORS, REVIVE_COST } from './config.js';
 import { pickChunk, applyGate, gateLabel, makeRng } from './chunks.js';
-import { save, persist, startCount, magnetTime, startShieldChance, gateLuck, reportMission } from './data.js';
+import { save, persist, startCount, magnetTime, bootsTime, recruitTime, startShieldChance, gateLuck, coinMult, fortMult, skin, track, checkAchievements, addGems, unlockTheme, weekInfo, reportWeekly } from './data.js';
 import { sfx, setIntensity } from './audio.js';
 import { PU_NAMES } from './entities.js';
 
 const vib = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* 무시 */ } };
 
 export class Game {
-  constructor({ world, chars, ents, swarm, parts, popups, ui, opts }) {
-    Object.assign(this, { world, chars, ents, swarm, parts, popups, ui, opts });
+  constructor({ world, chars, ents, swarm, parts, popups, ui, opts, hat }) {
+    Object.assign(this, { world, chars, ents, swarm, parts, popups, ui, opts, hat });
+    this.themeBase = 0;
+    this.startDist = 0;
+    this.mult = 1;
     this.state = 'title';
     this.mode = 'run';
     this.time = 0;
@@ -30,28 +33,47 @@ export class Game {
     this.lane = 1;
     this.speed = 6;
     this.section = 0;
-    this.world.resetTheme(0);
+    this.world.resetTheme(save.themes.sel);
+    this.applySkin();
     this.swarm.reset(14, 0, 0);
     this.world.camPos.set(3, 3, -8);
     this.ui.show('title');
     this.ui.tutorial(null);
   }
 
+  applySkin() {
+    const sk = skin();
+    this.swarm.skin = sk;
+    this.swarm.hat = this.hat;
+    this.hat.set(sk.hat, sk.leader);
+  }
+
+  themeIdx(section = this.section) { return (this.themeBase + section) % THEMES.length; }
+
   // ---------- 런 시작 ----------
-  startRun() {
+  startRun(weekly = false) {
     this.ents.clearAll();
     this.parts.clear();
     const o = this.opts;
-    this.rng = makeRng(o.seed ?? (Date.now() & 0xffffff));
+    this.weekly = weekly ? weekInfo() : null;
+    this.rng = makeRng(weekly ? this.weekly.seed : (o.seed ?? (Date.now() & 0xffffff)));
     this.dist = o.start || 0;
+    this.startDist = this.dist;
     this.section = Math.floor(this.dist / CFG.sectionLen);
-    this.world.resetTheme(this.section);
+    this.themeBase = weekly ? this.weekly.seed % THEMES.length : save.themes.sel;
+    this.world.resetTheme(this.themeIdx());
+    this.applySkin();
+    this.mult = save.mset.level;
+    this.revived = false;
+    this.invuln = 0;
+    this.trackT = 0;
+    this.runTime = 0;
     this.lane = 1;
     this.mode = 'run';
     this.modeT = 0;
     this.speed = this.sectionSpeed();
     this.speedF = 1;
-    const n = o.count || startCount();
+    const n = o.count || (weekly ? 10 : startCount());
     this.swarm.reset(n, this.dist, 0);
     this.coinsRun = 0;
     this.maxCount = n;
@@ -74,10 +96,11 @@ export class Game {
     this.ui.tutorial(this.tut);
     this.state = 'play';
     this.ui.show('play');
-    this.ui.banner(`구간 ${this.section + 1}`, THEMES[this.section % THEMES.length].name);
+    this.ui.banner(weekly ? '주간 챌린지' : `구간 ${this.section + 1}`, weekly ? `목표 ${this.weekly.target}m` : THEMES[this.themeIdx()].name);
     this.generate();
-    save.runs++;
+    save.stats.runs++;
     persist();
+    this.notify(checkAchievements());
     setIntensity(0);
   }
 
@@ -98,7 +121,7 @@ export class Game {
         this.genD = fortD + 30;
         continue;
       }
-      const ch = pickChunk(this.rng, D, this.slot++);
+      const ch = pickChunk(this.rng, D, this.slot++, this.opts.chunks);
       const ctx = { count: this.swarm.count, luck: gateLuck() };
       const c = ch.gen(this.rng, D, ctx);
       if (this.genD + c.len > fortD - 60 && !this.fortPlaced.has(fortD)) {
@@ -152,11 +175,15 @@ export class Game {
       if (L && L.y < 0.25) {
         this.swarm.jump(this.speed * this.speedF + 2, this.pu.boots > 0);
         sfx.jump();
+        save.stats.jumps++;
+        this.notify(track('jumps', 1));
       }
       if (this.tut === 'up') this.advanceTut('down');
     } else if (a === 'down') {
       this.swarm.slide(this.speed * this.speedF + 2);
       sfx.slide();
+      save.stats.slides++;
+      this.notify(track('slides', 1));
       if (this.tut === 'down') this.advanceTut(null);
     }
   }
@@ -182,7 +209,7 @@ export class Game {
   update(dtReal) {
     this.time += dtReal;
     if (this.state === 'title') { this.updateTitle(dtReal); return; }
-    if (this.state === 'pause' || this.state === 'over') return;
+    if (this.state === 'pause' || this.state === 'over' || this.state === 'revive') return;
     let dt = dtReal;
     if (this.hitstop > 0) { this.hitstop -= dtReal; dt *= 0.06; }
     if (this.mode === 'dying') dt *= 0.35;
@@ -219,6 +246,10 @@ export class Game {
     sw.update(dt, this.dist, Math.max(vel, 4), laneX);
 
     for (const k in this.pu) if (this.pu[k] > 0) this.pu[k] = Math.max(0, this.pu[k] - dt);
+    if (this.invuln > 0) this.invuln -= dt;
+    this.runTime += dt;
+    this.trackT += dt;
+    if (this.trackT > 1 && this.mode !== 'dying') { this.trackT = 0; this.trackRun(); }
 
     if (this.mode !== 'dying') {
       this.checkGates();
@@ -247,7 +278,7 @@ export class Game {
     this.chars.begin();
     sw.render(this.chars, this.dist, this.time, this.pu.boots > 0);
     this.renderEnemies();
-    for (const c of this.chargers) this.chars.push(c.x, c.y, -c.d, 0, 1, 1.1, 1, c.alt ? COLORS.memberAlt : COLORS.member, 0, -0.5);
+    for (const c of this.chargers) this.chars.push(c.x, c.y, -c.d, 0, 1, 1.1, 1, this.swarm.skin.crew[c.alt ? 1 : 0], 0, -0.5);
     this.chars.end();
 
     // 방패 돔
@@ -284,10 +315,10 @@ export class Game {
     this.ui.setEnemyLabels(labels);
 
     const pus = [];
-    for (const k of ['magnet', 'boots', 'recruit']) if (this.pu[k] > 0) pus.push({ kind: k, frac: this.pu[k] / (k === 'magnet' ? magnetTime() : k === 'boots' ? CFG.bootsTime : CFG.recruitTime) });
+    for (const k of ['magnet', 'boots', 'recruit']) if (this.pu[k] > 0) pus.push({ kind: k, frac: this.pu[k] / (k === 'magnet' ? magnetTime() : k === 'boots' ? bootsTime() : recruitTime()) });
     if (this.shield) pus.push({ kind: 'shield', frac: 1 });
     this.ui.setPowerups(pus);
-    this.ui.setHud(this.dist, this.coinsRun, (this.dist % CFG.sectionLen) / CFG.sectionLen, this.section, THEMES[this.section % THEMES.length].name);
+    this.ui.setHud(this.dist, this.coinsRun, (this.dist % CFG.sectionLen) / CFG.sectionLen, this.section, THEMES[this.themeIdx()].name, this.score(), this.mult);
   }
 
   project(x, y, z) {
@@ -319,7 +350,8 @@ export class Game {
         sfx.gateGood(best.op === 'x');
         vib(10);
         this.parts.burst(best.x, 1.2, -row.d, 18, { color: 0x6ac8ff, speed: 5, up: 3, size: 0.16 });
-        reportMission('goodGates', 1).forEach((m) => this.missionDone(m));
+        save.stats.goodGates++;
+        this.notify(track('goodGates', 1));
         // 새 멤버 톡톡 팝
         for (let i = 0; i < Math.min(12, delta); i++) setTimeout(() => sfx.pop(), i * 35);
       } else {
@@ -350,7 +382,7 @@ export class Game {
         const top = m.y + sw.height(m);
         if (top < o.y0 + 0.02 || m.y > o.y1) continue;
         // 충돌
-        if (this.opts.god) continue;
+        if (this.opts.god || this.invuln > 0) continue;
         if (this.shield) { this.breakObstacle(o); break; }
         this.hitMember(j, o);
       }
@@ -375,7 +407,7 @@ export class Game {
     const dir = m.x >= o.x ? 1 : -1;
     const md = this.dist + m.rel;
     sw.kill(j, this.dist, dir);
-    this.parts.burst(m.x, m.y + 0.4, -md, 5, { color: wasLeader ? COLORS.leader : COLORS.member, speed: 4, up: 3, size: 0.12 });
+    this.parts.burst(m.x, m.y + 0.4, -md, 5, { color: wasLeader ? this.swarm.skin.leader : this.swarm.skin.crew[0], speed: 4, up: 3, size: 0.12 });
     if (this.time - this.hitSfxT > 0.05) { sfx.hit(); this.hitSfxT = this.time; }
     this.world.shake = Math.max(this.world.shake, wasLeader ? 0.6 : 0.22);
     vib(wasLeader ? 40 : 12);
@@ -448,11 +480,12 @@ export class Game {
       vib(15);
       this.parts.burst(p.x, 1.1, -p.d, 20, { color: 0xffffff, speed: 5, up: 3, size: 0.14 });
       if (p.kind === 'magnet') this.pu.magnet = magnetTime();
-      else if (p.kind === 'boots') this.pu.boots = CFG.bootsTime;
-      else if (p.kind === 'recruit') this.pu.recruit = CFG.recruitTime;
+      else if (p.kind === 'boots') this.pu.boots = bootsTime();
+      else if (p.kind === 'recruit') this.pu.recruit = recruitTime();
       else if (p.kind === 'shield') this.shield = true;
       this.popups.show(p.x, 2.2, -p.d, PU_NAMES[p.kind] + '!', 'big');
-      reportMission('powerups', 1).forEach((m) => this.missionDone(m));
+      save.stats.powerups++;
+      this.notify(track('powerups', 1));
     }
   }
 
@@ -509,7 +542,7 @@ export class Game {
       sw.remove(bi, 1);
       const px = (ex + mx) / 2, pd = (ed + md) / 2;
       this.parts.burst(px, 0.5, -pd, 3, { color: COLORS.enemy, speed: 4, up: 3, size: 0.13 });
-      this.parts.burst(px, 0.5, -pd, 3, { color: COLORS.member, speed: 4, up: 3, size: 0.13 });
+      this.parts.burst(px, 0.5, -pd, 3, { color: this.swarm.skin.crew[0], speed: 4, up: 3, size: 0.13 });
       sfx.clash();
     }
     if (this.modeT % 0.1 < dt) this.world.shake = Math.max(this.world.shake, 0.12);
@@ -518,6 +551,9 @@ export class Game {
       e.members.length = 0;
       e.state = 'dead';
       this.mode = 'run';
+      const killed = e.startCount || 0;
+      save.stats.enemies += killed;
+      this.notify(track('enemies', killed));
       this.battleE = null;
       sfx.gateGood(false);
       this.popups.show(e.x, 2, -(e.d - e.adv), '격파!', 'good');
@@ -583,7 +619,7 @@ export class Game {
         this.chargers.splice(i, 1);
         f.hp -= c.rep;
         f.shake = 1;
-        this.parts.burst(c.x, 0.8, -(f.d - 0.9), 3, { color: COLORS.member, speed: 3, up: 2, size: 0.12, vz: 3 });
+        this.parts.burst(c.x, 0.8, -(f.d - 0.9), 3, { color: this.swarm.skin.crew[0], speed: 3, up: 2, size: 0.12, vz: 3 });
         this.parts.burst(c.x, 1.2, -(f.d - 0.9), 1, { color: 0x8a5a32, speed: 3, up: 3, size: 0.18, vz: 3 });
         sfx.pop();
         if (Math.random() < 0.3) sfx.gateHit();
@@ -609,7 +645,7 @@ export class Game {
       const col = p.m.material.color.getHex();
       for (let i = 0; i < n; i++) {
         this.parts.spawn(wp.x + (Math.random() - 0.5) * p.m.scale.x, wp.y + (Math.random() - 0.5) * Math.min(3, p.m.scale.y), wp.z + 0.5,
-          { color: col, speed: 7, up: 5, vz: 5, size: 0.35 + Math.random() * 0.45, life: 1.6 + Math.random() * 0.6, gravity: 18, spin: 10 });
+          { color: col, speed: 6, up: 5, vz: 1.5, size: 0.3 + Math.random() * 0.35, life: 1.6 + Math.random() * 0.6, gravity: 18, spin: 10 });
       }
       p.m.visible = false;
     }
@@ -624,17 +660,23 @@ export class Game {
     const sw = this.swarm;
     const keep = Math.min(sw.count, startCount() + CFG.fortressKeepExtra);
     const excess = sw.count - keep;
-    const bonus = excess * CFG.fortressCoinPerMember + CFG.fortressCoinBase * (this.section + 1);
+    const bonus = Math.round((excess * CFG.fortressCoinPerMember + CFG.fortressCoinBase * (this.section + 1)) * fortMult());
+    const gems = 1 + Math.floor(this.section / 2);
+    addGems(gems);
     const removed = sw.setCount(keep);
     for (const m of removed) this.parts.burst(m.x, 0.6, -(this.dist + m.rel), 2, { color: COLORS.coin, speed: 2, up: 5, size: 0.16 });
     this.coinsRun += bonus;
     this.forts++;
-    reportMission('fortress', 1).forEach((m) => this.missionDone(m));
-    this.popups.show(0, 3, -(this.dist + 2), `+${bonus} 코인`, 'big');
+    save.stats.forts++;
+    save.stats.maxFortsRun = Math.max(save.stats.maxFortsRun, this.forts);
+    this.notify(track('fortress', 1));
+    this.notify(track('fortRun', this.forts));
+    this.popups.show(0, 3, -(this.dist + 2), `+${bonus} 코인  +${gems} 보석`, 'big');
     this.section++;
-    this.world.setTheme(this.section);
+    this.world.setTheme(this.themeIdx());
+    if (!this.weekly && unlockTheme(this.themeIdx())) this.ui.toast(`새 테마 해금: ${THEMES[this.themeIdx()].name}`);
     setIntensity(Math.min(2, this.section));
-    const th = THEMES[this.section % THEMES.length];
+    const th = THEMES[this.themeIdx()];
     setTimeout(() => { if (this.state === 'play') this.ui.banner(`구간 ${this.section + 1} · ${th.name}`, '속도 UP! 더 어려워져요'); }, 900);
     this.mode = 'breach';
     this.modeT = 0;
@@ -652,24 +694,80 @@ export class Game {
     this.ui.tutorial(null);
   }
 
-  endRun() {
-    this.state = 'over';
-    const dist = Math.floor(this.dist - (this.opts.start || 0));
-    const newBest = Math.floor(this.dist) > save.bestDist;
-    if (newBest) save.bestDist = Math.floor(this.dist);
-    if (this.maxCount > save.bestCount) save.bestCount = this.maxCount;
-    save.coins += this.coinsRun;
-    reportMission('maxCount', this.maxCount).forEach((m) => this.missionDone(m));
-    reportMission('dist', Math.floor(this.dist)).forEach((m) => this.missionDone(m));
-    reportMission('coins', this.coinsRun).forEach((m) => this.missionDone(m));
-    reportMission('enemies', this.enemiesKilled).forEach((m) => this.missionDone(m));
-    persist();
-    this.ui.showOver({ head: '게임 오버', dist: Math.floor(this.dist), newBest, cause: this.deathCause || '무리가 모두 사라짐', maxCount: this.maxCount, coins: this.coinsRun, forts: this.forts, ran: dist });
+  score() { return Math.floor(Math.max(0, this.dist - this.startDist) * this.mult); }
+
+  trackRun() {
+    const d = Math.floor(this.dist);
+    this.notify(track('dist', d));
+    this.notify(track('count', this.maxCount));
+    this.notify(track('coinsRun', this.coinsRun));
   }
 
-  missionDone(m) {
+  // 게임 오버 연출 이후: 부활 가능하면 부활 제안, 아니면 결과
+  endRun() {
+    if (!this.revived && save.gems >= REVIVE_COST && !this.opts.noRevive) {
+      this.state = 'revive';
+      this.ui.showRevive(REVIVE_COST, save.gems);
+      return;
+    }
+    this.finishRun();
+  }
+
+  revive() {
+    if (this.state !== 'revive' || save.gems < REVIVE_COST) return;
+    save.gems -= REVIVE_COST;
+    save.stats.revives++;
+    this.revived = true;
     persist();
-    this.ui.toast(`미션 완료! +${m.reward} 코인`);
+    const sw = this.swarm;
+    sw.reset(10, this.dist, (this.lane - 1) * CFG.laneW);
+    // 주변 위험 요소 제거
+    for (const o of this.ents.obstacles) if (o.d > this.dist - 8 && o.d - o.halfL < this.dist + 30) { o.dead = true; o.t = 0; }
+    for (const e of this.ents.enemies) if (!e.dead && e.d < this.dist + 30) { e.dead = true; e.members.length = 0; }
+    this.battleE = null;
+    this.chargers.length = 0;
+    const f = this.ents.fortress;
+    this.mode = f && f.active && !f.broken && this.dist >= f.d - 2.7 ? 'siege' : 'run';
+    this.modeT = 0;
+    this.invuln = 2.5;
+    this.shield = true;
+    this.state = 'play';
+    this.ui.show('play');
+    this.ui.banner('부활!', '무리 10명으로 다시 달려요');
+    sfx.powerup();
+    this.parts.burst((this.lane - 1) * CFG.laneW, 1, -this.dist, 30, { color: 0xffffff, speed: 6, up: 4, size: 0.18 });
+    this.notify(checkAchievements());
+  }
+
+  finishRun() {
+    this.state = 'over';
+    this.trackRun();
+    const d = Math.floor(this.dist);
+    const sc = this.score();
+    const coins = Math.round(this.coinsRun * coinMult());
+    const newBest = sc > save.bestScore;
+    if (newBest) save.bestScore = sc;
+    if (d > save.bestDist) save.bestDist = d;
+    if (this.maxCount > save.bestCount) save.bestCount = this.maxCount;
+    save.coins += coins;
+    save.stats.totalCoins += coins;
+    save.stats.totalDist += Math.floor(this.dist - this.startDist);
+    save.stats.playTime += this.runTime;
+    this.notify(track('coins', coins));
+    let weeklyText = '';
+    if (this.weekly) {
+      const got = reportWeekly(d);
+      weeklyText = got ? `주간 챌린지 성공! 보석 +5, 코인 +300` : `주간 챌린지 ${d}m / 목표 ${this.weekly.target}m`;
+    }
+    this.notify(checkAchievements());
+    persist();
+    this.ui.showOver({ head: this.weekly ? '주간 챌린지 결과' : '게임 오버', dist: d, score: sc, mult: this.mult, newBest, cause: weeklyText || this.deathCause || '무리가 모두 사라짐', maxCount: this.maxCount, coins, forts: this.forts });
+  }
+
+  notify(list) {
+    if (!list || !list.length) return;
+    persist();
+    for (const n of list) this.ui.toast(n.text);
     sfx.powerup();
   }
 }

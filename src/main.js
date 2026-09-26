@@ -1,13 +1,13 @@
 // 진입점: 초기화, 메인 루프, 리사이즈, 일시정지 처리
 import { World } from './world.js';
-import { CharRenderer } from './chars.js';
+import { CharRenderer, Hat } from './chars.js';
 import { Entities } from './entities.js';
 import { Swarm } from './swarm.js';
 import { Particles, Popups } from './fx.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
 import { createInput } from './input.js';
-import { save, persist, buyUpgrade, ensureMissions } from './data.js';
+import { save, loadSave, persist, buyUpgrade, buySkin, selectSkin, selectTheme, claimStreak, ensureDaily } from './data.js';
 import { initAudio, unlockAudio, setMuted, startMusic, sfx, suspendAudio, resumeAudio } from './audio.js';
 
 const q = new URLSearchParams(location.search);
@@ -21,6 +21,8 @@ const opts = {
   speed: num('speed'),
   fast: num('fast') || 1,
   fortHp: num('forthp'),
+  noRevive: q.has('norevive'),
+  chunks: q.get('chunks') ? q.get('chunks').split(',') : null,
 };
 
 const app = document.getElementById('app');
@@ -32,14 +34,23 @@ const chars = new CharRenderer(world.scene);
 const ents = new Entities(world.scene);
 const swarm = new Swarm();
 const parts = new Particles(world.scene);
-ensureMissions();
+loadSave();
+ensureDaily();
 initAudio(save.muted);
+const hat = new Hat(world.scene);
 
 let game;
 const ui = new UI(uiRoot, {
   click: () => { unlockAudio(); sfx.click(); },
-  start: () => { unlockAudio(); startMusic(); game.startRun(); },
-  restart: () => { unlockAudio(); startMusic(); game.startRun(); },
+  start: () => { unlockAudio(); startMusic(); game.startRun(false); },
+  weekly: () => { unlockAudio(); startMusic(); game.startRun(true); },
+  restart: () => { unlockAudio(); startMusic(); game.startRun(!!game.weekly); },
+  revive: () => game.revive(),
+  giveUp: () => game.finishRun(),
+  buySkin: (id) => { const ok = buySkin(id); if (ok) { sfx.powerup(); game.applySkin(); } return ok; },
+  selectSkin: (id) => { selectSkin(id); game.applySkin(); },
+  selectTheme: (i) => { selectTheme(i); game.world.resetTheme(i); },
+  claimStreak: () => { const r = claimStreak(); if (r) sfx.powerup(); return r; },
   pause: () => game.pause(),
   resume: () => game.resume(),
   toTitle: () => game.titleSetup(),
@@ -47,7 +58,7 @@ const ui = new UI(uiRoot, {
   buy: (id) => { const ok = buyUpgrade(id); if (ok) sfx.powerup(); return ok; },
 });
 const popups = new Popups(ui.fx, world.camera);
-game = new Game({ world, chars, ents, swarm, parts, popups, ui, opts });
+game = new Game({ world, chars, ents, swarm, parts, popups, ui, opts, hat });
 
 createInput(canvas, (a) => { unlockAudio(); game.action(a); });
 // 첫 터치 이후 오디오 재개

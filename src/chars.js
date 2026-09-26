@@ -80,3 +80,49 @@ export class CharRenderer {
     this.shadow.instanceMatrix.needsUpdate = true;
   }
 }
+
+// 리더 머리 장식 (스킨별)
+export class Hat {
+  constructor(scene) {
+    this.g = new THREE.Group();
+    scene.add(this.g);
+    this.type = null;
+  }
+
+  set(type, color) {
+    if (type === this.type) return;
+    this.type = type;
+    this.g.clear();
+    const L = (c) => new THREE.MeshLambertMaterial({ color: c });
+    const add = (geo, mat, x, y, z, rx = 0, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, 0, rz); this.g.add(m); return m; };
+    if (type === 'crown') {
+      const gold = L(0xffd23a);
+      add(new THREE.CylinderGeometry(0.17, 0.17, 0.1, 10, 1, true), gold, 0, 0.8, 0);
+      for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; add(new THREE.ConeGeometry(0.05, 0.12, 4), gold, Math.cos(a) * 0.15, 0.9, Math.sin(a) * 0.15); }
+      add(new THREE.SphereGeometry(0.035, 6, 4), L(0xff3b6a), 0, 0.8, -0.17);
+    } else if (type === 'ears') {
+      for (const s of [-1, 1]) { add(new THREE.SphereGeometry(0.08, 8, 6), L(color), s * 0.13, 0.76, 0); add(new THREE.SphereGeometry(0.045, 6, 4), L(0xffb0a0), s * 0.13, 0.76, -0.05); }
+    } else if (type === 'bunny') {
+      for (const s of [-1, 1]) { const e = add(new THREE.CapsuleGeometry(0.045, 0.22, 2, 6), L(0xffffff), s * 0.08, 0.92, 0.02, 0, s * -0.2); e.scale.z = 0.6; }
+    } else if (type === 'helmet') {
+      add(new THREE.SphereGeometry(0.215, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2.2), L(0x9aa6c0), 0, 0.57, 0);
+      add(new THREE.BoxGeometry(0.03, 0.14, 0.12), L(0xff4a5a), 0, 0.82, 0.02);
+    } else if (type === 'horn') {
+      for (const s of [-1, 1]) add(new THREE.ConeGeometry(0.045, 0.16, 6), L(0x8a1a2a), s * 0.1, 0.8, 0, 0, s * -0.4);
+    } else if (type === 'leaf') {
+      add(new THREE.CylinderGeometry(0.012, 0.012, 0.1, 4), L(0x3a8a3a), 0, 0.8, 0);
+      for (const s of [-1, 1]) { const l = add(new THREE.SphereGeometry(0.07, 6, 4), L(0x5ad05a), s * 0.06, 0.86, 0, 0, s * -0.6); l.scale.set(1, 0.4, 0.6); }
+    } else if (type === 'band') {
+      add(new THREE.CylinderGeometry(0.205, 0.205, 0.07, 12, 1, true), L(0xff3b4f), 0, 0.6, 0);
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.03, 0.05, 0.16), L(0xff3b4f), s * 0.03, 0.6, 0.26, 0.4 * s, 0);
+    }
+  }
+
+  place(x, y, z, sx, sy, sz, roll, pitch, visible) {
+    this.g.visible = visible && this.g.children.length > 0;
+    if (!this.g.visible) return;
+    this.g.position.set(x, y, z);
+    this.g.scale.set(sx, sy, sz);
+    this.g.rotation.set(pitch, 0, roll);
+  }
+}

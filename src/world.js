@@ -250,10 +250,10 @@ export class World {
     let tx, ty, tz, lx, ly, lz;
     if (mode === 'title') {
       // 타이틀: 무리 앞쪽에서 얼굴이 보이게
-      tx = focus.x + 2.2; ty = 3.2; tz = -(focus.d + 7.5);
-      lx = focus.x; ly = 0.6; lz = -(focus.d - 2.5);
+      tx = focus.x + 2.4; ty = 3.6; tz = -(focus.d + 9.5);
+      lx = focus.x; ly = -0.9; lz = -(focus.d - 2.5);
     } else {
-      tx = focus.x * 0.55; ty = 7.2 + sp * 0.75; tz = -(focus.d - 8.2 - sp * 1.1);
+      tx = focus.x * 0.55; ty = 7.4 + sp * 0.95; tz = -(focus.d - 8.4 - sp * 1.5);
       lx = focus.x * 0.75; ly = 0; lz = -(focus.d + 9);
     }
     const kc = 1 - Math.exp(-dt * (mode === 'title' ? 2 : 6));

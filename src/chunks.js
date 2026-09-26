@@ -18,14 +18,15 @@ const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
 const shuffle = (rng, a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
 // ---------- 게이트 값 ----------
-function gateValue(rng, D, good) {
+function gateValue(rng, D, good, count = 99) {
   const r = rng();
   if (good) {
     if (r < 0.52) return { op: '+', v: ri(rng, 6, 14) + Math.round(D * 5) };
     if (r < 0.9) return { op: 'x', v: 2 };
     return { op: 'x', v: 3 };
   }
-  if (r < 0.62) return { op: '-', v: ri(rng, 5, 12) + Math.round(D * 6) };
+  // 빼기 게이트는 현재 인원의 60% 까지만 (한 번에 전멸하지 않게)
+  if (r < 0.62) return { op: '-', v: Math.max(2, Math.min(ri(rng, 5, 12) + Math.round(D * 6), Math.floor(count * 0.6))) };
   return { op: '÷', v: D > 2.5 && rng() < 0.4 ? 3 : 2 };
 }
 
@@ -33,8 +34,8 @@ function gateRow(rng, D, ctx, n) {
   const goods = [true];
   for (let i = 1; i < n; i++) goods.push(rng() < 0.3 + ctx.luck - Math.min(0.12, D * 0.03));
   shuffle(rng, goods);
-  if (n === 3) return goods.map((g, i) => ({ x: LX(i), w: CFG.laneW - 0.12, ...gateValue(rng, D, g), good: g }));
-  return goods.map((g, i) => ({ x: (i === 0 ? -1 : 1) * CFG.trackHalfW / 2, w: CFG.trackHalfW - 0.1, ...gateValue(rng, D, g), good: g }));
+  if (n === 3) return goods.map((g, i) => ({ x: LX(i), w: CFG.laneW - 0.12, ...gateValue(rng, D, g, ctx.count), good: g }));
+  return goods.map((g, i) => ({ x: (i === 0 ? -1 : 1) * CFG.trackHalfW / 2, w: CFG.trackHalfW - 0.1, ...gateValue(rng, D, g, ctx.count), good: g }));
 }
 
 function coinLine(items, lane, d0, n, gap = 2.2, y = 0.6) {
@@ -174,7 +175,8 @@ export const CHUNKS = [
   } },
 ];
 
-export function pickChunk(rng, D, slot) {
+export function pickChunk(rng, D, slot, force) {
+  if (force && force.length) { const c = CHUNKS.find((x) => x.id === force[slot % force.length]); if (c) return c; }
   let cats;
   if (slot % 2 === 0) cats = rng() < 0.82 ? ['gate'] : ['bonus'];
   else cats = rng() < Math.min(0.45, 0.12 + D * 0.12) ? ['enemy'] : ['obs'];

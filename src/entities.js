@@ -248,7 +248,7 @@ export class Entities {
 
   // ---------- 적 무리 ----------
   addEnemy(it, baseD) {
-    const e = { d: baseD + it.d, x: it.x, count: it.count, wide: !!it.wide, state: 'idle', members: [], adv: 0, dead: false };
+    const e = { d: baseD + it.d, x: it.x, count: it.count, startCount: it.count, wide: !!it.wide, state: 'idle', members: [], adv: 0, dead: false };
     this.layoutEnemy(e);
     this.enemies.push(e);
   }
