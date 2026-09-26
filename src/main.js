@@ -210,7 +210,10 @@ const app = {
     if (!(sec >= CFG.offline.minSec)) return;
     const capped = Math.min(sec, CFG.offline.capHours * 3600);
     const rate = this.game.idleRate();
-    const amt = Math.floor(rate * capped);
+    // 자리 비운 보상은 다음 해금 1개 남짓으로 상한 (진행 붕괴 방지)
+    const pad = this.game.pads[0];
+    const capAmt = (pad ? pad.u.cost : 400 * STAGES[this.p.stage].priceMul) * 1.2;
+    const amt = Math.floor(Math.min(rate * capped, capAmt));
     if (amt < 1) {
       if (this.p.stats.plates > 20) this.ui.toast('직원을 고용하면 자리를 비운 동안에도 돈을 벌어요');
       return;
@@ -246,7 +249,8 @@ const app = {
   tutTarget() {
     const t = this.p.tut;
     const g = this.game;
-    if (t >= 6 || g.p.stage > 0) return this.hintTarget();
+    if (t < 6 && g.done.size >= 2) this.p.tut = 6;
+    if (this.p.tut >= 6 || g.p.stage > 0) return this.hintTarget();
     const st = Object.values(g.stations).find((s) => s.built);
     switch (t) {
       case 0:

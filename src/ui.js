@@ -128,7 +128,7 @@ export class UI {
         const w = want[m] || 0;
         const b = onBelt[m] || 0;
         const cls = w > b ? 'need' : w > 0 ? 'ok' : 'none';
-        html += `<span class="dm ${cls}">${menuImg(m)}<b>${w}</b><small>${b}</small></span>`;
+        html += `<span class="dm ${cls}">${menuImg(m)}<b>${w}</b></span>`;
       }
       const dried = g.belts.reduce((a, b) => a + (b.built ? g.driedCount(b) : 0), 0);
       if (dried) html += `<span class="dm dry">마른 접시 <b>${dried}</b></span>`;
@@ -326,7 +326,7 @@ export class UI {
       } else if (s.out >= CFG.station.outCap) {
         msg = '가득';
         cls = 'full';
-      } else if (s.inp === 0 && s.out === 0) {
+      } else if (s.inp === 0 && s.out === 0 && s.incoming === 0 && g.customers.some((c) => c.state === 'wait' && c.orders[c.oi] === s.menu)) {
         msg = '재료 필요';
         cls = 'idle';
       }

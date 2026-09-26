@@ -25,6 +25,9 @@ const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _v = new THREE.Vector3();
 const _s = new THREE.Vector3(1, 1, 1);
+const _m3 = new THREE.Matrix4();
+const _m4 = new THREE.Matrix4();
+const SIT_LEGS = new THREE.Matrix4().makeTranslation(0, 0.2, 0).multiply(new THREE.Matrix4().makeRotationX(-1.3)).multiply(new THREE.Matrix4().makeTranslation(0, -0.18, 0));
 
 function rand(a, b) {
   return a + Math.random() * (b - a);
@@ -141,7 +144,7 @@ export class Game {
     this.done = done;
     const has = (pred) => stage.unlocks.some((u) => done.has(u.id) && pred(u));
     this.ext = has((u) => u.t === 'extend');
-    const len = this.ext ? L.layout?.len1 ?? stage.layout.len1 : stage.layout.len0;
+    const len = this.ext ? stage.layout.len1 : stage.layout.len0;
 
     // 벨트
     this.belts = L.belts.map((bd, i) => {
@@ -708,7 +711,7 @@ export class Game {
       return;
     }
     if (z.type === 'upgrade') {
-      if (a.isChef && !a.upgOpened && a.zoneT > 0.25) {
+      if (a.isChef && !a.upgOpened && ((!a.moving && a.zoneT > 0.15) || a.zoneT > 0.8)) {
         a.upgOpened = true;
         this.hooks.openUpgrade();
       }
@@ -733,7 +736,7 @@ export class Game {
 
   stackTopPos(a, out = {}) {
     let h = 0;
-    for (const it of a.stack) h += ITEM_H[it.k] || 0.2;
+    for (const it of a.stack) h += (ITEM_H[it.k] || 0.2) * 1.22;
     const fx = Math.sin(a.ry) * 0.42;
     const fz = Math.cos(a.ry) * 0.42;
     out.x = a.x + fx + a.lean.x * h * 0.6;
@@ -1597,7 +1600,6 @@ export class Game {
         const ry = tp.a === 0 ? 0 : tp.a === Math.PI ? Math.PI : -tp.a;
         this.drawDish(sl.item.m, tp.x, BELT_H + 0.02, tp.z, ry + sl.i, 1, sl.item.dried);
       }
-      if (b.group) b.group.userData;
     }
     // 비행 아이템
     for (const f of this.flights) {
@@ -1681,13 +1683,14 @@ export class Game {
     const fz = Math.cos(a.ry) * 0.42;
     const n = a.stack.length;
     const sway = a.moving ? Math.sin(a.walkT * 11) * 0.02 : 0;
+    const S = 1.22;
     for (let i = 0; i < n; i++) {
       const it = a.stack[i];
       const k = Math.pow(h, 1.25) * 0.55;
       const x = a.x + fx + a.lean.x * k + Math.cos(a.ry) * sway * h;
       const z = a.z + fz + a.lean.z * k - Math.sin(a.ry) * sway * h;
-      this.drawItem(it, x, 0.74 + h, z, a.ry + Math.sin(i * 1.7) * 0.12, 1);
-      h += ITEM_H[it.k] || 0.2;
+      this.drawItem(it, x, 0.74 + h, z, a.ry + Math.sin(i * 1.7) * 0.12, S);
+      h += (ITEM_H[it.k] || 0.2) * S;
     }
   }
 
@@ -1730,12 +1733,8 @@ export class Game {
     // 몸통
     I.putMatrix('c_body', _m, c.shirt);
     // 다리 (앉으면 앞으로)
-    if (sitting) {
-      _m2.makeRotationX(-1.3);
-      _m2.premultiply(new THREE.Matrix4().makeTranslation(0, 0.2, 0));
-      _m2.multiply(new THREE.Matrix4().makeTranslation(0, -0.18, 0));
-      I.putMatrix('c_legs', _m.clone().multiply(_m2), c.pants);
-    } else I.putMatrix('c_legs', _m, c.pants);
+    if (sitting) I.putMatrix('c_legs', _m3.copy(_m).multiply(SIT_LEGS), c.pants);
+    else I.putMatrix('c_legs', _m, c.pants);
     // 머리
     let hb = 0;
     let tilt = 0;
@@ -1748,13 +1747,13 @@ export class Game {
     _e.set(tilt, 0, c.state === 'wait' && c.pat < c.patMax * 0.3 ? Math.sin(this.time * 20) * 0.1 : 0);
     _q.setFromEuler(_e);
     _m2.compose(_v.set(0, 0.87 + hb, 0), _q, _s.set(1, 1, 1));
-    const hm = _m.clone().multiply(_m2);
+    const hm = _m4.copy(_m).multiply(_m2);
     I.putMatrix('c_head', hm, c.skin);
     I.putMatrix('c_hair', hm, c.hair);
     I.putMatrix('c_face', hm, null);
     if (c.vip) {
       _m2.makeTranslation(0, 0.22, 0);
-      I.putMatrix('c_crown', hm.clone().multiply(_m2), null);
+      I.putMatrix('c_crown', _m3.copy(hm).multiply(_m2), null);
     }
     // 먹는 접시
     if (c.dish) {
@@ -1797,7 +1796,7 @@ export class Game {
     const menus = this.builtMenus();
     const avg = menus.reduce((a, m) => a + MENUS[m].price, 0) / Math.max(1, menus.length);
     const staffF = Math.min(1, runners * 0.45 + haulers * 0.35);
-    return seats * avg * this.stage.priceMul * 0.05 * staffF * (this.stars() / 5) * this.stage.cust * CFG.offline.share * 2;
+    return seats * avg * this.stage.priceMul * 0.05 * staffF * (this.stars() / 5) * this.stage.cust * CFG.offline.share;
   }
 
   // 디버그: 모든 해금 완료 (다음 식당 발판 직전까지)

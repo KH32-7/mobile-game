@@ -208,7 +208,7 @@ export class UnlockPad {
     this.mesh = new THREE.Mesh(padGeo, mat);
     this.mesh.position.set(x, 0.03, z);
     this.mesh.renderOrder = 2;
-    this.size = kind === 'next' ? 1.9 : 1.55;
+    this.size = kind === 'next' ? 2.0 : 1.7;
     this.mesh.scale.set(this.size, 1, this.size);
     this.label = label;
     this.icon = icon;
@@ -251,34 +251,36 @@ export class UnlockPad {
     ctx.stroke();
     // 아이콘
     ctx.save();
-    ctx.translate(w * 0.28, 22);
-    const s = w * 0.44;
+    ctx.translate(w * 0.29, 16);
+    const s = w * 0.42;
     if (this.icon.menu) drawMenu(ctx, this.icon.menu, s);
     else drawGlyph(ctx, this.icon.glyph, s);
     ctx.restore();
     // 라벨
     ctx.fillStyle = '#ffffff';
     ctx.strokeStyle = dark;
-    ctx.lineWidth = 7;
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 9;
     ctx.textAlign = 'center';
-    ctx.font = 'bold 30px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
-    ctx.strokeText(this.label, w / 2, 160);
-    ctx.fillText(this.label, w / 2, 160);
+    ctx.font = 'bold 38px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+    ctx.strokeText(this.label, w / 2, 164);
+    ctx.fillText(this.label, w / 2, 164);
     // 비용
     const remain = Math.ceil(this.cost * (1 - q));
-    ctx.font = 'bold 44px system-ui, -apple-system, sans-serif';
+    ctx.font = 'bold 56px system-ui, -apple-system, sans-serif';
     const txt = fmt(remain);
     const tw = ctx.measureText(txt).width;
-    const cx = w / 2 + 18;
-    ctx.strokeText(txt, cx, 214);
-    ctx.fillText(txt, cx, 214);
+    const cx = w / 2 + 20;
+    ctx.lineWidth = 10;
+    ctx.strokeText(txt, cx, 226);
+    ctx.fillText(txt, cx, 226);
     // 동전
-    const x0 = cx - tw / 2 - 26;
+    const x0 = cx - tw / 2 - 30;
     ctx.fillStyle = '#ffc83d';
     ctx.beginPath();
-    ctx.arc(x0, 199, 16, 0, Math.PI * 2);
+    ctx.arc(x0, 207, 20, 0, Math.PI * 2);
     ctx.fill();
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 5;
     ctx.strokeStyle = '#b9770e';
     ctx.stroke();
     this.tex.needsUpdate = true;
@@ -486,6 +488,28 @@ export function buildEnvironment(stage, lay, theme) {
   // 테마 소품
   const props = new Build();
   const glow = new Build();
+  // 부두에 댄 배 (입고 느낌)
+  if (stage.theme !== 'space') {
+    const bx = x0 + 3.2;
+    const bz = z0 - 2.6;
+    props.add(GEO.rbox(4.2, 0.7, 1.6, 0.7), stage.theme === 'mall' ? '#ffffff' : '#b0582e', bx, -0.05, bz);
+    props.add(GEO.rbox(4.3, 0.12, 1.7, 0.72), '#f4f0e0', bx, 0.32, bz);
+    props.add(GEO.rbox(1.3, 0.8, 1.0, 0.15), '#f7f3ea', bx + 0.8, 0.75, bz);
+    props.add(GEO.box(1.4, 0.1, 1.1), theme.accent, bx + 0.8, 1.18, bz);
+    props.add(GEO.cyl(0.05, 0.05, 1.8, 6), '#6a4a2a', bx - 0.9, 1.2, bz);
+    for (let i = 0; i < 3; i++) props.add(GEO.box(0.5, 0.35, 0.4), '#9a6a3a', bx - 1.4 + i * 0.55, 0.55, bz + 0.1);
+    lanternGlow(glow, bx - 0.9, 2.0, bz, theme.lantern, 0.6);
+    // 반대편 작은 배
+    props.add(GEO.rbox(2.6, 0.5, 1.1, 0.5), '#3f6fae', x1 - 2.8, -0.1, z0 - 3.2);
+    props.add(GEO.rbox(2.7, 0.1, 1.2, 0.52), '#f4f0e0', x1 - 2.8, 0.18, z0 - 3.2);
+  } else {
+    const bx = x0 + 3.2;
+    const bz = z0 - 2.8;
+    props.add(GEO.cap(0.8, 2.4, 10), '#e8ecf5', bx, 0.2, bz, 0, 0, Math.PI / 2);
+    props.add(GEO.cone(0.5, 0.8, 8), '#ff3fa4', bx + 2.1, 0.2, bz, 0, 0, -Math.PI / 2);
+    glow.add(GEO.cyl(0.3, 0.3, 0.1, 10), '#3de0ff', bx - 0.6, 0.85, bz, 0, 0, 0);
+    glow.add(GEO.sph(0.25, 8, 6), '#3de0ff', bx - 2.2, 0.2, bz);
+  }
   const rnd = mulberry(stage.id.length * 77 + 3);
   // 등불: 좌우 벽 위
   for (let z = z0 + 2; z < z1 - 1; z += 3.2) {

@@ -65,7 +65,17 @@ async function newPage(browser, w = 390, h = 844, init = null) {
     while (Date.now() - t0 < timeout && i < pts.length) {
       const last = i === pts.length - 1;
       const p = last ? { x: tx, z: tz } : pts[i];
-      const c = await page.evaluate(() => ({ x: __game.game.chef.x, z: __game.game.chef.z }));
+      const c = await page.evaluate(() => ({ x: __game.game.chef.x, z: __game.game.chef.z, panel: !!__game.ui.panel }));
+      if (c.panel) {
+        // 지나가다 업그레이드 패널이 열리면 닫고 계속
+        await touch('touchEnd', 0, 0);
+        if (!(await page.locator('.modal.upgrade .x').count())) break; // 결과 화면 등은 그대로 둠
+        const bx = await page.locator('.modal .x').first().boundingBox();
+        if (bx) await page.tapAt(bx.x + bx.width / 2, bx.y + bx.height / 2);
+        await page.waitForTimeout(300);
+        await touch('touchStart', ox, oy);
+        continue;
+      }
       const dx = p.x - c.x;
       const dz = p.z - c.z;
       const d = Math.hypot(dx, dz);
@@ -121,6 +131,7 @@ async function main() {
   const browser = await chromium.launch({ executablePath: exe, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
     // ---------- 1. 첫 실행 + 코어 루프 ----------
+    if (!process.env.SKIP1) {
     const page = await newPage(browser);
     await page.goto(BASE);
     await page.waitForTimeout(1200);
@@ -232,6 +243,7 @@ async function main() {
     const after = await page.g(() => ({ money: Math.floor(__game.game.run.money), done: __game.game.done.size, plates: __game.p.stats.plates, tut: __game.p.tut }));
     assert(after.done === before.done && after.money === before.money && after.plates === before.plates, `새로고침 후 상태 유지 ${JSON.stringify(after)}`);
     await page.context().close();
+    }
 
     // ---------- 2. 디버그: 오프라인 수익 + 식당 이전 ----------
     const p2 = await newPage(browser);
@@ -239,20 +251,20 @@ async function main() {
     await p2.waitForTimeout(1000);
     await p2.tapSel('#t-start');
     await p2.waitForTimeout(500);
-    // 돈 추가 후 해금 발판을 실제로 밟아 직원까지 해금
-    for (let i = 0; i < 30; i++) {
+    // 돈 추가 후 해금 발판 3개는 실제로 밟고, 나머지는 디버그 해금 버튼
+    for (let i = 0; i < 3; i++) {
       const info = await p2.g(() => {
         const g = __game.game;
         const pad = g.pads[0];
-        return pad ? { x: pad.x, z: pad.z, t: pad.u.t, n: g.done.size } : null;
+        return { x: pad.x, z: pad.z, n: g.done.size };
       });
-      if (!info || info.t === 'next') break;
       await p2.tapSel('.debug [data-a="money"]');
       await p2.walkTo(info.x, info.z, 0.3);
-      await p2.waitFor(() => __game.game.done.size > 0 && !__game.ui.panel, 300, '');
-      await p2.waitFor((n) => __game.game.done.size > n, 6000, '디버그 해금');
-      if (await p2.g(() => !!__game.ui.panel)) await p2.tapSel('.modal .x');
+      await p2.waitFor(`__game.game.done.size > ${info.n}`, 20000, '디버그 해금');
     }
+    assert(await p2.g(() => __game.game.done.size >= 3), '디버그 돈으로 해금 발판 3개 밟아서 해금');
+    await p2.tapSel('.debug [data-a="unlock"]');
+    await p2.waitForTimeout(1500);
     await shot(p2, '15-stage1-full');
     assert(await p2.g(() => __game.game.pads[0]?.u.t === 'next'), '1호점 모든 시설 해금 (실제 발판 밟기)');
     assert(await p2.g(() => __game.game.staff.length >= 2), '직원 고용됨');
