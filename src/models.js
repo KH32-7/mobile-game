@@ -233,7 +233,7 @@ Object.assign(PROP_TYPES, {
       build([
         part(ico(0.3, 1), '#ffffff', 0, 0.3),
         part(cyl(0.305, 0.305, 0.12, 12), '#ff6b8a', 0, 0.3),
-        part(cyl(0.305, 0.305, 0.12, 12), '#4db8ff', 0, 0.3, Math.PI / 2),
+        part(cyl(0.305, 0.305, 0.12, 12), '#4db8ff', 0, 0.3, 0, Math.PI / 2),
         part(cyl(0.305, 0.305, 0.12, 12), '#ffd84d', 0, 0.3, 0, 0, Math.PI / 2),
       ]),
   },
@@ -364,6 +364,46 @@ Object.assign(PROP_TYPES, {
       }
       return build(p);
     },
+  },
+});
+
+// ---------------- 사람/튜브/매점 (크기 사다리 촘촘하게) ----------------
+Object.assign(PROP_TYPES, {
+  person: {
+    size: 0.28,
+    tint: ['#ff9aa2', '#a0c4ff', '#b5ead7', '#ffd6a5', '#c7ceea', '#fdffb6', '#ffc6ff'],
+    geo: () =>
+      build([
+        part(box(0.14, 0.45, 0.16), '#4a5078', 0.09, 0.22),
+        part(box(0.14, 0.45, 0.16), '#4a5078', -0.09, 0.22),
+        part(cyl(0.2, 0.22, 0.55, 7), '#ffffff', 0, 0.72),
+        part(box(0.1, 0.42, 0.1), '#ffffff', 0.27, 0.72, 0, 0, 0, 0.25),
+        part(box(0.1, 0.42, 0.1), '#ffffff', -0.27, 0.72, 0, 0, 0, -0.25),
+        part(ico(0.17, 1), '#ffe0c8', 0, 1.15),
+        part(sph(0.18, 8, 3, 0, Math.PI / 2), '#6b4a3a', 0, 1.18),
+      ]),
+  },
+  tube: {
+    size: 0.45,
+    tint: ['#ff8fb8', '#8fd3ff', '#ffe066', '#a8f0a0'],
+    geo: () => build([part(new THREE.TorusGeometry(0.34, 0.13, 6, 12), '#ffffff', 0, 0.13, 0, Math.PI / 2), part(box(0.12, 0.27, 0.3), '#ffffff', 0.34, 0.13, 0)]),
+  },
+  stand: {
+    size: 1.6,
+    tint: ['#ffffff', '#fff0f5', '#f0fbff'],
+    geo: () =>
+      build([
+        part(box(2.6, 1.1, 1.4), '#f7e3c0', 0, 0.55),
+        part(box(2.7, 0.12, 1.5), '#ffffff', 0, 1.12),
+        part(box(0.1, 1.2, 0.1), '#ffffff', 1.25, 1.75, 0.6),
+        part(box(0.1, 1.2, 0.1), '#ffffff', -1.25, 1.75, 0.6),
+        part(box(0.1, 1.2, 0.1), '#ffffff', 1.25, 1.75, -0.6),
+        part(box(0.1, 1.2, 0.1), '#ffffff', -1.25, 1.75, -0.6),
+        part(box(3.0, 0.14, 1.9), '#ff8fab', 0, 2.4, 0, 0.1),
+        part(box(1.6, 0.5, 0.08), '#7ad0ff', 0, 2.75, 0.75),
+        part(ico(0.25, 0), '#ffb7d0', 0.8, 1.35, 0.2),
+        part(ico(0.22, 0), '#ffe066', -0.7, 1.35, 0.1),
+      ]),
   },
 });
 
@@ -568,3 +608,38 @@ export const MISC = {
   trashBag: () => build([part(ico(0.45, 0), '#5a6b5e'), part(cone(0.18, 0.3, 4), '#4a5a4e', 0, 0.45)]),
   bullet: () => build([part(ico(0.4, 0), '#ffffff')]),
 };
+
+// 맵별 적 외형: 기본 모델 + 테마 장식 (해변: 밀짚모자와 튜브, 공장: 안전모와 배기관)
+const TOPS = {
+  sweeper: [0, 1.0, -0.05, 0.55],
+  dasher: [0, 1.22, -0.2, 0.55],
+  thrower: [-0.1, 1.75, 0.1, 0.5],
+  giant: [0, 3.4, 0.05, 0.5],
+  mini: [0, 1.95, 0.55, 0.55],
+  boss: [0, 2.9, 0.05, 0.42],
+};
+export function enemyGeo(type, theme = 'city') {
+  const base = ENEMY_MODELS[type]();
+  if (theme === 'city') return base;
+  const [x, y, z, s] = TOPS[type];
+  const parts = [];
+  if (theme === 'beach') {
+    parts.push(part(cyl(0.8 * s, 0.8 * s, 0.05, 12), '#f2c86b', x, y + 0.02, z));
+    parts.push(part(cone(0.5 * s, 0.45 * s, 10), '#ffe08a', x, y + 0.25 * s, z));
+    parts.push(part(cyl(0.52 * s, 0.52 * s, 0.07, 12), '#ff6b8a', x, y + 0.08, z));
+    parts.push(part(new THREE.TorusGeometry(0.75, 0.16, 6, 12), '#ff8fb8', 0, 0.35, 0, Math.PI / 2, 0, 0, 1.15, 1.15, 1));
+  } else if (theme === 'factory') {
+    parts.push(part(sph(0.5 * s, 10, 4, 0, Math.PI / 2), '#ffc43d', x, y, z));
+    parts.push(part(cyl(0.68 * s, 0.68 * s, 0.05, 12), '#ffb020', x, y + 0.01, z));
+    parts.push(part(cyl(0.12, 0.14, 0.9, 6), '#5b5870', x + 0.35, y * 0.8, z - 0.55));
+    parts.push(part(box(1.5, 0.1, 0.12), '#1d1f33', 0, 0.62, 0.9));
+    parts.push(part(box(1.5, 0.1, 0.12), '#ffd23f', 0, 0.74, 0.9));
+  }
+  const g = mergeGeometries([base.index ? base.toNonIndexed() : base, ...parts.map((p) => {
+    p.computeVertexNormals();
+    return p;
+  })]);
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return g;
+}

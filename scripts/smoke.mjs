@@ -18,7 +18,7 @@ mkdirSync(SHOTS, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'pipe' });
+const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'pipe' });
 server.stdout.on('data', () => {});
 server.stderr.on('data', (d) => process.stderr.write(d));
 
@@ -91,7 +91,7 @@ try {
     for (let i = 0; i < 8; i++) {
       await clearLevelups();
       try {
-        await page.tap(sel, { timeout: 4000 });
+        await page.tap(sel, { timeout: 4000, force: i > 0 });
         return;
       } catch (e) {
         if (i === 7) console.log(String(e).split('\n').filter((l) => /intercepts|not visible|Timeout/.test(l)).slice(0, 3).join('\n'));
@@ -103,28 +103,9 @@ try {
   await page.goto(URL + '?debug', { waitUntil: 'load' });
   await page.waitForFunction(() => window.__game && window.__game.frames > 5, null, { timeout: 30000 });
   await sleep(800);
-  // 첫 접속: 출석 보상 모달
-  check(await page.isVisible('#modal'), '출석 체크 모달 표시');
-  await page.screenshot({ path: `${SHOTS}/00-streak.png` });
-  await page.tap('#modal [data-act=claimStreak]');
-  await sleep(300);
-  const c0 = await G(() => window.__game.save.coins);
-  check(c0 > 0, `출석 보상 코인 (${c0})`);
-  await page.screenshot({ path: `${SHOTS}/01-title.png` });
-  check(await page.isVisible('#title'), '타이틀 화면 표시');
-  // 미션 시트
-  await page.tap('.nav-b[data-sheet=missions]');
-  await sleep(1200);
-  const nMis = await page.locator('#sheet .row').count();
-  check(nMis >= 3, `일일 미션 표시 (${nMis}행)`);
-  await page.screenshot({ path: `${SHOTS}/01b-missions.png` });
-  await page.tap('#sheetClose');
-  await sleep(200);
-
-  // 플레이 시작 (실제 탭)
-  await page.tap('#btnStart');
-  await sleep(600);
-  check((await state()) === 'play', '플레이 상태 진입');
+  // 첫 실행: 출석 모달 없이 바로 튜토리얼 런
+  check((await state()) === 'play' && !(await page.isVisible('#modal')), '첫 실행 바로 튜토리얼 런 (출석 모달 없음)');
+  check(await page.isVisible('#tutorial'), '튜토리얼 손가락/목표 표시');
   await page.screenshot({ path: `${SHOTS}/02-tutorial.png` });
 
   // 조이스틱 드래그로 이동
@@ -134,6 +115,26 @@ try {
   const trav = await G(() => window.__game.traveled);
   check(trav > 3, `드래그로 홀 이동 (이동 거리 ${trav.toFixed(1)})`);
   check(p1.sw > 0, `오브젝트 삼키기 (${p1.sw}개)`);
+  // 튜토리얼 목표: 가장 가까운 작은 물체 쪽으로 조이스틱을 계속 밀어 3개 먹기
+  for (let i = 0; i < 25 && !(await G(() => window.__game.save.tutorialDone)); i++) {
+    await clearLevelups();
+    const a = await G(() => {
+      const g = window.__game;
+      const h = g.hole;
+      const w = g.world;
+      let best = null;
+      let bd = 1e9;
+      for (const k of w.query(h.x, h.z, 12, [])) {
+        if (w.pState[k] !== 0 || w.pSize[k] >= h.r * 0.9) continue;
+        const d = Math.hypot(w.pX[k] - h.x, w.pZ[k] - h.z);
+        if (d < bd) (bd = d), (best = k);
+      }
+      return best === null ? 0 : Math.atan2(w.pZ[best] - h.z, w.pX[best] - h.x);
+    });
+    await drag(195, 600, [a], 900);
+  }
+  await clearLevelups();
+  check(await G(() => window.__game.save.tutorialDone), '튜토리얼 목표 (3개 먹기) 완료');
   await page.screenshot({ path: `${SHOTS}/03-play.png` });
 
   // 레벨업 카드 (자연 레벨업이 없으면 XP 주입)
@@ -211,7 +212,7 @@ try {
   // 보스를 깎아서 줄인 뒤 삼키기
   await clearLevelups();
   await G(() => window.__game.debugHitBoss(0.97));
-  await sleep(1500);
+  await page.waitForFunction(() => { const g = window.__game; const b = g.enemies.boss; return !b || b.size < g.hole.r * 0.9; }, null, { timeout: 15000 }).catch(() => {});
   await clearLevelups();
   const bs = await G(() => ({ s: window.__game.enemies.boss && window.__game.enemies.boss.size, r: window.__game.hole.r }));
   check(bs.s && bs.s < bs.r, `보스 축소 (크기 ${bs.s && bs.s.toFixed(2)} < 홀 ${bs.r.toFixed(2)})`);
@@ -230,7 +231,7 @@ try {
     await drag(195, 600, [d], 500);
   }
   await page.waitForFunction(() => window.__game.state === 'result', null, { timeout: 15000 }).catch(() => {});
-  await sleep(600);
+  await sleep(2500);
   const cleared = await G(() => window.__game.cleared);
   check(cleared, '보스 삼키고 클리어');
   check(await page.isVisible('#result'), '결과 화면 (클리어)');
@@ -245,13 +246,29 @@ try {
   await clearLevelups();
   await G(() => window.__game.debugKill());
   await page.waitForFunction(() => window.__game.state === 'result', null, { timeout: 20000 });
-  await sleep(500);
+  await sleep(2500);
   check(await page.isVisible('#result'), '결과 화면 (사망)');
   await page.screenshot({ path: `${SHOTS}/10-result-dead.png` });
 
-  // 타이틀로 (코인/업그레이드 반영)
+  // 타이틀로 (첫 판 이후 출석 모달)
   await page.tap('#btnResTitle');
   await sleep(700);
+  check(await page.isVisible('#modal'), '첫 판 결과 뒤 출석 체크 모달');
+  await page.screenshot({ path: `${SHOTS}/00-streak.png` });
+  const cb = await G(() => window.__game.save.coins);
+  await page.tap('#modal [data-act=claimStreak]');
+  await sleep(300);
+  const c0 = await G(() => window.__game.save.coins);
+  check(c0 > cb, `출석 보상 코인 (${cb} -> ${c0})`);
+  check(await page.isVisible('#title'), '타이틀 화면 표시');
+  await page.screenshot({ path: `${SHOTS}/01-title.png` });
+  await page.tap('.nav-b[data-sheet=missions]');
+  await sleep(1200);
+  const nMis = await page.locator('#sheet .row').count();
+  check(nMis >= 3, `일일 미션 표시 (${nMis}행)`);
+  await page.screenshot({ path: `${SHOTS}/01b-missions.png` });
+  await page.tap('#sheetClose');
+  await sleep(200);
   const coins = await G(() => window.__game.save.coins);
   check(coins > 0, `코인 저장 (${coins})`);
   await page.screenshot({ path: `${SHOTS}/11-title-after.png` });
@@ -358,6 +375,12 @@ try {
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.__game && window.__game.frames > 3, null, { timeout: 30000 });
   check((await G(() => window.__game.save.ver)) === 2, '손상된 저장 데이터 복구');
+  // 저장이 초기화되었으므로 첫 실행처럼 튜토리얼 런이 시작됨 -> 일시정지 메뉴로 타이틀
+  await safeTap('#btnPause');
+  await sleep(300);
+  await page.screenshot({ path: `${SHOTS}/06b-pause-volume.png` });
+  await safeTap('#btnToTitle');
+  await sleep(500);
   if (await page.isVisible('#modal')) await page.tap('#modal [data-act=claimStreak]');
 
   // 작은 화면 레이아웃
@@ -369,6 +392,26 @@ try {
   await G(() => window.__game.debugXp(window.__game.xpNeed + 1));
   await sleep(700);
   await page.screenshot({ path: `${SHOTS}/13-levelup-360.png` });
+  await G(() => window.__game.debugKill());
+  await page.waitForFunction(() => window.__game.state === 'result', null, { timeout: 20000 });
+  await sleep(2500);
+  await page.screenshot({ path: `${SHOTS}/14-result-360.png` });
+  const fit = await G(() => {
+    const b = document.querySelector('#btnResTitle').getBoundingClientRect();
+    return b.bottom <= window.innerHeight && b.top >= 0;
+  });
+  check(fit, '360x640 결과 화면 버튼이 화면 안에 보임');
+
+  // 사운드 믹스 계측 (OfflineAudioContext 렌더)
+  const snd = await G(() => window.__audio.measure());
+  for (const [k, v] of Object.entries(snd.sfx)) console.log(`     sfx ${k.padEnd(10)} peak ${v.peakDb}dB  rms ${v.rmsDb}dB  <150Hz ${(v.low * 100).toFixed(0)}%`);
+  for (const k of ['bgm_normal', 'bgm_boss', 'mix']) console.log(`     ${k.padEnd(14)} peak ${snd[k].peakDb}dB  rms ${snd[k].rmsDb}dB  <150Hz ${(snd[k].low * 100).toFixed(0)}%`);
+  check(snd.mix.peakDb <= -1.5 && snd.mix.peakDb >= -6, `마스터 피크 약 -3dBFS (${snd.mix.peakDb})`);
+  const main = ['pop_mid', 'hurt', 'boom', 'levelUp', 'sizeUp', 'pulse'];
+  check(main.every((k) => snd.sfx[k].rmsDb >= -26 && snd.sfx[k].rmsDb <= -16), `주요 효과음 RMS -24~-20dB 근처 (${main.map((k) => snd.sfx[k].rmsDb).join(', ')})`);
+  check(Object.values(snd.sfx).every((v) => v.rmsDb >= -35), '모든 효과음 RMS -35dB 이상');
+  check(snd.bgm_normal.low <= 0.6 && snd.bgm_boss.low <= 0.6, `BGM 150Hz 이하 비중 60% 이하 (${snd.bgm_normal.low}, ${snd.bgm_boss.low})`);
+  check(snd.sfx.pop_big.low <= 0.6, `삼키기 "쿵" 에 중역 배음 (150Hz 이하 ${snd.sfx.pop_big.low})`);
 
   const fps = await G(async () => {
     const f0 = window.__game.frames;

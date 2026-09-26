@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CFG, ENEMY_DEFS } from './config.js';
-import { ENEMY_MODELS, MISC } from './models.js';
+import { enemyGeo, MISC } from './models.js';
 import { patchFlash, patchHoleClip } from './holeclip.js';
 import { BlobShadows, makeFaller, stepFaller, blobTexture } from './world.js';
 
@@ -24,7 +24,7 @@ export class Enemies {
     for (const t of TYPES) {
       const cap = ENEMY_DEFS[t].cap;
       total += cap;
-      const geo = ENEMY_MODELS[t]();
+      const geo = enemyGeo(t, 'city');
       const fa = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
       fa.setUsage(THREE.DynamicDrawUsage);
       geo.setAttribute('aFlash', fa);
@@ -43,6 +43,19 @@ export class Enemies {
     this.shadowSlots = total;
     this.shadows = new BlobShadows(scene, total, blobTexture());
     this._tint = new THREE.Color();
+    this.theme = 'city';
+    // 바닥 링: 삼킬 수 있는 적 = 홀 색, 위험한 적 = 빨강
+    const eg = new THREE.RingGeometry(0.78, 1, 28);
+    eg.rotateX(-Math.PI / 2);
+    this.ringMesh = new THREE.InstancedMesh(eg, patchHoleClip(new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.8, depthWrite: false })), total);
+    this.ringMesh.frustumCulled = false;
+    this.ringMesh.renderOrder = 2;
+    this.ringMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < total; i++) this.ringMesh.setColorAt(i, new THREE.Color(1, 1, 1));
+    this.ringMesh.count = 0;
+    scene.add(this.ringMesh);
+    this.cEdible = new THREE.Color('#b890ff');
+    this.cDanger = new THREE.Color('#ff3b5c');
 
     // 적 투사체 (쓰레기 봉투)
     this.projCap = 80;
@@ -72,6 +85,20 @@ export class Enemies {
     this.fillMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.fillMesh);
     this.reset();
+  }
+
+  // 맵별 적 외형 교체
+  setTheme(theme) {
+    if (theme === this.theme) return;
+    this.theme = theme;
+    for (const t of TYPES) {
+      const mesh = this.meshes[t];
+      const old = mesh.geometry;
+      const geo = enemyGeo(t, theme);
+      geo.setAttribute('aFlash', this.flash[t]);
+      mesh.geometry = geo;
+      old.dispose();
+    }
   }
 
   reset() {
@@ -135,14 +162,21 @@ export class Enemies {
       sawCd: 0,
       hitCd: 0,
       speedMul: (0.9 + Math.random() * 0.2) * (0.85 + 0.15 * sizeMul),
-      dmgMul: 1 + (sizeMul - 1) * 0.35,
+      dmgMul: 1 + (sizeMul - 1) * 0.2,
       shadowI: 0,
       bob: Math.random() * 10,
       spawnT: 0,
+      id: (this._id = (this._id || 0) + 1),
+      fleeT: 0,
+      fled: false,
+      introT: 0,
     };
     e.shadowI = this.shadowIndex(e);
     const mesh = this.meshes[type];
-    this._tint.set((this.game.mods && this.game.mods.tint) || '#ffffff');
+    const M = this.game.mods || {};
+    const big = type === 'boss' || type === 'mini';
+    this._tint.set((big ? M.bossTint : M.tint) || '#ffffff');
+    e.name = (type === 'boss' ? M.bossName : type === 'mini' ? M.miniName : null) || def.name;
     mesh.setColorAt(slot, this._tint);
     mesh.instanceColor.needsUpdate = true;
     this.list.push(e);
@@ -151,17 +185,39 @@ export class Enemies {
     return e;
   }
 
-  // 화면 밖 스폰 위치
-  spawnPos(hole, dist) {
+  // 화면 가장자리 바로 밖 스폰 위치 (화면 사각형 둘레 위 무작위)
+  spawnPos(hole, margin = 3) {
+    const g = this.game;
     const H = CFG.map.half + 4;
-    for (let tries = 0; tries < 8; tries++) {
-      const a = Math.random() * Math.PI * 2;
-      const x = hole.x + Math.cos(a) * dist;
-      const z = hole.z + Math.sin(a) * dist;
+    const hw = g.viewHalfW + margin;
+    const far = g.viewFar + margin;
+    const near = g.viewNear + margin;
+    for (let tries = 0; tries < 10; tries++) {
+      const per = 2 * (2 * hw) + 2 * (far + near);
+      let u = Math.random() * per;
+      let x, z;
+      if (u < 2 * hw) (x = hole.x - hw + u), (z = hole.z - far);
+      else if ((u -= 2 * hw) < 2 * hw) (x = hole.x - hw + u), (z = hole.z + near);
+      else if ((u -= 2 * hw) < far + near) (x = hole.x - hw), (z = hole.z - far + u);
+      else (u -= far + near), (x = hole.x + hw), (z = hole.z - far + u);
       if (Math.abs(x) < H && Math.abs(z) < H) return [x, z];
     }
-    const a = Math.random() * Math.PI * 2;
-    return [Math.max(-H, Math.min(H, hole.x + Math.cos(a) * dist)), Math.max(-H, Math.min(H, hole.z + Math.sin(a) * dist))];
+    return [Math.max(-H, Math.min(H, hole.x + (Math.random() - 0.5) * hw * 2)), Math.max(-H, Math.min(H, hole.z - far))];
+  }
+
+  // 보스 등장 시 일반 적 정리
+  clearMinions() {
+    for (const e of [...this.list]) {
+      if (e.type === 'boss' || e.type === 'mini') continue;
+      e.dead = true;
+      this.removeFromList(e);
+      this.meshes[e.type].setMatrixAt(e.slot, HIDE);
+      this.free[e.type].push(e.slot);
+      this.shadows.hide(e.shadowI);
+      this.game.fx.burst(e.x, 0.6, e.z, 6, e.size * 0.6, ['#ffffff', '#ffd0e0']);
+    }
+    this.projs.length = 0;
+    this.marks.length = 0;
   }
 
   updateSpawns(dt, t, hole) {
@@ -172,7 +228,6 @@ export class Enemies {
     const sizeMul = (1 + p * S.sizeGrow) * (M.sizeE || 1);
     const hpMul = (1 + p * S.hpGrow) * (M.hpE || 1);
     const W = M.weights || { dasher: 1, thrower: 1, giant: 1 };
-    const dist = g.camDist * 0.95 + 8;
     if (this.boss) {
       // 보스전 중에는 졸개만 소량
       this.spawnAcc += dt * 0.8;
@@ -190,22 +245,37 @@ export class Enemies {
       if (r < pd) type = 'dasher';
       else if (r < pd + pt) type = 'thrower';
       else if (r < pd + pt + pg) type = 'giant';
-      const [x, z] = this.spawnPos(hole, dist);
-      this.spawn(type, x, z, sizeMul * (0.85 + Math.random() * 0.3), hpMul);
+      const [x, z] = this.spawnPos(hole, 0.5 + Math.random() * 2);
+      // 일부는 홀보다 작게 (먹이), 나머지는 위협
+      const feed = type === 'sweeper' && Math.random() < 0.45;
+      const sm = feed ? Math.min(sizeMul, (hole.r * 0.8) / ENEMY_DEFS.sweeper.size) : sizeMul;
+      this.spawn(type, x, z, sm * (0.85 + Math.random() * 0.3), hpMul);
     }
     this.swarmT -= dt;
-    if (this.swarmT <= 0) {
+    if (this.swarmT <= 0 && !this.boss) {
       this.swarmT = S.swarmEvery;
-      const a = Math.random() * Math.PI * 2;
-      const n = 10 + Math.floor(p * 18);
+      // 한쪽 가장자리에서 몰려오는 먹이 무리 (상한 준수)
+      const n = Math.min(10 + Math.floor(p * 14), S.maxAlive - this.list.length);
+      const [bx, bz] = this.spawnPos(hole, 4);
       for (let i = 0; i < n; i++) {
-        const aa = a + (Math.random() - 0.5) * 0.9;
-        const dd = dist + Math.random() * 8;
-        const x = Math.max(-100, Math.min(100, hole.x + Math.cos(aa) * dd));
-        const z = Math.max(-100, Math.min(100, hole.z + Math.sin(aa) * dd));
-        this.spawn('sweeper', x, z, sizeMul * (0.7 + Math.random() * 0.3), hpMul * 0.8);
+        const x = Math.max(-100, Math.min(100, bx + (Math.random() - 0.5) * 8));
+        const z = Math.max(-100, Math.min(100, bz + (Math.random() - 0.5) * 8));
+        const sm = Math.min(sizeMul, (hole.r * (0.45 + Math.random() * 0.4)) / ENEMY_DEFS.sweeper.size);
+        this.spawn('sweeper', x, z, sm, hpMul * 0.6);
       }
-      g.ui.toast('청소 로봇 무리가 몰려온다!');
+      if (n > 0) g.ui.toast('청소 로봇 무리가 몰려온다!');
+    }
+    // 화면에서 너무 멀어진 적은 화면 가장자리로 재배치
+    const lim = 8;
+    for (const e of this.list) {
+      if (e.type === 'boss' || e.type === 'mini') continue;
+      const dx = e.x - hole.x;
+      const dz = e.z - hole.z;
+      if (Math.abs(dx) > g.viewHalfW + lim || dz < -(g.viewFar + lim) || dz > g.viewNear + lim) {
+        const [x, z] = this.spawnPos(hole, 3 + e.size);
+        e.x = x;
+        e.z = z;
+      }
     }
   }
 
@@ -295,27 +365,53 @@ export class Enemies {
     const g = this.game;
     const fitR = hole.r * CFG.hole.fit;
     const list = this.list;
-    // 분리 (간단한 쌍 검사)
-    for (let i = 0; i < list.length; i++) {
-      const a = list[i];
-      for (let j = i + 1; j < list.length; j++) {
-        const b = list[j];
-        const dx = b.x - a.x;
-        const dz = b.z - a.z;
-        const min = (a.size + b.size) * 0.85;
-        const d2 = dx * dx + dz * dz;
-        if (d2 < min * min && d2 > 1e-6) {
-          const d = Math.sqrt(d2);
-          const push = ((min - d) / d) * 0.5;
-          const wa = b.size / (a.size + b.size);
-          const wb = 1 - wa;
-          a.x -= dx * push * wa;
-          a.z -= dz * push * wa;
-          b.x += dx * push * wb;
-          b.z += dz * push * wb;
+    // 분리: 공간 해시 (셀 4유닛). 보스급은 따로 처리
+    const CS = 4;
+    const cells = this._cells || (this._cells = new Map());
+    cells.clear();
+    let maxS = 0;
+    const bigs = [];
+    for (const e of list) {
+      if (e.type === 'boss' || e.type === 'mini') {
+        bigs.push(e);
+        continue;
+      }
+      if (e.size > maxS) maxS = e.size;
+      const k = (Math.floor(e.x / CS) + 512) * 1024 + (Math.floor(e.z / CS) + 512);
+      let c = cells.get(k);
+      if (!c) cells.set(k, (c = []));
+      c.push(e);
+    }
+    const sep = (a, b) => {
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const min = (a.size + b.size) * 0.85;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < min * min && d2 > 1e-6) {
+        const d = Math.sqrt(d2);
+        const push = ((min - d) / d) * 0.5;
+        const wa = b.size / (a.size + b.size);
+        const wb = 1 - wa;
+        a.x -= dx * push * wa;
+        a.z -= dz * push * wa;
+        b.x += dx * push * wb;
+        b.z += dz * push * wb;
+      }
+    };
+    for (const a of list) {
+      if (a.type === 'boss' || a.type === 'mini') continue;
+      const rr = Math.ceil(((a.size + maxS) * 0.85) / CS);
+      const cx = Math.floor(a.x / CS);
+      const cz = Math.floor(a.z / CS);
+      for (let ix = cx - rr; ix <= cx + rr; ix++) {
+        for (let iz = cz - rr; iz <= cz + rr; iz++) {
+          const c = cells.get((ix + 512) * 1024 + (iz + 512));
+          if (!c) continue;
+          for (const b of c) if (b !== a && b.id > a.id) sep(a, b);
         }
       }
     }
+    for (const b of bigs) for (const a of list) if (a !== b) sep(a, b);
 
     for (let n = list.length - 1; n >= 0; n--) {
       const e = list[n];
@@ -336,17 +432,19 @@ export class Enemies {
       let mz = 0;
       e.atk -= dt;
       e.flash = Math.max(0, e.flash - dt * 6);
+      // 체력이 낮은 일부 작은 적만 잠깐 도망
+      if (small && !e.fled && e.hp < e.maxHp * 0.35 && Math.random() < 0.3) {
+        e.fled = true;
+        e.fleeT = 1.2;
+      }
+      if (e.fleeT > 0) e.fleeT -= dt;
+      const fleeing = e.fleeT > 0;
 
       if (e.type === 'dasher' || e.type === 'mini') {
         if (e.state === 'move') {
           mx = nx;
           mz = nz;
-          if (small && e.type === 'dasher') {
-            mx = -nx;
-            mz = -nz;
-            spd *= 0.8;
-          }
-          if (d < 12 + e.size * 3 && e.atk <= 0 && !small) {
+          if (d < 12 + e.size * 3 && e.atk <= 0) {
             e.state = 'wind';
             e.timer = 0.65;
             e.dashDir = [nx, nz];
@@ -373,11 +471,7 @@ export class Enemies {
         }
       } else if (e.type === 'thrower') {
         const range = def.range + e.size * 3;
-        if (small && d < range * 0.7) {
-          mx = -nx;
-          mz = -nz;
-          spd *= 0.8;
-        } else if (d > range) {
+        if (small || d > range) {
           mx = nx;
           mz = nz;
         } else if (d < range * 0.6) {
@@ -395,7 +489,11 @@ export class Enemies {
       } else if (e.type === 'boss') {
         mx = nx;
         mz = nz;
-        if (e.atk <= 0) {
+        if (e.introT > 0) {
+          e.introT -= dt;
+          spd = 0;
+          e.atk = Math.max(e.atk, 1.5);
+        } else if (e.atk <= 0) {
           e.atk = 3.2;
           this.slam(e, hole);
           if (Math.random() < 0.5) {
@@ -410,11 +508,11 @@ export class Enemies {
         // sweeper, giant
         mx = nx;
         mz = nz;
-        if (small && e.type === 'sweeper') {
-          mx = -nx;
-          mz = -nz;
-          spd *= 0.75;
-        }
+      }
+      if (fleeing) {
+        mx = -nx;
+        mz = -nz;
+        spd *= 0.9;
       }
       // 흔들리는 접근 (군집 느낌)
       const wob = Math.sin(t * 2 + e.bob) * 0.25;
@@ -532,6 +630,7 @@ export class Enemies {
       if (tt && f.slot > maxSlot[tt]) maxSlot[tt] = f.slot;
     }
     for (const e of list) if (e.slot > maxSlot[e.type]) maxSlot[e.type] = e.slot;
+    let ri = 0;
     for (const e of list) {
       const mesh = this.meshes[e.type];
       const pop = Math.min(1, e.spawnT * 4);
@@ -539,12 +638,22 @@ export class Enemies {
       const bob = e.type === 'sweeper' ? Math.abs(Math.sin(t * 10 + e.bob)) * 0.05 * e.size : 0;
       _q.setFromAxisAngle(_up, e.rot);
       // 큰 적은 키를 눌러서 카메라를 가리지 않게
-      const sy = (s / (1 + Math.max(0, s - 2) * 0.09)) * (1 + (e.state === 'wind' ? 0.1 * Math.sin(e.timer * 50) : 0));
+      const squash = e.type === 'boss' ? 0.5 : 1 / (1 + Math.max(0, s - 2) * 0.09);
+      const sy = s * squash * (1 + (e.state === 'wind' ? 0.1 * Math.sin(e.timer * 50) : 0));
       _m.compose(_v.set(e.x, bob, e.z), _q, _s.set(s, sy, s));
       mesh.setMatrixAt(e.slot, _m);
       this.flash[e.type].array[e.slot] = e.flash;
       this.shadows.set(e.shadowI, e.x, e.z, e.size * 0.9);
+      const rr = e.size * 1.08;
+      _m.makeScale(rr, 1, rr);
+      _m.setPosition(e.x, 0.045, e.z);
+      this.ringMesh.setMatrixAt(ri, _m);
+      this.ringMesh.setColorAt(ri, e.size < fitR ? this.cEdible : this.cDanger);
+      ri++;
     }
+    this.ringMesh.count = ri;
+    this.ringMesh.instanceMatrix.needsUpdate = true;
+    if (this.ringMesh.instanceColor) this.ringMesh.instanceColor.needsUpdate = true;
     for (let n = this.fallers.length - 1; n >= 0; n--) {
       if (stepFaller(this.fallers[n], dt, hole, g.world.wellDepth)) this.fallers.splice(n, 1);
     }

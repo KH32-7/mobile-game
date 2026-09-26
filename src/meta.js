@@ -156,6 +156,17 @@ export const Meta = {
     Save.save();
     return null;
   },
+  // 지금 살 수 있는 가장 싼 강화 (결과 화면 진행 바)
+  nextUpgrade() {
+    const d = Save.data;
+    let best = null;
+    for (const u of UPGRADES) {
+      const l = d.upg[u.id] || 0;
+      if (l >= u.max || !this.tierUnlocked(u.tier)) continue;
+      if (!best || u.cost[l] < best.cost) best = { id: u.id, name: u.name, cost: u.cost[l] };
+    }
+    return best;
+  },
   buySkill(id) {
     const d = Save.data;
     if (d.skills.includes(id)) return '이미 해금됨';

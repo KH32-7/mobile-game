@@ -31,7 +31,7 @@ export class MetaUI {
       <div class="title-top">
         <div class="coins" id="coinBox"></div>
         <button class="streak-pill btn" id="streakPill"></button>
-        <button class="btn icon" id="btnMute" aria-label="음소거"></button>
+        <button class="btn icon" id="btnMute" aria-label="설정">${S('<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5 V5.5 M12 18.5 V21.5 M2.5 12 H5.5 M18.5 12 H21.5 M5.3 5.3 L7.4 7.4 M16.6 16.6 L18.7 18.7 M5.3 18.7 L7.4 16.6 M16.6 7.4 L18.7 5.3"/>')}</button>
       </div>
       <div class="title-wrap">
         <div class="logo">
@@ -190,6 +190,18 @@ export class MetaUI {
       return true;
     }
     return false;
+  }
+
+  openSettings() {
+    const d = Save.data;
+    this.showModal(`<h2>설정</h2>
+      <div class="vols wide">
+        <label>배경음<input type="range" min="0" max="100" class="vol" data-vol="music"></label>
+        <label>효과음<input type="range" min="0" max="100" class="vol" data-vol="sfx"></label>
+      </div>
+      <button class="btn" data-act="mute">${d.muted ? '소리 켜기' : '전체 음소거'}</button>
+      <button class="btn primary" data-act="closeModal">닫기</button>`);
+    this.game.syncVolumes();
   }
 
   showModal(html) {
@@ -358,6 +370,10 @@ export class MetaUI {
       return;
     } else if (a === 'closeModal') {
       this.closeModal();
+    } else if (a === 'mute') {
+      g.muteToggle();
+      this.openSettings();
+      return;
     }
     if (err) {
       g.audio.hurt();

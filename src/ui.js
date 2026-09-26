@@ -47,10 +47,11 @@ export class UI {
         <div id="combo"></div>
         <div id="banner"></div>
         <div id="skillbar"></div>
+        <div id="arrow"><div class="ar"><svg viewBox="0 0 24 24"><path d="M4 5 L21 12 L4 19 L8 12 Z" fill="currentColor"/></svg></div><span></span></div>
       </div>
       <div id="tutorial" class="hidden">
-        <div class="finger"><div class="dot"></div></div>
-        <div class="tip">화면 아무 곳이나 누르고 드래그해서 이동<br><b>홀보다 작은 건 전부 삼킬 수 있어!</b></div>
+        <div class="finger"><div class="trail"></div><div class="dot"></div></div>
+        <div class="tip">화면 아무 곳이나 누르고 드래그해서 이동<br><b class="goal">콘을 3개 먹어봐 (0/3)</b></div>
       </div>
       <div id="title" class="screen"></div>
       <div id="levelup" class="screen hidden">
@@ -66,18 +67,26 @@ export class UI {
           <button class="btn primary" id="btnResume">계속하기</button>
           <button class="btn" id="btnRestart">다시 시작</button>
           <button class="btn" id="btnToTitle">타이틀로</button>
-          <button class="btn icon" id="btnMute2" aria-label="음소거"></button>
+          <div class="vol-row"><button class="btn icon" id="btnMute2" aria-label="음소거"></button><div class="vols">
+            <label>배경음<input type="range" min="0" max="100" class="vol" data-vol="music"></label>
+            <label>효과음<input type="range" min="0" max="100" class="vol" data-vol="sfx"></label>
+          </div></div>
         </div>
       </div>
       <div id="result" class="screen hidden">
-        <div class="panel">
-          <h2 class="res-title"></h2>
-          <div class="res-grid"></div>
-          <div class="res-coins"></div>
-          <div class="res-best"></div>
-          <div class="res-meta"></div>
-          <button class="btn primary" id="btnAgain">다시 하기</button>
-          <button class="btn" id="btnResTitle">타이틀로</button>
+        <div class="panel res-panel">
+          <div class="res-head"><h2 class="res-title"></h2><div class="res-wallet coins"></div></div>
+          <div class="res-scroll">
+            <div class="res-grid"></div>
+            <div class="res-coins"></div>
+            <div class="res-next"></div>
+            <div class="res-best"></div>
+            <div class="res-meta"></div>
+          </div>
+          <div class="res-btns">
+            <button class="btn primary" id="btnAgain">다시 하기</button>
+            <button class="btn" id="btnResTitle">타이틀로</button>
+          </div>
         </div>
       </div>
       <div id="toast"></div>
@@ -95,6 +104,7 @@ export class UI {
     this.vig = this.$('#vignette');
     this.flashEl = this.$('#flash');
     this.bossbar = this.$('#bossbar');
+    this.arrow = this.$('#arrow');
     this.cache = {};
   }
 
@@ -117,7 +127,6 @@ export class UI {
     const svg = m
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" fill="currentColor"/><path d="M17 9 L22 14 M22 9 L17 14"/></svg>'
       : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9 H8 L13 5 V19 L8 15 H4 Z" fill="currentColor"/><path d="M16.5 8.5 A5 5 0 0 1 16.5 15.5 M19 6 A8.5 8.5 0 0 1 19 18"/></svg>';
-    this.$('#btnMute').innerHTML = svg;
     this.$('#btnMute2').innerHTML = svg;
   }
 
@@ -136,7 +145,9 @@ export class UI {
     const boss = g.enemies.boss || g.enemies.mini;
     if (boss) {
       this.bossbar.classList.remove('hidden');
-      this.set('bn', this.bossbar.querySelector('.name'), 'text', boss.def.name + (boss.type === 'boss' && boss.size < h.r * 0.94 ? '  지금 삼켜!' : ''));
+      const eat = boss.size < h.r * 0.94;
+      this.bossbar.classList.toggle('gold', eat);
+      this.set('bn', this.bossbar.querySelector('.name'), 'text', (boss.name || boss.def.name) + (eat ? '  ▶ 지금 삼켜!' : ''));
       this.set('bf', this.bossbar.querySelector('.fill'), 'width', `${((boss.hp / boss.maxHp) * 100).toFixed(1)}%`);
     } else this.bossbar.classList.add('hidden');
   }
@@ -215,19 +226,40 @@ export class UI {
     });
   }
 
+  setTutorial(n) {
+    const el = this.$('#tutorial .goal');
+    el.textContent = n >= 3 ? '완벽해!' : `작은 걸 3개 먹어봐 (${n}/3)`;
+    el.classList.toggle('done', n >= 3);
+  }
+
   showResult(r) {
     const el = this.$('#result');
     el.querySelector('.res-title').textContent = r.cleared ? '메카 격파! 정화 완료' : '홀이 닫혔다...';
     el.querySelector('.res-title').classList.toggle('win', r.cleared);
-    el.querySelector('.res-grid').innerHTML = `
-      <div><span>생존 시간</span><b>${fmtTime(r.time)}</b></div>
-      <div><span>삼킨 개수</span><b>${r.swallowed}</b></div>
-      <div><span>최대 크기</span><b>${r.size.toFixed(1)}m</b></div>
-      <div><span>처치 수</span><b>${r.kills}</b></div>
-      <div><span>도달 레벨</span><b>${r.level}</b></div>
-      <div><span>최고 콤보</span><b>x${r.maxCombo}</b></div>`;
-    el.querySelector('.res-coins').innerHTML = `${ICONS.coin}<b>+${r.coins}</b> 코인 획득`;
+    const cells = [
+      ['생존 시간', r.time, (v) => fmtTime(v)],
+      ['삼킨 개수', r.swallowed, (v) => Math.round(v)],
+      ['최대 크기', r.size, (v) => v.toFixed(1) + 'm'],
+      ['처치 수', r.kills, (v) => Math.round(v)],
+      ['도달 레벨', r.level, (v) => Math.round(v)],
+      ['최고 콤보', r.maxCombo, (v) => 'x' + Math.round(v)],
+    ];
+    el.querySelector('.res-grid').innerHTML = cells.map(([k]) => `<div><span>${k}</span><b>0</b></div>`).join('');
+    const bs = el.querySelectorAll('.res-grid b');
+    const coinsEl = el.querySelector('.res-coins');
+    coinsEl.innerHTML = `${ICONS.coin}<b>+0</b> 코인 획득`;
+    const wallet = el.querySelector('.res-wallet');
+    const startCoins = r.walletAfter - r.coins - (r.meta.daily || 0) - r.meta.newAch.reduce((a, x) => a + x.reward, 0);
+    wallet.innerHTML = `${ICONS.coin}<b>${Math.max(0, startCoins)}</b>`;
     el.querySelector('.res-best').innerHTML = (r.daily ? '<span class="daily-tag">데일리 챌린지</span> ' : `<span class="map-tag">${r.mapName} 난이도 ${r.diff}</span> `) + (r.newBest ? '<span class="nb">신기록!</span>' : `최고 ${fmtTime(r.bestTime)}`);
+    const next = el.querySelector('.res-next');
+    if (r.nextUpg) {
+      const { name, cost } = r.nextUpg;
+      const have = r.walletAfter;
+      const pct = Math.min(100, (have / cost) * 100);
+      next.innerHTML = `<div class="nx-t">${have >= cost ? `<b>${name}</b> 강화 가능!` : `다음 강화 <b>${name}</b>까지 ${cost - have}코인`}</div><div class="prog"><div style="width:0%"></div></div>`;
+      setTimeout(() => (next.querySelector('.prog div').style.width = pct + '%'), 900);
+    } else next.innerHTML = '';
     const meta = [];
     for (const u of r.meta.unlocks) meta.push(`<div class="mi unlock">${u}</div>`);
     if (r.meta.daily) meta.push(`<div class="mi unlock">데일리 챌린지 완료! +${r.meta.daily} 코인</div>`);
@@ -235,6 +267,58 @@ export class UI {
     for (const m of r.meta.missions) meta.push(`<div class="mi mis">미션 완료: ${m}</div>`);
     el.querySelector('.res-meta').innerHTML = meta.join('');
     el.classList.remove('hidden');
+    el.querySelector('.res-scroll').scrollTop = 0;
+    // 숫자 카운트업 + 코인이 지갑으로 날아감
+    const t0 = performance.now();
+    const D = 900;
+    const tick = () => {
+      const k = Math.min(1, (performance.now() - t0) / D);
+      const e = 1 - Math.pow(1 - k, 3);
+      cells.forEach(([, v, f], i) => (bs[i].textContent = f(v * e)));
+      coinsEl.querySelector('b').textContent = '+' + Math.round(r.coins * e);
+      if (k < 1) requestAnimationFrame(tick);
+      else this.flyCoins(coinsEl, wallet, Math.max(0, startCoins), r.walletAfter);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  flyCoins(from, to, a, b) {
+    const layer = this.root;
+    const rr = layer.getBoundingClientRect();
+    const f = from.getBoundingClientRect();
+    const t = to.getBoundingClientRect();
+    const n = 10;
+    for (let i = 0; i < n; i++) {
+      const c = document.createElement('div');
+      c.className = 'fly-coin';
+      c.innerHTML = ICONS.coin;
+      const sx = f.left - rr.left + f.width * (0.3 + Math.random() * 0.4);
+      const sy = f.top - rr.top + f.height / 2;
+      const tx = t.left - rr.left + 14;
+      const ty = t.top - rr.top + t.height / 2;
+      c.style.transform = `translate(${sx}px, ${sy}px)`;
+      layer.appendChild(c);
+      const delay = i * 45;
+      setTimeout(() => {
+        c.style.transition = 'transform 0.55s cubic-bezier(.5,-0.4,.7,1), opacity 0.2s 0.5s';
+        c.style.transform = `translate(${tx}px, ${ty}px) scale(0.7)`;
+        c.style.opacity = '0';
+      }, delay + 20);
+      setTimeout(() => c.remove(), delay + 800);
+    }
+    const t0 = performance.now() + 350;
+    const w = to.querySelector('b');
+    const tick = () => {
+      const k = Math.max(0, Math.min(1, (performance.now() - t0) / 700));
+      w.textContent = Math.round(a + (b - a) * k);
+      if (k < 1) requestAnimationFrame(tick);
+      else {
+        to.classList.remove('bump');
+        void to.offsetWidth;
+        to.classList.add('bump');
+      }
+    };
+    requestAnimationFrame(tick);
   }
 
   combo(n) {

@@ -11,6 +11,7 @@ export const defaults = () => ({
   ver: SAVE_VER,
   coins: 0,
   muted: false,
+  settings: { music: 0.7, sfx: 0.9 },
   tutorialDone: false,
   upg: { size: 0, hp: 0, speed: 0, xp: 0, coin: 0, power: 0, armor: 0, reroll: 0, revive: 0 },
   maps: Object.fromEntries(MAP_ORDER.map((m, i) => [m, mapDefaults(i === 0)])),

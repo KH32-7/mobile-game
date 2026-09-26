@@ -8,24 +8,25 @@ export const CFG = {
     speedPerR: 0.55, // 반지름 1 증가당 추가 속도
     accel: 10,
     decel: 4.2,
-    hp: 100,
-    iframe: 1.0,
-    growthK: 0.2, // r^2 += growthK * size^2 * growthFalloff(r)
-    enemyGrowthK: 0.16,
+    hp: 120,
+    iframe: 1.2,
+    growthK: 0.15, // r^2 += growthK * size^2 * growthFalloff(r)
+    enemyGrowthK: 0.07,
     fit: 0.94, // size < r * fit 이면 삼킬 수 있음
     visualLerp: 3.2,
-    maxR: 12,
+    maxR: 14,
   },
 
-  cam: { fov: 42, tilt: 55, dist: 13, distPerR: 4.4, lerp: 2.6 },
+  // 화면 가로 폭(월드 유닛) = baseW + r * wPerR, 세로 화면 aspect 에 맞춰 거리 자동 계산
+  cam: { fov: 50, tilt: 66, baseW: 13, wPerR: 5.2, lerp: 2.6 },
 
   run: { length: 300, miniAt: 150, bossAt: 300 },
 
   // 레벨 L -> L+1 필요 XP
-  xpNeed: (lvl) => Math.floor(10 + lvl * 8 + Math.pow(lvl, 2.1)),
+  xpNeed: (lvl) => Math.floor(8 + lvl * 6 + Math.pow(lvl, 1.95)),
   // 홀이 클수록 같은 물체의 성장/XP 효율 감소 (후반 폭주 방지)
-  growthFalloff: (r) => 1 / (1 + 0.4 * r * r),
-  xpFalloff: (r) => 1 / (1 + 0.06 * r * r),
+  growthFalloff: (r) => 1 / (1 + 0.085 * r * r),
+  xpFalloff: (r) => 1 / (1 + 0.05 * r * r),
   // 오브젝트 XP
   propXp: (size) => 1 + size * size * 1.6,
 
@@ -34,15 +35,15 @@ export const CFG = {
   combo: { window: 1.4 },
 
   spawn: {
-    baseRate: 0.9, // 초당
-    rateGrow: 3.4, // 5분 동안 추가
-    maxAlive: 150,
+    baseRate: 1.5, // 초당
+    rateGrow: 4.5, // 5분 동안 추가
+    maxAlive: 120,
     sizeGrow: 3.2, // 5분 동안 크기 배율 추가
     hpGrow: 2.6,
     swarmEvery: 32,
   },
 
-  coins: { perSec: 0.25, perKill: 0.35, perSwallow: 0.06, clear: 150 },
+  coins: { perSec: 0.38, perKill: 0.5, perSwallow: 0.09, clear: 220 },
 };
 
 // 적 정의 (size = 바닥 반지름)
@@ -51,8 +52,8 @@ export const ENEMY_DEFS = {
   dasher: { name: '돌진봇', size: 1.05, hp: 16, speed: 2.6, dmg: 12, xp: 6, cap: 60, dashSpeed: 15 },
   thrower: { name: '투척봇', size: 1.15, hp: 14, speed: 2.4, dmg: 8, xp: 7, cap: 50, range: 13 },
   giant: { name: '거대 청소기', size: 2.5, hp: 80, speed: 1.5, dmg: 18, xp: 26, cap: 24 },
-  mini: { name: '청소 트럭 대장', size: 5.0, hp: 1100, speed: 2.1, dmg: 22, xp: 160, cap: 2, dashSpeed: 12 },
-  boss: { name: '거대 청소 메카', size: 11, hp: 5200, speed: 1.7, dmg: 28, xp: 600, cap: 1 },
+  mini: { name: '청소 트럭 대장', size: 5.0, hp: 450, speed: 2.1, dmg: 22, xp: 160, cap: 2, dashSpeed: 12 },
+  boss: { name: '거대 청소 메카', size: 11, hp: 2600, speed: 1.7, dmg: 28, xp: 600, cap: 1 },
 };
 
 // 영구 업그레이드 트리 (tier 2 는 tier 1 합계 레벨, tier 3 은 tier 2 합계 레벨 필요)
@@ -79,6 +80,9 @@ export const MAPS = {
     unlock: null,
     sky: '#cfe8ff',
     enemyTint: '#ffffff',
+    bossTint: '#ffffff',
+    bossName: '거대 청소 메카',
+    miniName: '청소 트럭 대장',
     weights: { dasher: 1, thrower: 1, giant: 1 },
   },
   beach: {
@@ -88,6 +92,9 @@ export const MAPS = {
     unlock: { map: 'city', diff: 1 },
     sky: '#c4f1ff',
     enemyTint: '#fff4d8',
+    bossTint: '#a8ecff',
+    bossName: '해변 정화 메카',
+    miniName: '모래 청소 트럭',
     weights: { dasher: 0.8, thrower: 1.7, giant: 0.9 },
   },
   factory: {
@@ -97,6 +104,9 @@ export const MAPS = {
     unlock: { map: 'beach', diff: 1 },
     sky: '#f6e4d2',
     enemyTint: '#ffe6d0',
+    bossTint: '#ffb080',
+    bossName: '산업 분쇄 메카',
+    miniName: '녹슨 지게차 대장',
     weights: { dasher: 1.6, thrower: 0.8, giant: 1.5 },
   },
 };
@@ -248,14 +258,14 @@ export const EVOLUTIONS = {
     name: '강착 원반',
     color: '#c6b8ff',
     from: ['orbit', 'horizon'],
-    need: { orbit: 5, horizon: 2 },
+    need: { orbit: 3, horizon: 1 },
     desc: () => '파편 위성 진화: 파편 10개가 넓게 돌며 2.5배 피해, 작은 적을 끌어당김',
   },
   singularity: {
     name: '특이점 포',
     color: '#ff9f6b',
     from: ['cannon', 'glutton'],
-    need: { cannon: 5, glutton: 2 },
+    need: { cannon: 3, glutton: 1 },
     desc: () => '역류 캐논 진화: 탄환이 작은 블랙홀이 되어 적을 빨아들이고 폭발',
   },
 };

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CFG, ENEMY_DEFS, MAPS, SKINS, diffMul } from './config.js';
+import { CFG, ENEMY_DEFS, MAPS, SKINS, EVOLUTIONS, diffMul } from './config.js';
 import { Meta } from './meta.js';
 import { MetaUI } from './metaui.js';
 import { World } from './world.js';
@@ -13,6 +13,7 @@ import { Save } from './save.js';
 import { holeU, applySkin } from './holeclip.js';
 import { params, DEBUG } from './rng.js';
 
+const NORENDER = DEBUG && params.has('norender');
 const vibrate = (ms) => {
   try {
     navigator.vibrate && navigator.vibrate(ms);
@@ -50,6 +51,10 @@ export class Game {
     this.fx = new FX(this.scene, this.camera, this.ui.$('#dmg-layer'));
     this.enemies = new Enemies(this.scene, this);
     this.skills = new Skills(this.scene, this);
+    this.world.markGame = this;
+    this.enemies.setTheme(this.world.themeId);
+    this.applySkin();
+    Audio.setVolumes(this.save.settings.music, this.save.settings.sfx);
     this.input = new Input(app, this.ui.$('#joy'));
     this.input.onFirst = () => {
       Audio.init();
@@ -59,7 +64,11 @@ export class Game {
     this.hole = { x: 0, z: 0, vx: 0, vz: 0, r: 1, targetR: 1, hp: 100, maxHp: 100, invuln: 0 };
     this.state = 'title';
     this.time = 0;
-    this.camDist = CFG.cam.dist;
+    this.camDist = 30;
+    this.viewFar = 20;
+    this.viewNear = 12;
+    this.viewHalfW = 8;
+    this.camFocus = null;
     this.camPunch = 0;
     this.camPunchV = 0;
     this.shakeAmt = 0;
@@ -73,11 +82,22 @@ export class Game {
     this.resize();
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && this.state === 'play') this.pause();
+      if (document.hidden) {
+        if (this.state === 'play') this.pause();
+        Audio.suspend();
+      } else if (this.state !== 'paused') Audio.resume();
     });
     this.world.setHole(0, 0, 1);
-    this.showTitle();
-    if (DEBUG) window.__game = this;
+    // 첫 실행: 타이틀/출석 없이 바로 튜토리얼 런
+    if (!this.save.tutorialDone && !(DEBUG && params.has('title'))) {
+      this.showTitle(true);
+      this.startRun({ daily: false, tutorial: true });
+    } else this.showTitle();
+    if (DEBUG) {
+      window.__game = this;
+      window.__meta = Meta;
+      window.__audio = Audio;
+    }
     this.last = performance.now();
     this.frames = 0;
     requestAnimationFrame((t) => this.loop(t));
@@ -111,13 +131,33 @@ export class Game {
       ui.setMuteIcon(this.save.muted);
       Save.save();
     };
-    tap('#btnMute', mute);
+    tap('#btnMute', () => this.metaUI.openSettings());
     tap('#btnMute2', mute);
+    this.muteToggle = mute;
     ui.setMuteIcon(this.save.muted);
+    // 배경음/효과음 개별 볼륨 (일시정지 메뉴, 설정 모달 공용)
+    this.app.addEventListener('input', (e) => {
+      const el = e.target.closest && e.target.closest('.vol');
+      if (!el) return;
+      this.save.settings[el.dataset.vol] = el.value / 100;
+      Audio.setVolumes(this.save.settings.music, this.save.settings.sfx);
+      Save.save();
+    });
+    this.app.addEventListener('change', (e) => {
+      if (e.target.closest && e.target.closest('.vol')) {
+        Audio.init();
+        Audio.select();
+      }
+    });
+    this.syncVolumes = () => this.app.querySelectorAll('.vol').forEach((el) => (el.value = Math.round(this.save.settings[el.dataset.vol] * 100)));
   }
 
   applySkin() {
-    applySkin(SKINS[this.save.skins.sel] || SKINS.void);
+    const sk = SKINS[this.save.skins.sel] || SKINS.void;
+    applySkin(sk);
+    if (this.world && this.world.markMat) this.world.markMat.color.set(sk.rim);
+    if (this.world && this.world.silMat) this.world.silMat.color.set(sk.rim);
+    if (this.enemies) this.enemies.cEdible.set(sk.rim);
   }
 
   applyMapLook(id) {
@@ -131,11 +171,14 @@ export class Game {
     if (this.world.themeId === map && this.world.seed === seed) return;
     this.world.dispose();
     this.world = new World(this.scene, seed, map);
+    this.world.markGame = this;
     this.applyMapLook(map);
+    if (this.enemies) this.enemies.setTheme(map);
+    this.applySkin();
     this.world.setHole(this.hole.x, this.hole.z, this.hole.r);
   }
 
-  showTitle() {
+  showTitle(silent = false) {
     this.state = 'title';
     Audio.stopMusic();
     const ui = this.ui;
@@ -153,7 +196,8 @@ export class Game {
     const sel = this.save.sel.map;
     this.setWorld(this.save.maps[sel].unlocked ? sel : this.world.themeId);
     this.metaUI.renderTitle();
-    this.metaUI.maybePopup();
+    // 출석 보상 모달은 첫 판을 끝낸 뒤부터
+    if (!silent && this.save.stats.runs >= 1) this.metaUI.maybePopup();
   }
 
   // ---------- 런 ----------
@@ -190,6 +234,9 @@ export class Game {
       coin: dm.coin * (md.coin || 1),
       weights: MAPS[map].weights,
       tint: MAPS[map].enemyTint,
+      bossTint: MAPS[map].bossTint,
+      bossName: MAPS[map].bossName,
+      miniName: MAPS[map].miniName,
     };
     ['#title', '#pause', '#result', '#levelup', '#sheet', '#modal'].forEach((s) => ui.hide(s));
     ui.show('#hud');
@@ -224,7 +271,8 @@ export class Game {
     this.tierIdx = CFG.sizeTiers.findIndex((t) => t > r0);
     this.endT = 0;
     this.cleared = false;
-    this.camDist = CFG.cam.dist + r0 * CFG.cam.distPerR;
+    this.camDist = this.camWant(r0);
+    this.camFocus = null;
     this.state = 'play';
     this.noLevelUp = false;
     this.input.enabled = true;
@@ -233,10 +281,16 @@ export class Game {
     ui.setLowHp(false);
     Audio.init();
     Audio.resume();
-    Audio.setIntensity(0);
+    Audio.setMusicMode('normal');
     Audio.startMusic();
     this.tutorialT = 0;
-    if (!this.save.tutorialDone) ui.show('#tutorial');
+    this.tutorial = !!opts.tutorial || !this.save.tutorialDone;
+    this.tutCount = 0;
+    ui.hide('#tutorial');
+    if (this.tutorial) {
+      ui.show('#tutorial');
+      ui.setTutorial(0);
+    }
     if (mod && mod.startSkill) {
       for (let i = 0; i < mod.startSkill[1]; i++) this.skills.apply({ kind: 'skill', id: mod.startSkill[0] });
       ui.renderSkillbar(this.skills);
@@ -257,9 +311,11 @@ export class Game {
   pause() {
     if (this.state !== 'play') return;
     this.state = 'paused';
+    Audio.pauseMusic();
     this.input.release();
     this.ui.renderSkillbar(this.skills);
     this.ui.show('#pause');
+    this.syncVolumes();
   }
 
   resume() {
@@ -267,6 +323,8 @@ export class Game {
     this.ui.hide('#pause');
     this.state = 'play';
     this.last = performance.now();
+    Audio.resume();
+    Audio.resumeMusic();
   }
 
   // ---------- 이벤트 ----------
@@ -348,7 +406,7 @@ export class Game {
   onSwallowProp(it) {
     this.stats.swallowed++;
     this.countCombo(it.size);
-    this.gainXp(CFG.propXp(it.size) * CFG.xpFalloff(this.hole.targetR));
+    this.gainXp(CFG.propXp(it.size) * 0.4 * CFG.xpFalloff(this.hole.targetR));
     this.grow(it.size, CFG.hole.growthK);
     const h = this.hole;
     this.fx.burst(it.x, 0.4, it.z, 3 + it.size * 3, it.size * 0.6, ['#c79bff', '#ffffff', '#8a6bff']);
@@ -360,7 +418,7 @@ export class Game {
 
   onKill(e, swallowed) {
     this.stats.kills++;
-    const xp = e.def.xp * Math.pow(e.baseSize / e.def.size, 1.3);
+    const xp = e.def.xp * 0.35 * (e.baseSize / e.def.size);
     if (swallowed) {
       this.stats.swallowed++;
       this.countCombo(e.size);
@@ -436,7 +494,7 @@ export class Game {
     const coins =
       Math.floor((this.time * C.perSec + st.kills * C.perKill + st.swallowed * C.perSwallow + (this.cleared ? C.clear : 0)) * this.skills.coinMul() * this.coinMul * this.mods.coin) + this.bonusCoins;
     const mapBest = run.daily ? this.save.daily.challenge.best : this.save.maps[run.map].best.time;
-    const newBest = this.time > mapBest;
+    const newBest = this.time > mapBest && this.time >= 10;
     const meta = Meta.recordRun({
       map: run.map,
       diff: run.diff,
@@ -470,6 +528,8 @@ export class Game {
       mapName: MAPS[run.map].name,
       diff: run.diff,
       meta,
+      walletAfter: this.save.coins,
+      nextUpg: Meta.nextUpgrade(),
     });
   }
 
@@ -478,6 +538,7 @@ export class Game {
     this.input.release();
     Audio.levelUp();
     vibrate(25);
+    Audio.setMusicMode('levelup');
     const pick = (choices) => this.ui.showLevelUp(choices, this.skills, onPick, this.rerolls, () => {
       if (this.rerolls <= 0) return;
       this.rerolls--;
@@ -485,6 +546,15 @@ export class Game {
       pick(this.skills.choices(3));
     });
     const onPick = (c) => {
+      Audio.setMusicMode(this.enemies.boss ? 'boss' : 'normal');
+      if (c.kind === 'evo') {
+        this.ui.banner(`진화!<small>${EVOLUTIONS[c.id].name}</small>`, 'evo');
+        this.flashScreen('rgba(220,190,255,0.5)');
+        this.fx.ring(this.hole.x, this.hole.z, this.hole.r * 4 + 6, '#ffffff', 0.8);
+        this.fx.burst(this.hole.x, 1, this.hole.z, 50, 2, ['#ff6b6b', '#ffd24a', '#8dff4a', '#3ff0ff', '#a861ff']);
+        this.shake(0.8);
+        Audio.evolve();
+      }
       Audio.select();
       this.skills.apply(c);
       this.ui.renderSkillbar(this.skills);
@@ -496,30 +566,106 @@ export class Game {
     pick(this.skills.choices(3));
   }
 
+  // 화면 밖 목표(삼킬 수 있게 된 보스, 먹을 만한 큰 물체)를 가리키는 가장자리 화살표
+  updateArrow() {
+    const el = this.ui.arrow;
+    const h = this.hole;
+    const boss = this.enemies.boss;
+    let tgt = null;
+    let label = '';
+    let gold = false;
+    if (boss && boss.size < h.r * CFG.hole.fit) {
+      tgt = boss;
+      label = '삼켜!';
+      gold = true;
+    } else if (this.world.bigTarget) {
+      tgt = this.world.bigTarget;
+      label = '';
+    }
+    if (!tgt) {
+      el.style.display = 'none';
+      return;
+    }
+    const v = (this._av ||= new THREE.Vector3());
+    v.set(tgt.x, 0.5, tgt.z).project(this.camera);
+    let sx = v.x;
+    let sy = v.y;
+    const on = Math.abs(sx) < 0.85 && Math.abs(sy) < 0.8 && v.z < 1;
+    if (on && !gold) {
+      el.style.display = 'none';
+      return;
+    }
+    if (v.z > 1) {
+      sx = -sx;
+      sy = -sy;
+    }
+    const W = this.w;
+    const H = this.h;
+    let px = (sx * 0.5 + 0.5) * W;
+    let py = (-sy * 0.5 + 0.5) * H;
+    const cx = W / 2;
+    const cy = H / 2;
+    let ang = Math.atan2(py - cy, px - cx);
+    if (!on) {
+      // HUD(위 180px)와 스킬바(아래 70px)를 피한 사각형 가장자리로
+      const top = 190;
+      const bot = H - 80;
+      const ccy = (top + bot) / 2;
+      ang = Math.atan2(py - ccy, px - cx);
+      const mx = W / 2 - 34;
+      const my = (bot - top) / 2;
+      const k = Math.min(mx / Math.abs(Math.cos(ang) || 1e-6), my / Math.abs(Math.sin(ang) || 1e-6));
+      px = cx + Math.cos(ang) * k;
+      py = ccy + Math.sin(ang) * k;
+    } else {
+      py -= 60;
+      ang = Math.PI / 2;
+    }
+    el.style.display = 'block';
+    el.classList.toggle('gold', gold);
+    el.style.transform = `translate(${px.toFixed(0)}px, ${py.toFixed(0)}px)`;
+    el.firstChild.style.transform = `rotate(${ang.toFixed(3)}rad)`;
+    if (el.lastChild.textContent !== label) el.lastChild.textContent = label;
+  }
+
   // ---------- 타임라인 ----------
   timeline() {
     const t = this.time;
     const h = this.hole;
+    const front = (size) => {
+      const H = CFG.map.half + 4;
+      const z = h.z - (this.viewFar + size * 0.8);
+      return [h.x, z < -H ? h.z + this.viewNear + size : z];
+    };
     if (!this.miniSpawned && t >= CFG.run.miniAt) {
       this.miniSpawned = true;
-      this.ui.banner('경고! 미니보스<small>청소 트럭 대장 접근 중</small>', 'boss');
+      this.ui.banner(`경고! 미니보스<small>${this.mods.miniName} 접근 중</small>`, 'boss');
       Audio.warn();
-      const [x, z] = this.enemies.spawnPos(h, this.camDist * 0.8);
       const p = t / CFG.run.length;
-      this.enemies.spawn('mini', x, z, 1 + p * 0.5, (1 + p) * this.mods.hpE);
+      const [x, z] = front(5);
+      this.enemies.spawn('mini', x, z, 1 + p * 0.4, (1 + p) * this.mods.hpE);
     }
     if (!this.bossWarned && t >= CFG.run.bossAt - 3) {
       this.bossWarned = true;
-      this.ui.banner('경고! 보스 출현<small>거대 청소 메카: 공격해서 줄인 뒤 삼켜라!</small>', 'boss');
+      this.ui.banner(`경고! 보스 출현<small>${this.mods.bossName}: 공격해서 줄인 뒤 삼켜라!</small>`, 'boss');
       Audio.warn();
       vibrate([80, 60, 80]);
     }
     if (!this.bossSpawned && t >= CFG.run.bossAt) {
       this.bossSpawned = true;
-      const [x, z] = this.enemies.spawnPos(h, this.camDist * 0.75);
-      this.enemies.spawn('boss', x, z, 1, this.mods.hpE);
-      Audio.setIntensity(1);
-      this.shake(1.5);
+      const [x, z] = front(11);
+      // 일반 적 정리 + 5초 무적 + 보스 비추는 카메라 인트로
+      this.enemies.clearMinions();
+      const b = this.enemies.spawn('boss', x, z, 1, this.mods.hpE);
+      if (b) {
+        b.introT = 3.2;
+        this.camFocus = { x, z, t: 0, T: 3.2 };
+      }
+      h.invuln = Math.max(h.invuln, 5);
+      this.flashScreen('rgba(255,170,210,0.35)');
+      Audio.setMusicMode('boss');
+      Audio.boom(1);
+      this.shake(0.8);
     }
   }
 
@@ -553,31 +699,56 @@ export class Game {
     h.r += (h.targetR - h.r) * Math.min(1, dt * CFG.hole.visualLerp);
     this.world.setHole(h.x, h.z, h.r);
 
-    // 튜토리얼
-    if (!this.save.tutorialDone) {
-      if (moving) this.tutorialT += dt;
-      if (this.tutorialT > 1.5 && this.stats.swallowed >= 3) {
-        this.save.tutorialDone = true;
-        Save.save();
-        this.ui.hide('#tutorial');
-      }
-    }
-
     this.timeline();
-    this.enemies.updateSpawns(dt, this.time, h);
+    if (!this.tutorial) this.enemies.updateSpawns(dt, this.time, h);
+    this.updateArrow();
     const pull = this.skills.update(dt, h);
     const eaten = this.world.update(dt, h, this.skills.horizonMul(), pull);
     for (const it of eaten) this.onSwallowProp(it);
+    // 튜토리얼: 작은 것 3개 먹기
+    if (this.tutorial) {
+      if (moving) this.tutorialT += dt;
+      if (this.tutCount !== this.stats.swallowed) {
+        this.tutCount = Math.min(3, this.stats.swallowed);
+        this.ui.setTutorial(this.tutCount);
+      }
+      if (this.stats.swallowed >= 3 || this.time > 40) {
+        this.tutorial = false;
+        this.save.tutorialDone = true;
+        Save.save();
+        this.ui.hide('#tutorial');
+        this.ui.banner('좋아!<small>작은 로봇은 먹고, 빨간 원 로봇은 피해!</small>', 'level');
+        Audio.levelUp();
+      }
+    }
+
     this.enemies.update(dt, h, this.time);
     if (Math.random() < 0.5) this.fx.suck(h.x, h.z, h.r, 1);
     if (this.combo > 0 && this.time - this.lastSwallowT > CFG.combo.window) this.combo = 0;
     this.ui.setLowHp(h.hp / h.maxHp < 0.3 && this.state === 'play');
   }
 
+  // 홀 반지름에 맞는 카메라 거리 (세로 화면 aspect 보정: 화면 가로 폭 = baseW + r * wPerR)
+  camWant(r) {
+    const tanH = Math.tan((CFG.cam.fov * Math.PI) / 360) * Math.max(0.3, this.camera.aspect);
+    const W = CFG.cam.baseW + r * CFG.cam.wPerR;
+    return W / (2 * tanH);
+  }
+
   updateCamera(dt) {
     const h = this.hole;
-    const want = CFG.cam.dist + h.r * CFG.cam.distPerR;
-    this.camDist += (want - this.camDist) * Math.min(1, dt * CFG.cam.lerp);
+    let want = this.camWant(h.r);
+    const f = this.camFocus;
+    let fw = 0;
+    if (f) {
+      f.t += dt;
+      const k = f.t / f.T;
+      fw = k < 0.2 ? k / 0.2 : k > 0.8 ? (1 - k) / 0.2 : 1;
+      fw = fw * fw * (3 - 2 * fw);
+      want *= 1 + 0.35 * fw;
+      if (f.t >= f.T) this.camFocus = null;
+    }
+    if (dt > 0) this.camDist += (want - this.camDist) * Math.min(1, dt * (f ? 4 : CFG.cam.lerp));
     // 카메라 펀치 (스프링)
     this.camPunchV += (-this.camPunch * 60 - this.camPunchV * 9) * dt;
     this.camPunch += this.camPunchV * dt;
@@ -585,6 +756,10 @@ export class Game {
     const tilt = (CFG.cam.tilt * Math.PI) / 180;
     let tx = h.x;
     let tz = h.z;
+    if (f) {
+      tx += (f.x - h.x) * fw;
+      tz += (f.z - h.z) * fw;
+    }
     let ang = 0;
     if (this.state === 'title') {
       this.titleAngle += dt * 0.12;
@@ -597,10 +772,18 @@ export class Game {
     this.shakeAmt = Math.max(0, this.shakeAmt - dt * 3);
     const sa = this.shakeAmt * this.shakeAmt * (0.4 + h.r * 0.08);
     this.camera.position.set(cx + (Math.random() - 0.5) * sa, cy + (Math.random() - 0.5) * sa, cz + (Math.random() - 0.5) * sa);
-    this.camera.lookAt(tx, 0, tz - (this.state === 'title' ? 0 : d * 0.04));
-    const far = d * 1.3 + 40;
-    this.scene.fog.near = far * 0.75;
-    this.scene.fog.far = far * 1.6 + 30;
+    this.camera.lookAt(tx, 0, tz);
+    // 화면에 보이는 바닥 범위 (스폰/정리 기준)
+    const vf = (CFG.cam.fov * Math.PI) / 360;
+    const tanH = Math.tan(vf) * this.camera.aspect;
+    const hc = d * Math.sin(tilt);
+    const topA = tilt - vf;
+    const botA = tilt + vf;
+    this.viewFar = (topA > 0.05 ? hc / Math.tan(topA) : d * 3) - off;
+    this.viewNear = off - (botA < Math.PI / 2 ? hc / Math.tan(botA) : hc / Math.tan(botA));
+    this.viewHalfW = d * tanH * 1.05;
+    this.scene.fog.near = d * 1.25;
+    this.scene.fog.far = d * 2.6 + 20;
   }
 
   loop(t) {
@@ -643,7 +826,7 @@ export class Game {
     }
     this.fx.update(this.state === 'paused' || this.state === 'levelup' ? 0 : dt, this.w, this.h);
     this.updateCamera(this.state === 'paused' || this.state === 'levelup' ? 0 : dt);
-    this.renderer.render(this.scene, this.camera);
+    if (!NORENDER || this.frames % 30 === 0) this.renderer.render(this.scene, this.camera);
     this.frames++;
   }
 
