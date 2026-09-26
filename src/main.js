@@ -7,8 +7,8 @@ import { Particles, Popups } from './fx.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
 import { createInput } from './input.js';
-import { save, loadSave, persist, buyUpgrade, buySkin, selectSkin, selectTheme, claimStreak, ensureDaily } from './data.js';
-import { initAudio, unlockAudio, setMuted, startMusic, sfx, suspendAudio, resumeAudio } from './audio.js';
+import { save, loadSave, persist, buyUpgrade, buySkin, selectSkin, selectTheme, claimStreak, ensureDaily, levelUpSkin, unlockSkinFrags } from './data.js';
+import { initAudio, unlockAudio, setMuted, setMusicMuted, startMusic, sfx, suspendAudio, resumeAudio } from './audio.js';
 
 const q = new URLSearchParams(location.search);
 const num = (k) => (q.has(k) && q.get(k) !== '' && !isNaN(+q.get(k)) ? +q.get(k) : undefined);
@@ -22,6 +22,7 @@ const opts = {
   fast: num('fast') || 1,
   fortHp: num('forthp'),
   noRevive: q.has('norevive'),
+  noTutorial: q.has('notut'),
   chunks: q.get('chunks') ? q.get('chunks').split(',') : null,
 };
 
@@ -36,7 +37,7 @@ const swarm = new Swarm();
 const parts = new Particles(world.scene);
 loadSave();
 ensureDaily();
-initAudio(save.muted);
+initAudio(save.muteSfx, save.muteMusic);
 const hat = new Hat(world.scene);
 
 let game;
@@ -54,15 +55,18 @@ const ui = new UI(uiRoot, {
   pause: () => game.pause(),
   resume: () => game.resume(),
   toTitle: () => game.titleSetup(),
-  toggleMute: () => { save.muted = !save.muted; setMuted(save.muted); persist(); ui.refreshMute(); },
+  toggleSfx: () => { save.muteSfx = !save.muteSfx; setMuted(save.muteSfx); persist(); ui.refreshMute(); },
+  toggleMusic: () => { save.muteMusic = !save.muteMusic; setMusicMuted(save.muteMusic); persist(); ui.refreshMute(); },
+  levelUpSkin: (id) => { const ok = levelUpSkin(id); if (ok) { sfx.powerup(); game.applySkin(); } return ok; },
+  unlockFrags: (id) => { const ok = unlockSkinFrags(id); if (ok) { sfx.powerup(); game.applySkin(); } return ok; },
   buy: (id) => { const ok = buyUpgrade(id); if (ok) sfx.powerup(); return ok; },
 });
 const popups = new Popups(ui.fx, world.camera);
 game = new Game({ world, chars, ents, swarm, parts, popups, ui, opts, hat });
 
 createInput(canvas, (a) => { unlockAudio(); game.action(a); });
-// 첫 터치 이후 오디오 재개
-const firstTouch = () => { unlockAudio(); window.removeEventListener('pointerdown', firstTouch, true); };
+// 첫 터치 이후 오디오 재개 + 음악 시작 (타이틀 루프 포함)
+const firstTouch = () => { unlockAudio(); startMusic(); window.removeEventListener('pointerdown', firstTouch, true); };
 window.addEventListener('pointerdown', firstTouch, true);
 
 function resize() {
@@ -79,6 +83,9 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('blur', () => game.pause());
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
+// 첫 실행: 메뉴 없이 바로 튜토리얼 달리기
+if (!save.tutorialDone && !opts.noTutorial) game.startRun(false);
+
 let fpsEl = null, fpsAcc = 0, fpsN = 0;
 if (opts.debug) {
   fpsEl = document.createElement('div');
@@ -86,6 +93,7 @@ if (opts.debug) {
   uiRoot.appendChild(fpsEl);
 }
 window.__game = game;
+window.__sfx = sfx;
 
 let last = performance.now();
 function frame(now) {

@@ -1,6 +1,7 @@
 // DOM UI: 타이틀(메타 진행), HUD, 일시정지, 부활, 결과, 업그레이드, 컬렉션, 미션, 업적/통계, 테마, 튜토리얼
 import { CFG, SKINS, THEMES } from './config.js';
-import { save, persist, upgradeCost, ensureDaily, missionText, ACHS, achCount, badges, streakAvailable, STREAK_REWARDS, weeklyState } from './data.js';
+import { save, persist, upgradeCost, ensureDaily, missionText, ACHS, achCount, achGem, badges, streakAvailable, STREAK_REWARDS, weeklyState, features, newFeatures, skinLv, skinUpCost, perkScale, SKIN_MAX_LV, SKIN_UNLOCK_FRAGS } from './data.js';
+import { SkinPreview } from './preview.js';
 import { PU_NAMES } from './entities.js';
 
 const SVG = {
@@ -13,6 +14,8 @@ const SVG = {
   skin: '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="12" height="17" rx="6" fill="#fff"/><circle cx="10" cy="11" r="1.6" fill="#223"/><circle cx="14" cy="11" r="1.6" fill="#223"/><path d="M6 6l2-4 3 3 1-3 1 3 3-3 2 4z" fill="#ffd23a"/></svg>',
   mission: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="19" rx="3" fill="#fff"/><path d="M8 9l2 2 4-4M8 15h8" stroke="#2a5ad0" stroke-width="2" fill="none" stroke-linecap="round"/></svg>',
   trophy: '<svg viewBox="0 0 24 24"><path d="M7 3h10v5a5 5 0 0 1-10 0z" fill="#fff"/><path d="M7 5H3a4 4 0 0 0 4 5M17 5h4a4 4 0 0 1-4 5" stroke="#fff" stroke-width="2" fill="none"/><path d="M10 13h4v4h3v4H7v-4h3z" fill="#fff"/></svg>',
+  close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>',
+  music: '<svg viewBox="0 0 24 24" fill="#fff"><path d="M9 17V5l11-2v12"/><circle cx="6.5" cy="17.5" r="3"/><circle cx="17.5" cy="15.5" r="3"/></svg>',
   map: '<svg viewBox="0 0 24 24"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z" fill="#fff"/><path d="M9 3v15M15 6v15" stroke="#2a5ad0" stroke-width="1.5"/></svg>',
 };
 const PU_CSS = { magnet: '#ff4a6a', shield: '#3ae0ff', boots: '#5aff6a', recruit: '#ffc83a' };
@@ -24,12 +27,18 @@ const fmt = (n) => Math.floor(n).toLocaleString('ko-KR');
 const GEM = '<span class="gem-ico"></span>';
 const COIN = '<span class="coin-ico"></span>';
 
+const FEAT_NAMES = { records: '기록', missions: '미션', shop: '업그레이드', skins: '컬렉션', ach: '업적', weekly: '주간 챌린지', themes: '테마' };
+
 export class UI {
   constructor(root, handlers) {
     this.root = root;
     this.hd = handlers;
     this.toastQ = [];
     this.toastBusy = false;
+    this.hold = false;
+    this.preview = null;
+    this.skinFocus = null;
+    this.confirmBuy = null;
     this.build();
   }
 
@@ -38,17 +47,16 @@ export class UI {
     r.innerHTML = '';
     this.hud = h(`<div id="hud" class="hidden">
       <div class="hudtop">
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <div class="hudbox" id="hDist">0<small>m</small></div>
-          <div class="hudbox small" id="hScore">0</div>
-        </div>
-        <div class="hudbox">${COIN}<span id="hCoins">0</span></div>
+        <div class="hudbox dist"><div><span id="hDist">0</span><small>m</small></div><div class="sc" id="hScore">0</div></div>
+        <div class="hudbox" id="hCoinBox">${COIN}<span id="hCoins">0</span></div>
         <button class="icon-btn" id="pauseBtn" aria-label="일시정지">${SVG.pause}</button>
       </div>
       <div class="progress"><i id="hProg" style="width:0%"></i><div class="castle">${SVG.castle}</div><div class="lbl" id="hSect">구간 1</div></div>
       <div class="pus" id="hPus"></div>
       <div id="countLbl">0</div>
       <div id="enemyLbls"></div>
+      <div class="battleHint hidden" id="bHint"><b>탭 연타!</b> 돌격 속도 UP<div class="rushbar"><i id="rushBar"></i></div></div>
+      <div class="cdown hidden" id="cdown">3</div>
     </div>`);
     r.appendChild(this.hud);
     this.fx = h('<div id="fxLayer" style="position:absolute;inset:0"></div>');
@@ -58,11 +66,11 @@ export class UI {
 
     this.title = h(`<div class="screen" id="title">
       <div class="top">
-        <div style="display:flex;gap:8px"><div class="coinpill">${COIN}<span id="tCoins">0</span></div><div class="coinpill">${GEM}<span id="tGems">0</span></div></div>
-        <button class="icon-btn" id="tMute" aria-label="음소거"></button>
+        <div style="display:flex;gap:8px"><div class="coinpill">${COIN}<span id="tCoins">0</span></div><div class="coinpill" id="tGemPill">${GEM}<span id="tGems">0</span></div></div>
+        <div style="display:flex;gap:6px"><button class="icon-btn" id="tMusic" aria-label="배경음"></button><button class="icon-btn" id="tMute" aria-label="효과음"></button></div>
       </div>
       <div class="logo"><h1>스웜 <span>서퍼</span></h1><div class="sub">SWARM SURFERS</div>
-        <div class="records"><div>최고 점수<b id="tBestS">0</b></div><div>최고 거리<b id="tBestD">0m</b></div><div>최고 인원<b id="tBestC">0</b></div></div>
+        <div class="records" id="tRecords"><div>최고 점수<b id="tBestS">0</b></div><div>최고 거리<b id="tBestD">0m</b></div><div>최고 인원<b id="tBestC">0</b></div></div>
         <button class="streak-btn hidden" id="tStreak"></button>
       </div>
       <div class="spacer"></div>
@@ -70,51 +78,51 @@ export class UI {
         <div class="mcard" id="tMcard"></div>
         <button class="btn big gold" id="tStart">달리기 시작</button>
         <button class="btn purple" id="tWeekly"></button>
-        <div class="nav">
-          <button id="tShop">${SVG.up}<span>업그레이드</span><i class="dot"></i></button>
-          <button id="tSkins">${SVG.skin}<span>컬렉션</span><i class="dot"></i></button>
-          <button id="tMis">${SVG.mission}<span>미션</span><i class="dot"></i></button>
-          <button id="tAch">${SVG.trophy}<span>업적</span><i class="dot"></i></button>
-          <button id="tTheme">${SVG.map}<span>테마</span><i class="dot"></i></button>
+        <div class="nav" id="tNav">
+          <button id="tShop" data-f="shop">${SVG.up}<span>업그레이드</span><i class="dot"></i><em>NEW</em></button>
+          <button id="tSkins" data-f="skins">${SVG.skin}<span>컬렉션</span><i class="dot"></i><em>NEW</em></button>
+          <button id="tMis" data-f="missions">${SVG.mission}<span>미션</span><i class="dot"></i><em>NEW</em></button>
+          <button id="tAch" data-f="ach">${SVG.trophy}<span>업적</span><i class="dot"></i><em>NEW</em></button>
+          <button id="tTheme" data-f="themes">${SVG.map}<span>테마</span><i class="dot"></i><em>NEW</em></button>
         </div>
       </div>
     </div>`);
     r.appendChild(this.title);
 
-    const panel = (id, title, body, foot = '') => h(`<div class="screen panel-wrap hidden" id="${id}"><div class="panel"><h2>${title}</h2>${body}<div class="actions">${foot}<button class="btn gray" data-close>닫기</button></div></div></div>`);
+    const panel = (id, title, body) => h(`<div class="screen panel-wrap sub hidden" id="${id}"><div class="panel"><button class="xbtn" data-close aria-label="닫기">${SVG.close}</button><h2>${title}</h2>${body}</div></div>`);
     this.shop = panel('shopP', '업그레이드', `<div class="curr"><div class="coinpill">${COIN}<span class="cC">0</span></div></div><div id="upgList"></div>`);
-    this.skins = panel('skinP', '컬렉션', `<div class="curr"><div class="coinpill">${GEM}<span class="cG">0</span></div></div><div class="hint">보석은 요새 격파, 미션 배수, 업적, 출석으로 얻어요</div><div id="skinList" class="skingrid"></div>`);
+    this.skins = panel('skinP', '컬렉션', `<div class="curr"><div class="coinpill">${GEM}<span class="cG">0</span></div></div><div class="pvwrap" id="pvHost"></div><div class="pvinfo" id="pvInfo"></div><div class="hint">보석이나 조각 ${SKIN_UNLOCK_FRAGS}개로 해금, 조각을 모아 레벨업하면 보너스가 커져요</div><div id="skinList" class="skingrid"></div>`);
     this.mis = panel('misP', '미션', '<div id="misBody"></div>');
     this.ach = panel('achP', '업적과 통계', '<div class="tabs"><button data-tab="a" class="on">업적</button><button data-tab="s">통계</button></div><div id="achBody"></div>');
     this.theme = panel('themeP', '시작 테마', '<div class="hint">구간을 넘어 새 테마에 도착하면 해금돼요</div><div id="themeList"></div>');
     for (const p of [this.shop, this.skins, this.mis, this.ach, this.theme]) {
       r.appendChild(p);
-      $('[data-close]', p).addEventListener('click', (e) => { e.stopPropagation(); this.hd.click(); p.classList.add('hidden'); this.refreshTitle(); });
+      $('[data-close]', p).addEventListener('click', (e) => { e.stopPropagation(); this.hd.click(); this.closePanel(p); });
     }
     this.ach.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); this.hd.click(); this.openAch(b.dataset.tab); }));
 
-    this.pause = h(`<div class="screen panel-wrap hidden"><div class="panel"><h2>일시정지</h2>
+    this.pause = h(`<div class="screen panel-wrap hidden" id="pauseP"><div class="panel"><h2>일시정지</h2>
       <div class="actions">
         <button class="btn big gold" id="pResume">계속하기</button>
         <button class="btn" id="pRestart">다시 시작</button>
         <button class="btn gray" id="pTitle">타이틀로</button>
-        <button class="btn gray" id="pMute">소리</button>
+        <div class="toggles"><button class="btn gray" id="pMusic">배경음</button><button class="btn gray" id="pMute">효과음</button></div>
       </div></div></div>`);
     r.appendChild(this.pause);
 
-    this.reviveP = h(`<div class="screen panel-wrap hidden"><div class="panel result">
+    this.reviveP = h(`<div class="screen panel-wrap hidden" id="reviveP"><div class="panel result">
       <h2>무리가 전멸했어요</h2>
-      <div class="lbl">보석으로 한 번 부활할 수 있어요</div>
-      <div class="big" style="font-size:40px;margin:10px 0" id="rvCount">10명으로 부활</div>
+      <div class="lbl" id="rvSub">보석으로 부활할 수 있어요</div>
+      <div class="rvbig">10명으로 부활</div>
       <div class="rvbar"><i id="rvBar"></i></div>
-      <div class="actions"><button class="btn big purple" id="rvYes"></button><button class="btn gray" id="rvNo">포기하기</button></div>
+      <div class="actions"><button class="btn big purple rvbtn" id="rvYes"></button><div class="rvcap" id="rvCap"></div><button class="btn gray" id="rvNo">포기하기</button></div>
     </div></div>`);
     r.appendChild(this.reviveP);
 
-    this.over = h(`<div class="screen panel-wrap hidden"><div class="panel result">
+    this.over = h(`<div class="screen panel-wrap hidden" id="overP"><div class="panel result">
       <h2 id="oHead">게임 오버</h2>
-      <div class="lbl">점수</div><div class="big" id="oScore">0</div>
-      <div class="lbl" id="oMult"></div>
+      <div class="lbl">총점</div><div class="big" id="oScore">0</div>
+      <div class="split"><div><span>거리 점수</span><b id="oDS">0</b><small id="oMult"></small></div><div><span>무리 점수</span><b id="oCS">0</b><small>요새 격파 시 인원 x 구간 x 10</small></div></div>
       <div id="oNew"></div><div class="cause" id="oCause"></div>
       <div class="grid">
         <div><span class="lbl">달린 거리</span><b id="oDist">0m</b></div>
@@ -136,19 +144,20 @@ export class UI {
     on('tMis', () => this.openMissions());
     on('tAch', () => this.openAch('a'));
     on('tTheme', () => this.openThemes());
-    on('tMute', () => this.hd.toggleMute());
-    on('tStreak', () => { const rw = this.hd.claimStreak(); if (rw) this.toast(`출석 ${save.streak.count}일째 보상: ${rw.c ? '코인 +' + rw.c : '보석 +' + rw.g}`); this.refreshTitle(); });
+    on('tMute', () => this.hd.toggleSfx());
+    on('tMusic', () => this.hd.toggleMusic());
+    on('tStreak', () => { const rw = this.hd.claimStreak(); if (rw) this.toast(`출석 ${save.streak.count}일째 보상: ${this.rwText(rw)}`); this.refreshTitle(); });
     on('pauseBtn', () => this.hd.pause());
     on('pResume', () => this.hd.resume());
     on('pRestart', () => this.hd.restart());
     on('pTitle', () => this.hd.toTitle());
-    on('pMute', () => this.hd.toggleMute());
-    on('rvYes', () => { clearInterval(this.rvTimer); this.hd.revive(); });
-    on('rvNo', () => { clearInterval(this.rvTimer); this.hd.giveUp(); });
+    on('pMute', () => this.hd.toggleSfx());
+    on('pMusic', () => this.hd.toggleMusic());
+    on('rvYes', () => this.hd.revive());
+    on('rvNo', () => this.hd.giveUp());
     on('oRetry', () => this.hd.restart());
     on('oShop', () => this.openShop());
     on('oTitle', () => this.hd.toTitle());
-    // UI 위에서 시작된 포인터가 게임 입력으로 새지 않게
     for (const el of r.querySelectorAll('.screen')) el.addEventListener('pointerdown', (e) => e.stopPropagation());
 
     this.countLbl = $('#countLbl', r);
@@ -158,46 +167,79 @@ export class UI {
     this.refreshTitle();
   }
 
+  rwText(rw) { return rw.c ? `코인 +${rw.c}` : rw.g ? `보석 +${rw.g}` : rw.frag ? `${rw.frag.name} 조각 +${rw.frag.n}` : '조각'; }
+
+  closePanel(p) {
+    p.classList.add('hidden');
+    if (p === this.skins && this.preview) this.preview.stop();
+    if (!this.title.classList.contains('hidden')) this.refreshTitle();
+  }
+
   refreshMute() {
-    const m = save.muted;
-    $('#tMute', this.root).innerHTML = m ? SVG.soundOff : SVG.soundOn;
-    $('#pMute', this.root).textContent = m ? '소리 켜기' : '소리 끄기';
+    $('#tMute', this.root).innerHTML = save.muteSfx ? SVG.soundOff : SVG.soundOn;
+    $('#tMusic', this.root).innerHTML = SVG.music;
+    $('#tMusic', this.root).classList.toggle('off', save.muteMusic);
+    $('#pMute', this.root).textContent = save.muteSfx ? '효과음 켜기' : '효과음 끄기';
+    $('#pMusic', this.root).textContent = save.muteMusic ? '배경음 켜기' : '배경음 끄기';
   }
 
   refreshTitle() {
     const r = this.root;
+    const F = features();
     $('#tCoins', r).textContent = fmt(save.coins);
     $('#tGems', r).textContent = fmt(save.gems);
+    $('#tGemPill', r).classList.toggle('hidden', !F.skins);
     $('#tBestS', r).textContent = fmt(save.bestScore);
     $('#tBestD', r).textContent = fmt(save.bestDist) + 'm';
     $('#tBestC', r).textContent = fmt(save.bestCount);
+    $('#tRecords', r).classList.toggle('hidden', !F.records);
     const sb = $('#tStreak', r);
-    if (streakAvailable()) {
+    if (F.missions && streakAvailable()) {
       const y = new Date(); y.setDate(y.getDate() - 1);
       const k = `${y.getFullYear()}-${y.getMonth() + 1}-${y.getDate()}`;
       const day = save.streak.last === k ? save.streak.count + 1 : 1;
       const rw = STREAK_REWARDS[(day - 1) % 7];
-      sb.innerHTML = `출석 ${day}일째 보상 받기 ${rw.c ? COIN + '+' + rw.c : GEM + '+' + rw.g}`;
+      sb.innerHTML = `출석 ${day}일째 보상 받기 ${rw.c ? COIN + '+' + rw.c : rw.g ? GEM + '+' + rw.g : '스킨 조각 +' + rw.f}`;
       sb.classList.remove('hidden');
     } else sb.classList.add('hidden');
-    // 미션 카드
     const ms = save.mset;
     const pips = [0, 1, 2].map((i) => `<i class="${i < ms.inSet ? 'on' : ''}"></i>`).join('');
-    $('#tMcard', r).innerHTML = `<div class="mhead"><span class="mult">x${ms.level}</span><span>미션 배수</span><span class="pips3">${pips}</span></div>` +
+    const mc = $('#tMcard', r);
+    mc.classList.toggle('hidden', !F.missions);
+    mc.innerHTML = `<div class="mhead"><span class="mult">x${ms.level}</span><span>미션 배수</span><span class="pips3">${pips}</span></div>` +
       ms.list.map((m) => `<div class="mrow"><span>${missionText(m)}</span><span class="mbar"><i style="width:${Math.min(100, (m.progress / m.target) * 100)}%"></i></span></div>`).join('');
     const w = weeklyState();
-    $('#tWeekly', r).innerHTML = w.claimed ? `주간 챌린지 완료! 최고 ${fmt(w.best)}m` : `주간 챌린지 ${fmt(w.target)}m 도전 ${GEM}+5`;
+    const wb = $('#tWeekly', r);
+    wb.classList.toggle('hidden', !F.weekly);
+    wb.innerHTML = w.claimed ? `주간 챌린지 완료! 최고 ${fmt(w.best)}m` : `주간 챌린지 ${fmt(w.target)}m 도전 ${GEM}+2`;
+    const nav = $('#tNav', r);
+    let anyNav = false;
+    nav.querySelectorAll('button').forEach((b) => { const on = !!F[b.dataset.f]; b.classList.toggle('hidden', !on); anyNav ||= on; });
+    nav.classList.toggle('hidden', !anyNav);
+    nav.style.gridTemplateColumns = `repeat(${Math.max(1, nav.querySelectorAll('button:not(.hidden)').length)}, 1fr)`;
     const b = badges();
     const set = (id, v) => $('#' + id + ' .dot', r).classList.toggle('on', !!v);
     set('tShop', b.shop); set('tSkins', b.skins); set('tMis', b.missions); set('tAch', b.ach); set('tTheme', b.themes);
+    // 새로 열린 기능 연출
+    const fresh = newFeatures();
+    for (const k of fresh) {
+      const btn = nav.querySelector(`[data-f="${k}"]`);
+      if (btn) btn.classList.add('fresh');
+      if (k === 'records') $('#tRecords', r).classList.add('reveal');
+      if (k === 'weekly') wb.classList.add('reveal');
+    }
+    const named = fresh.filter((k) => FEAT_NAMES[k] && k !== 'records');
+    if (named.length) this.toast(`새 기능 열림: ${named.map((k) => FEAT_NAMES[k]).join(', ')}`);
   }
 
   show(name) {
     for (const el of this.root.querySelectorAll('.screen')) el.classList.add('hidden');
+    if (this.preview) this.preview.stop();
     this.hud.classList.toggle('hidden', !(name === 'play' || name === 'pause'));
-    if (name === 'title') { this.refreshTitle(); this.title.classList.remove('hidden'); }
+    if (name === 'title') { this.title.classList.remove('hidden'); this.refreshTitle(); }
     if (name === 'pause') this.pause.classList.remove('hidden');
     if (name === 'over') this.over.classList.remove('hidden');
+    this.root.classList.toggle('playing', name === 'play');
   }
 
   openShop() {
@@ -218,31 +260,67 @@ export class UI {
     this.shop.classList.remove('hidden');
   }
 
+  // ---------- 컬렉션 ----------
   openSkins() {
+    if (!this.preview) { try { this.preview = new SkinPreview(); } catch (e) { this.preview = null; } }
+    if (!this.skinFocus) this.skinFocus = save.skins.sel;
+    this.renderSkins();
+    this.skins.classList.remove('hidden');
+    const sk = SKINS.find((s) => s.id === this.skinFocus) || SKINS[0];
+    if (this.preview) this.preview.start($('#pvHost', this.skins), sk);
+  }
+
+  renderSkins() {
     const list = $('#skinList', this.skins);
     list.innerHTML = '';
     $('.cG', this.skins).textContent = fmt(save.gems);
+    const focus = SKINS.find((s) => s.id === this.skinFocus) || SKINS[0];
+    const flv = skinLv(focus.id);
+    const owned0 = save.skins.owned.includes(focus.id);
+    $('#pvInfo', this.skins).innerHTML = `<b>${focus.name}</b> ${owned0 ? `<span class="lv">Lv.${flv}</span>` : '<span class="lv lock">잠김</span>'}<div>${focus.bonus}${owned0 && flv > 1 ? ` <small>(보너스 x${perkScale(focus.id).toFixed(2)})</small>` : ''}</div>`;
+    if (this.preview) this.preview.setSkin(focus);
     for (const s of SKINS) {
       const owned = save.skins.owned.includes(s.id);
       const sel = save.skins.sel === s.id;
-      const card = h(`<div class="skin ${sel ? 'sel' : ''} ${owned ? '' : 'locked'}" data-skin="${s.id}">
-        <div class="jel"><i style="background:${hex(s.crew[0])}"></i><i class="ld" style="background:${hex(s.leader)}"></i><i style="background:${hex(s.crew[1])}"></i></div>
-        <div class="sn">${s.name}</div><div class="sb">${s.bonus}</div>
-        <button class="btn ${sel ? 'gray' : owned ? '' : 'purple'}" ${!owned && save.gems < s.cost ? 'disabled' : ''}>${sel ? '사용 중' : owned ? '선택' : GEM + s.cost}</button></div>`);
-      card.querySelector('button').addEventListener('click', (e) => {
-        e.stopPropagation(); this.hd.click();
-        if (owned) this.hd.selectSkin(s.id);
-        else if (this.hd.buySkin(s.id)) this.toast(`${s.name} 해금!`);
-        this.openSkins();
+      const lv = skinLv(s.id);
+      const frags = save.skins.frags[s.id] || 0;
+      const need = owned ? skinUpCost(s.id) : SKIN_UNLOCK_FRAGS;
+      const thumb = this.preview ? this.preview.thumb(s) : '';
+      let btn = '';
+      if (owned) {
+        btn = `<button class="btn ${sel ? 'gray' : ''}" data-a="sel">${sel ? '사용 중' : '선택'}</button>`;
+        if (s.id === 'basic') btn += '<div class="maxlv">보너스 없음</div>';
+        else if (need != null) btn += `<button class="btn gold small" data-a="up" ${frags >= need ? '' : 'disabled'}>레벨업 ${frags}/${need}</button>`;
+        else btn += '<div class="maxlv">최대 레벨</div>';
+      } else {
+        const confirm = this.confirmBuy === s.id;
+        btn = `<button class="btn ${confirm ? 'red' : 'purple'}" data-a="buy" ${save.gems < s.cost ? 'disabled' : ''}>${confirm ? `정말 구매? ${GEM}${s.cost}` : GEM + s.cost}</button>`;
+        btn += `<button class="btn gold small" data-a="frag" ${frags >= SKIN_UNLOCK_FRAGS ? '' : 'disabled'}>조각 ${frags}/${SKIN_UNLOCK_FRAGS}</button>`;
+      }
+      const card = h(`<div class="skin ${sel ? 'sel' : ''} ${owned ? '' : 'locked'} ${this.skinFocus === s.id ? 'focus' : ''}" data-skin="${s.id}">
+        ${thumb ? `<img class="thumb" src="${thumb}" alt="">` : `<div class="jel"><i style="background:${hex(s.crew[0])}"></i><i class="ld" style="background:${hex(s.leader)}"></i><i style="background:${hex(s.crew[1])}"></i></div>`}
+        <div class="sn">${s.name}${owned ? ` <small>Lv.${lv}</small>` : ''}</div><div class="sb">${s.bonus}</div>${btn}</div>`);
+      card.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const a = e.target.closest('button')?.dataset.a;
+        this.hd.click();
+        if (a === 'sel') this.hd.selectSkin(s.id);
+        else if (a === 'up') { if (this.hd.levelUpSkin(s.id)) this.toast(`${s.name} Lv.${skinLv(s.id)}!`); }
+        else if (a === 'frag') { if (this.hd.unlockFrags(s.id)) this.toast(`${s.name} 해금!`); }
+        else if (a === 'buy') {
+          if (this.confirmBuy === s.id) { this.confirmBuy = null; if (this.hd.buySkin(s.id)) this.toast(`${s.name} 해금!`); }
+          else { this.confirmBuy = s.id; clearTimeout(this._cbT); this._cbT = setTimeout(() => { this.confirmBuy = null; if (!this.skins.classList.contains('hidden')) this.renderSkins(); }, 3000); }
+        }
+        this.skinFocus = s.id;
+        this.renderSkins();
       });
       list.appendChild(card);
     }
-    this.skins.classList.remove('hidden');
   }
 
   missionRow(m) {
     const pct = Math.min(100, (m.progress / m.target) * 100);
-    return `<div class="mission ${m.done ? 'done' : ''}"><div class="mt"><span>${missionText(m)}</span><span class="rw">+${m.reward}</span></div>
+    return `<div class="mission ${m.done ? 'done' : ''}"><div class="mt"><span>${missionText(m)}</span><span class="rw">+${Math.round(m.reward)}</span></div>
       <div class="bar"><i style="width:${pct}%"></i></div><div class="st">${m.done ? '완료! 보상 지급됨' : `${fmt(m.progress)} / ${fmt(m.target)}`}</div></div>`;
   }
 
@@ -251,18 +329,18 @@ export class UI {
     const pips = [0, 1, 2].map((i) => `<i class="${i < ms.inSet ? 'on' : ''}"></i>`).join('');
     const days = STREAK_REWARDS.map((rw, i) => {
       const got = save.streak.count > 0 && i < ((save.streak.count - 1) % 7) + 1;
-      return `<div class="day ${got ? 'got' : ''}"><small>${i + 1}일</small>${rw.c ? COIN + rw.c : GEM + rw.g}</div>`;
+      return `<div class="day ${got ? 'got' : ''}"><small>${i + 1}일</small>${rw.c ? COIN + rw.c : rw.g ? GEM + rw.g : '조각' + rw.f}</div>`;
     }).join('');
     $('#misBody', this.mis).innerHTML = `
       <h3>출석 보상 <small>연속 ${save.streak.count}일</small></h3><div class="days">${days}</div>
       ${streakAvailable() ? '<button class="btn gold" id="mStreak" style="width:100%;margin-bottom:8px">오늘 보상 받기</button>' : ''}
       <h3>미션 배수 x${ms.level} <span class="pips3">${pips}</span></h3>
-      <div class="hint">3개를 끝낼 때마다 배수가 올라 점수가 늘고 보석을 받아요</div>
+      <div class="hint">3개를 끝낼 때마다 배수가 올라 거리 점수가 늘어요</div>
       ${ms.list.map((m) => this.missionRow(m)).join('')}
       <h3>일일 미션</h3>${ensureDaily().map((m) => this.missionRow(m)).join('')}
       <div class="hint">매일 자정에 새 일일 미션이 열려요</div>`;
     const sb = $('#mStreak', this.mis);
-    if (sb) sb.addEventListener('click', (e) => { e.stopPropagation(); this.hd.click(); const rw = this.hd.claimStreak(); if (rw) this.toast(`출석 보상: ${rw.c ? '코인 +' + rw.c : '보석 +' + rw.g}`); this.openMissions(); });
+    if (sb) sb.addEventListener('click', (e) => { e.stopPropagation(); this.hd.click(); const rw = this.hd.claimStreak(); if (rw) this.toast(`출석 보상: ${this.rwText(rw)}`); this.openMissions(); });
     this.mis.classList.remove('hidden');
   }
 
@@ -276,7 +354,7 @@ export class UI {
         const done = !!save.ach[a.id];
         const v = Math.min(a.goal, a.v(save));
         return `<div class="achv ${done ? 'done' : ''}"><div class="medal">${done ? '★' : '☆'}</div><div class="info"><div class="name">${a.name}</div><div class="desc">${a.desc}</div>
-          <div class="bar"><i style="width:${(v / a.goal) * 100}%"></i></div></div><div class="rw">${GEM}${a.gem}</div></div>`;
+          <div class="bar"><i style="width:${(v / a.goal) * 100}%"></i></div></div><div class="rw">${GEM}${achGem(a)}</div></div>`;
       }).join('');
     } else {
       const s = save.stats;
@@ -309,26 +387,23 @@ export class UI {
     this.theme.classList.remove('hidden');
   }
 
-  showRevive(cost, gems) {
+  showRevive(cost, gems, nth) {
     for (const el of this.root.querySelectorAll('.screen')) el.classList.add('hidden');
-    $('#rvYes', this.reviveP).innerHTML = `부활하기 ${GEM}${cost} <small style="opacity:.8;font-size:14px">(보유 ${gems})</small>`;
+    $('#rvYes', this.reviveP).innerHTML = `부활하기 ${GEM}${cost}`;
+    $('#rvCap', this.reviveP).textContent = `보유 보석 ${fmt(gems)}개`;
+    $('#rvSub', this.reviveP).textContent = nth > 1 ? `${nth}번째 부활, 비용이 올라가요` : '보석으로 부활할 수 있어요';
+    this.reviveBar(1);
     this.reviveP.classList.remove('hidden');
-    let t = 6;
-    const bar = $('#rvBar', this.reviveP);
-    bar.style.width = '100%';
-    clearInterval(this.rvTimer);
-    this.rvTimer = setInterval(() => {
-      t -= 0.1;
-      bar.style.width = Math.max(0, (t / 6) * 100) + '%';
-      if (t <= 0) { clearInterval(this.rvTimer); this.hd.giveUp(); }
-    }, 100);
   }
+  reviveBar(f) { $('#rvBar', this.reviveP).style.width = (f * 100).toFixed(1) + '%'; }
 
   showOver(r) {
     this.reviveP.classList.add('hidden');
     $('#oHead', this.over).textContent = r.head;
     $('#oScore', this.over).textContent = fmt(r.score);
-    $('#oMult', this.over).textContent = `거리 ${fmt(r.dist)}m × 미션 배수 x${r.mult}`;
+    $('#oDS', this.over).textContent = fmt(r.distScore);
+    $('#oCS', this.over).textContent = fmt(r.crowdScore);
+    $('#oMult', this.over).textContent = `${fmt(r.dist)}m x 배수 x${r.mult}`;
     $('#oDist', this.over).textContent = fmt(r.dist) + 'm';
     $('#oNew', this.over).innerHTML = r.newBest ? '<span class="newbest">최고 점수!</span>' : '';
     $('#oCause', this.over).textContent = r.cause || '';
@@ -344,9 +419,9 @@ export class UI {
   // ---------- HUD ----------
   setHud(dist, coins, sectFrac, sect, themeName, score, mult) {
     const d = Math.floor(dist);
-    if (d !== this._d) { this._d = d; $('#hDist', this.hud).firstChild.nodeValue = fmt(d); }
+    if (d !== this._d) { this._d = d; $('#hDist', this.hud).textContent = fmt(d); }
     if (coins !== this._c) { this._c = coins; $('#hCoins', this.hud).textContent = fmt(coins); }
-    if (score !== this._sc) { this._sc = score; $('#hScore', this.hud).textContent = `${fmt(score)} 점 · x${mult}`; }
+    if (score !== this._sc) { this._sc = score; $('#hScore', this.hud).textContent = `${fmt(score)}점 · x${mult}`; }
     $('#hProg', this.hud).style.width = (Math.min(1, sectFrac) * 100).toFixed(1) + '%';
     const s = `구간 ${sect + 1} · ${themeName}`;
     if (s !== this._s) { this._s = s; $('#hSect', this.hud).textContent = s; }
@@ -389,18 +464,89 @@ export class UI {
     list.forEach((p, i) => { const bar = c.children[i]?.querySelector('i'); if (bar) bar.style.width = (p.frac * 100).toFixed(0) + '%'; });
   }
 
+  battleHint(on) {
+    if (on === this._bh) return;
+    this._bh = on;
+    $('#bHint', this.hud).classList.toggle('hidden', !on);
+  }
+  rushPulse() {
+    const b = $('#bHint', this.hud);
+    b.classList.remove('pulse'); void b.offsetWidth; b.classList.add('pulse');
+    const bar = $('#rushBar', this.hud);
+    this._rush = Math.min(1, (this._rush || 0) + 0.2);
+    bar.style.width = this._rush * 100 + '%';
+    clearTimeout(this._rushT);
+    this._rushT = setTimeout(() => { this._rush = 0; bar.style.width = '0%'; }, 1200);
+  }
+
+  countdown(n) {
+    const el = $('#cdown', this.hud);
+    el.classList.toggle('hidden', !n);
+    if (n) { el.textContent = n; el.classList.remove('go'); void el.offsetWidth; el.classList.add('go'); }
+  }
+
+  stamp(text, good) {
+    const el = h(`<div class="stamp ${good ? '' : 'bad'}">${text}!</div>`);
+    this.fx.appendChild(el);
+    setTimeout(() => el.remove(), 900);
+  }
+
+  crowdBonus(n) {
+    const el = h(`<div class="crowdBonus">무리 보너스 <b>+0</b></div>`);
+    this.fx.appendChild(el);
+    const b = el.querySelector('b');
+    const t0 = performance.now();
+    const tick = (now) => {
+      const k = Math.min(1, (now - t0) / 900);
+      b.textContent = '+' + fmt(n * (1 - Math.pow(1 - k, 3)));
+      if (k < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    setTimeout(() => el.remove(), 2600);
+  }
+
+  rewardCard(r) {
+    const el = h(`<div class="reward"><div class="rt">요새 격파!</div><div class="rm">x${r.mult}</div>
+      <div class="rr">${COIN}<b>+${fmt(r.coins)}</b></div>${r.gems ? `<div class="rr">${GEM}<b>+${r.gems}</b></div>` : ''}${r.frag ? `<div class="rf">${r.frag.name} 조각 +${r.frag.n}</div>` : ''}</div>`);
+    this.fx.appendChild(el);
+    setTimeout(() => el.classList.add('out'), 1500);
+    setTimeout(() => el.remove(), 1900);
+  }
+
+  // 화면 중앙에서 HUD 코인 칸으로 코인이 날아감
+  coinFly(n) {
+    const box = $('#hCoinBox', this.hud).getBoundingClientRect();
+    const root = this.root.getBoundingClientRect();
+    const tx = box.left - root.left + 16, ty = box.top - root.top + 16;
+    for (let i = 0; i < n; i++) {
+      const c = h('<span class="flycoin coin-ico"></span>');
+      const sx = root.width / 2 + (Math.random() - 0.5) * 160, sy = root.height * 0.66 + (Math.random() - 0.5) * 50;
+      c.style.left = sx + 'px'; c.style.top = sy + 'px';
+      this.fx.appendChild(c);
+      c.style.opacity = '0';
+      setTimeout(() => { c.style.opacity = '1'; }, 500 + i * 60);
+      setTimeout(() => { c.style.transform = `translate(${tx - sx}px, ${ty - sy}px) scale(.6)`; c.style.opacity = '0.3'; }, 650 + i * 60);
+      setTimeout(() => c.remove(), 1500 + i * 60);
+    }
+  }
+
   banner(text, sub = '') {
     const el = h(`<div class="banner">${text}${sub ? `<small>${sub}</small>` : ''}</div>`);
     this.fx.appendChild(el);
     setTimeout(() => el.remove(), 1900);
   }
 
-  // 토스트는 겹치지 않게 순서대로
+  // 토스트는 겹치지 않게 순서대로, 튜토리얼과 시작 직후에는 보류
+  holdToasts(on) {
+    this.hold = on;
+    if (!on && !this.toastBusy) this.nextToast();
+  }
   toast(text) {
     this.toastQ.push(text);
-    if (!this.toastBusy) this.nextToast();
+    if (!this.toastBusy && !this.hold) this.nextToast();
   }
   nextToast() {
+    if (this.hold) { this.toastBusy = false; return; }
     const text = this.toastQ.shift();
     if (!text) { this.toastBusy = false; return; }
     this.toastBusy = true;
@@ -421,12 +567,14 @@ export class UI {
     if (old) old.remove();
     if (!step) return;
     const map = {
-      lr: ['left', '좌우로 밀어서 레인 이동'],
-      up: ['up', '위로 밀면 무리가 파도처럼 점프'],
-      down: ['down', '아래로 밀면 슬라이드, 무리가 좁게 뭉침'],
+      lr: ['left', '기차가 와요! 옆으로 밀어서 레인 이동'],
+      up: ['up', '위로 밀어서 무리 전체가 파도 점프'],
+      down: ['down', '아래로 밀어서 슬라이드, 무리가 좁게 뭉쳐요'],
+      gate: ['right', '파란 게이트로! x2 는 인원이 두 배'],
+      enemy: ['tap', '적보다 많으면 이겨요! 탭 연타로 더 빨리'],
     };
     const [dir, text] = map[step];
-    this.fx.appendChild(h(`<div class="tut"><div class="hand ${dir}">${SVG.hand}</div><div class="txt">${text}</div></div>`));
+    const slow = step === 'lr' || step === 'up' || step === 'down';
+    this.fx.appendChild(h(`<div class="tut ${slow ? 'slow' : ''}"><div class="hand ${dir}">${SVG.hand}</div><div class="txt">${text}</div></div>`));
   }
 }
-
