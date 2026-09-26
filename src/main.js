@@ -1,15 +1,15 @@
 import './style.css';
 import {
-  CARDS, RELICS, BATTLE, CAMPAIGN, DECK_MAX, DECK_MIN, PLAYABLE, ARENAS, RUN_TIERS, TROPHY, ACHIEVEMENTS,
-  LEVEL_COST, CARD_MAX_LEVEL, CARD_LEVEL_BONUS, ENEMY_DECKS, stageParams,
+  CARDS, RELICS, CAMPAIGN, DECK_MAX, DECK_MIN, PLAYABLE, ARENAS, RUN_TIERS, TROPHY, ACHIEVEMENTS,
+  CARD_LEVEL_BONUS, ENEMY_DECKS, stageParams,
 } from './config.js';
-import { Battle, shuffle } from './battle.js';
+import { Battle } from './battle.js';
 import { AI } from './ai.js';
 import { Renderer, buildCardFace } from './render.js';
 import { UI, setFaceMaker, cardImg, lockedImg, relicImg, iconImg, crownSvg } from './ui.js';
 import { initAudio, sfx, playBgm, setMuted, suspendAudio } from './audio.js';
 import { loadRun, writeRun } from './storage.js';
-import { newRun, availableNodes, runRng, rollCards, rollRelics, enemySetup, NODE_INFO, copies } from './campaign.js';
+import { newRun, availableNodes, runRng, rollCards, rollRelics, enemySetup, NODE_INFO } from './campaign.js';
 import * as M from './meta.js';
 import { makeRng } from './rng.js';
 
@@ -33,7 +33,6 @@ const vib = (p) => {
   }
 };
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 const SPEAKER_ON = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 9h4l5-4v14l-5-4H4z" fill="#fff"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
 const SPEAKER_OFF = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 9h4l5-4v14l-5-4H4z" fill="#fff"/><path d="M16 9l6 6M22 9l-6 6" stroke="#ff8a8a" stroke-width="2.2" stroke-linecap="round"/></svg>';
@@ -275,10 +274,6 @@ class Game {
       }
       if (t.t < 6) this.tutView = { text: '같은 카드가 손에 오면 합성을 노려봐요' };
     }
-  }
-
-  get tutDraw() {
-    return this.tutView;
   }
 
   // ---------- 타이틀(로비) ----------
@@ -1360,8 +1355,3 @@ window.__ps = {
     return game.renderer.L;
   },
 };
-void shuffle;
-void BATTLE;
-void LEVEL_COST;
-void CARD_MAX_LEVEL;
-void copies;

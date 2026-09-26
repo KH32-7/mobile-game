@@ -279,7 +279,6 @@ export class Renderer {
     if (!b) return;
     ctx.save();
     ctx.translate(this.shakeX, this.shakeY);
-    this.drawArenaShake(ctx);
     this.drawRiver(ctx);
     this.drawMarks(ctx, b);
     const dragInfo = this.dragInfo(game);
@@ -306,8 +305,6 @@ export class Renderer {
       ctx.fillText(`fps ${game.fps | 0} x${game.timeScale}`, this.w - 66, this.L.hudH + 14);
     }
   }
-
-  drawArenaShake() {}
 
   drawRiver(ctx) {
     const L = this.L;

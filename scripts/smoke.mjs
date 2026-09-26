@@ -145,6 +145,16 @@ async function main() {
     // ---------- 1. 타이틀 + 메타 진행 ----------
     let page = await newPage(browser);
     await page.goto(BASE);
+    // 저장 마이그레이션: 구버전(v1) 기록 + 깨진 원정 데이터
+    await page.evaluate(() => {
+      localStorage.clear();
+      localStorage.setItem('pocketSiege.save.v1', JSON.stringify({ bestStage: 4, runWins: 1, battleWins: 7, tutDone: true, muted: false }));
+      localStorage.setItem('pocketSiege.run.v1', '{broken json');
+    });
+    await page.goto(BASE);
+    await page.waitForTimeout(400);
+    const mig = await page.evaluate(() => ({ v: window.__ps.profile.version, best: window.__ps.profile.stats.bestStage, wins: window.__ps.profile.stats.wins, run: window.__ps.game.run }));
+    assert(mig.v === 2 && mig.best === 4 && mig.wins === 7 && mig.run === null, 'v1 저장본 마이그레이션 + 깨진 데이터 안전 처리');
     await page.evaluate(() => localStorage.clear());
     await page.goto(BASE);
     await page.waitForTimeout(700);
