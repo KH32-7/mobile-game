@@ -639,6 +639,8 @@ export class UI {
     if (!g.run || g.paused || !['intro', 'ready', 'rolling', 'celebrate'].includes(g.state)) return;
     g.paused = true;
     g.aim = null;
+    document.querySelectorAll('.coach').forEach((e) => e.remove());
+    $('#hudHearts').classList.remove('spot');
     const rel = g.run.relics.map((id) => `<div class="shop-row sm"><img src="${relicIcon(id, 64)}" alt=""><div class="sr-t"><b>${RELIC_MAP[id].name}</b><small>${RELIC_MAP[id].desc}</small></div></div>`).join('');
     const root = this.screen(
       `<div class="menu-title">일시정지</div>

@@ -1259,7 +1259,7 @@ svg.gem {
   top: calc(var(--sat) + 110px);
   transform: translateX(-50%);
   width: min(88%, 360px);
-  z-index: 2;
+  z-index: 6;
   background: #fffaf0;
   color: var(--ink);
   border-radius: 16px;
