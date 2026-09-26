@@ -1,0 +1,21 @@
+import { chromium } from 'playwright';
+const args = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args });
+const dsf = Number(process.env.DSF || 2);
+const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: dsf });
+const page = await ctx.newPage();
+await page.goto('http://localhost:4820/' + (process.env.Q || ''));
+await page.waitForTimeout(800);
+await page.locator('#t-start').tap();
+await page.waitForTimeout(3000);
+const m = () => page.evaluate(() => new Promise((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 3000) requestAnimationFrame(f); else res(n / 3); }; requestAnimationFrame(f); }));
+console.log('fps', await m(), JSON.stringify(await page.evaluate(() => window.__perf)));
+await page.evaluate(() => { document.getElementById('hud').style.display='none'; document.getElementById('world-ui').style.display='none'; });
+console.log('nohud', await m());
+await page.evaluate(() => { document.getElementById('gl').style.visibility='hidden'; });
+console.log('nocanvas', await m());
+await page.evaluate(() => { document.getElementById('gl').style.visibility=''; __game.setSetting('shadows', false) });
+await page.waitForTimeout(1500);
+console.log('noshadow', await m());
+
+await b.close();
