@@ -3,6 +3,7 @@ import { T, PHYS } from './config.js';
 import { TILE, SLOPE_DIR } from './gen.js';
 import { cupPos, millAngle, moverPos } from './physics.js';
 import { mulberry32 } from './rng.js';
+import { drawBallSkin, drawFlag } from './draw.js';
 
 export const THEMES = [
   { name: '전반 9홀', hue: 100, sat: 58, light: 50, voidA: '#1f6b45', voidB: '#185a39', dot: 'rgba(120,200,120,0.18)', rail: '#fff3dc', railSide: '#caa472', bg: '#175434', sand: '#f4db8e', flag: '#ff3d3d' },
@@ -32,7 +33,7 @@ export function renderStatic(h, theme, S = 2) {
       x.fillStyle = theme.dot;
       for (let k = 0; k < 4; k++) {
         x.beginPath();
-        x.arc(tx * T + rng() * T, ty * T + rng() * T, 2 + rng() * 3, 0, 7);
+        x.arc(tx * T + rng() * T, ty * T + rng() * T, theme.stars ? 0.6 + rng() * 1.2 : 2 + rng() * 3, 0, 7);
         x.fill();
       }
     }
@@ -77,12 +78,13 @@ export function renderStatic(h, theme, S = 2) {
         for (let k = 0; k < 5; k++) x.fillRect(px + rng() * T, py + rng() * T, 1.4, 1.4);
       } else if (v === TILE.WATER) {
         const gr = x.createLinearGradient(px, py, px, py + T);
-        gr.addColorStop(0, '#3db3ff');
-        gr.addColorStop(1, '#1e88e5');
+        const wc = theme.water || ['#3db3ff', '#1e88e5'];
+        gr.addColorStop(0, wc[0]);
+        gr.addColorStop(1, wc[1]);
         x.fillStyle = gr;
         x.fillRect(px, py, T, T);
       } else if (v === TILE.ICE) {
-        x.fillStyle = chk ? '#dff6ff' : '#cdefff';
+        x.fillStyle = chk ? (theme.ice || ['#dff6ff'])[0] : (theme.ice || [0, '#cdefff'])[1];
         x.fillRect(px, py, T, T);
         x.strokeStyle = 'rgba(255,255,255,0.9)';
         x.lineWidth = 1.5;
@@ -225,10 +227,27 @@ export class Renderer {
     this.cv.width = Math.round(this.w * this.dpr);
     this.cv.height = Math.round(this.h * this.dpr);
   }
-  setHole(h, theme) {
+  setHole(h, theme, world) {
     this.hole = h;
     this.theme = theme;
+    this.world = world;
     this.layer = renderStatic(h, theme, 2);
+    // 월드 밖 배경 패턴 (벽 영역과 같은 무늬)
+    const pc = document.createElement('canvas');
+    pc.width = pc.height = T * 2;
+    const px = pc.getContext('2d');
+    const rng = mulberry32(99);
+    for (let k = 0; k < 4; k++) {
+      px.fillStyle = (k === 0 || k === 3) ? theme.voidB : theme.voidA;
+      px.fillRect((k % 2) * T, (k >> 1) * T, T, T);
+    }
+    px.fillStyle = theme.dot;
+    for (let k = 0; k < 12; k++) {
+      px.beginPath();
+      px.arc(rng() * T * 2, rng() * T * 2, theme.stars ? 0.6 + rng() * 1.2 : 2 + rng() * 3, 0, 7);
+      px.fill();
+    }
+    this.bgPattern = this.ctx.createPattern(pc, 'repeat');
     this.waterTiles = [];
     this.slopeTiles = [];
     const g = h.grid;
@@ -260,10 +279,31 @@ export class Renderer {
     c.scale(cam.scale, cam.scale);
     c.translate(-cam.x, -cam.y);
     // 월드 바깥 배경 패턴
+    if (this.bgPattern) {
+      const x0 = cam.x - this.w / 2 / cam.scale - 40,
+        y0 = cam.y - cam.cy / cam.scale - 40;
+      c.fillStyle = this.bgPattern;
+      c.fillRect(x0, y0, this.w / cam.scale + 80, this.h / cam.scale + 80);
+    }
     c.drawImage(this.layer, 0, 0, h.cols * T, h.rows * T);
     const st = G.st;
+    // 블랙홀 (우주 월드의 물)
+    if (this.world && this.world.blackhole) {
+      for (const [tx, ty] of this.waterTiles) {
+        const cx = tx * T + T / 2,
+          cy = ty * T + T / 2;
+        c.strokeStyle = 'rgba(200,120,255,0.55)';
+        c.lineWidth = 1.5;
+        for (let k = 0; k < 3; k++) {
+          const a = -time * 2.2 + k * 2.1 + tx + ty;
+          c.beginPath();
+          c.arc(cx, cy, 4 + k * 4, a, a + 2.2);
+          c.stroke();
+        }
+      }
+    }
     // 물결
-    c.strokeStyle = 'rgba(255,255,255,0.45)';
+    c.strokeStyle = this.world && this.world.blackhole ? 'rgba(0,0,0,0)' : 'rgba(255,255,255,0.45)';
     c.lineWidth = 1.5;
     c.beginPath();
     for (const [tx, ty] of this.waterTiles) {
@@ -545,29 +585,7 @@ export class Renderer {
       c.moveTo(p.x, p.y);
       c.lineTo(p.x + 14, p.y + 8);
       c.stroke();
-      c.strokeStyle = '#eeeeee';
-      c.lineWidth = 2.2;
-      c.beginPath();
-      c.moveTo(p.x, p.y);
-      c.lineTo(p.x, p.y - pole);
-      c.stroke();
-      c.fillStyle = th.flag;
-      c.beginPath();
-      const fy = p.y - pole;
-      c.moveTo(p.x + 1, fy);
-      const segs = 6;
-      for (let k = 1; k <= segs; k++) {
-        const u = k / segs;
-        c.lineTo(p.x + 1 + u * 20, fy + u * 6 + Math.sin(time * 6 - u * 3 + i) * 2.5 * u);
-      }
-      for (let k = segs; k >= 0; k--) {
-        const u = k / segs;
-        c.lineTo(p.x + 1 + u * 20, fy + 13 - u * 7 + Math.sin(time * 6 - u * 3 + i) * 2.5 * u);
-      }
-      c.closePath();
-      c.fill();
-      c.fillStyle = 'rgba(255,255,255,0.3)';
-      c.fillRect(p.x + 1, fy + 1, 5, 4);
+      drawFlag(c, p.x, p.y, pole, G.cos ? G.cos.flag : { id: 'theme' }, th.flag, time + i);
       c.globalAlpha = 1;
     });
     G.fx.draw(c);
@@ -651,7 +669,8 @@ export class Renderer {
       for (let i = 0; i < b.trail.length; i++) {
         const p = b.trail[i];
         const u = i / b.trail.length;
-        c.fillStyle = `rgba(255,255,255,${0.28 * u})`;
+        const tr = G.cos ? G.cos.trail : { color: '255,255,255' };
+        c.fillStyle = tr.rainbow ? `hsla(${(i * 30 + time * 200) % 360},90%,65%,${0.4 * u})` : `rgba(${tr.color},${(tr.id === 'basic' ? 0.28 : 0.45) * u})`;
         c.beginPath();
         c.arc(p[0], p[1], r * (0.4 + 0.6 * u), 0, 7);
         c.fill();
@@ -663,14 +682,7 @@ export class Renderer {
     c.beginPath();
     c.ellipse(bx + 2.5, by + 3.5, r * s, r * 0.8 * s, 0, 0, 7);
     c.fill();
-    const gr = c.createRadialGradient(bx - r * 0.4, by - r * 0.4, 0.5, bx, by, r * s);
-    gr.addColorStop(0, '#ffffff');
-    gr.addColorStop(0.7, '#f1f1f1');
-    gr.addColorStop(1, '#bdbdbd');
-    c.fillStyle = gr;
-    c.beginPath();
-    c.arc(bx, by, r * s, 0, 7);
-    c.fill();
+    drawBallSkin(c, bx, by, r * s, G.cos ? G.cos.ball : { colors: ['#fff', '#bdbdbd'] }, time);
     if (b.skimming) {
       c.strokeStyle = 'rgba(255,255,255,0.8)';
       c.lineWidth = 1.5;
@@ -684,9 +696,9 @@ export class Renderer {
   drawScreen(c, G, time) {
     // 바람 표시
     const h = this.hole;
-    if (h.wind && !G.M.windbreak && G.hudTop) {
-      const x = this.w - 58,
-        y = G.hudTop + 26;
+    if (h.wind && !G.M.windbreak && G.view) {
+      const x = 34,
+        y = G.view.bottom - 40;
       const a = Math.atan2(h.wind.y, h.wind.x);
       c.fillStyle = 'rgba(0,0,0,0.35)';
       c.beginPath();
@@ -712,7 +724,7 @@ export class Renderer {
       c.fillStyle = '#fff';
       c.font = `700 10px ${FONT}`;
       c.textAlign = 'center';
-      c.fillText('바람', x, y + 32);
+      c.fillText('바람', x, y - 28);
     }
     // 드래그 시작점 (취소 영역)
     if (G.aim && G.aim.sx != null) {

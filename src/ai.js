@@ -1,5 +1,5 @@
 // 자동 조준 (디버그 치트 + 생성기 검증용). 실제 물리로 후보 샷을 시뮬레이션해 가장 좋은 샷 선택
-import { T, PHYS } from './config.js';
+import { T } from './config.js';
 import { stepBall, cloneState, newBall, cupPos } from './physics.js';
 import { distField, lineClear, TILE } from './gen.js';
 
@@ -55,9 +55,6 @@ export function planShot(h, st, bx, by, M, maxSpeed, opts = {}) {
     const a = Math.atan2(c.y - by, c.x - bx);
     for (let p = 0.06; p <= 1.0; p += 0.04) cands.push([a, p]);
   }
-  // 경로상의 목표 지점 방향
-  const tx = Math.floor(bx / T),
-    ty = Math.floor(by / T);
   let best = null;
   const evalC = (a, p) => {
     const sp = p * maxSpeed;
@@ -81,9 +78,6 @@ export function planShot(h, st, bx, by, M, maxSpeed, opts = {}) {
         if (best.sc < -900) break;
       }
   }
-  void tx;
-  void ty;
   return best;
 }
 
-export { PHYS };
