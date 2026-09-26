@@ -9,7 +9,7 @@
 | 블록 조커 | 퍼즐 로그라이크 | Block Blast + Balatro | 2D Canvas | `game/block-joker` | [/block-joker/](https://kh32-7.github.io/mobile-game/block-joker/) |
 | 보이드 모 | 액션 로그라이트 | Hole.io, All in Hole + Survivor.io | 3D three.js | `game/void-maw` | [/void-maw/](https://kh32-7.github.io/mobile-game/void-maw/) |
 | 스웜 서퍼 | 엔드리스 러너 | Subway Surfers + Mob Control | 3D three.js | `game/swarm-surfers` | [/swarm-surfers/](https://kh32-7.github.io/mobile-game/swarm-surfers/) |
-| 포켓 시즈 | 실시간 전략 | Clash Royale + Merge Tactics + 로그라이크 | 2D Canvas | `game/pocket-siege` | [/pocket-siege/](https://kh32-7.github.io/mobile-game/pocket-siege/) |
+| 스시 루프 | 경영 타이쿤 | Pizza Ready + 컨베이어 벨트 퍼즐 | 3D three.js | `game/sushi-loop` | [/sushi-loop/](https://kh32-7.github.io/mobile-game/sushi-loop/) |
 | 로그 퍼트 | 스포츠 아케이드 | 미니골프 + 새총 조준 + 로그라이크 | 2D Canvas | `game/rogue-putt` | [/rogue-putt/](https://kh32-7.github.io/mobile-game/rogue-putt/) |
 
 ## 시장 조사 요약 (2026년 9월 기준)
@@ -44,10 +44,11 @@
 - 비튼 점: 혼자가 아니라 무리를 이끌고 달림. 숫자 게이트로 인원을 불리고, 레인보다 넓게 퍼진 무리가 장애물에 깎여 나감. 1000m마다 요새를 인원수로 부숨.
 - 다시 하게 만드는 이유: 인원 관리라는 두 번째 목표, 코인 업그레이드, 미션.
 
-### 4. 포켓 시즈 (실시간 전략, 2D)
-- 코어: Clash Royale식 엘릭서 카드 2레인 대전, AI 상대.
-- 비튼 점: 같은 카드를 필드의 내 유닛 위에 떨어뜨리면 합성(최대 3성). 10스테이지 로그라이크 원정으로 카드와 유물을 모아 덱을 키움. 킹 타워 HP 이월.
-- 다시 하게 만드는 이유: 덱빌딩, 갈림길 선택, "새로 뽑을까 키울까" 판단.
+### 4. 스시 루프 (경영 타이쿤, 3D)
+- 코어: Pizza Ready식 아이들 아케이드. 조이스틱으로 걸어 다니며 재료를 등에 쌓아 나르고, 발판을 밟아 조리하고, 돈을 모아 해금 발판으로 식당을 키움.
+- 비튼 점: 서빙이 컨베이어 벨트. 벨트 슬롯이 한정되어 있어서 손님 주문을 보고 올려야 하고, 안 팔린 접시는 말라서 치워야 함. 러시 타임, VIP 세트 주문, 콤보 팁.
+- 다시 하게 만드는 이유: 식당 이전(4곳 이상), 오프라인 수익, 직원 고용, 코스튬과 레시피 도감.
+- 참고: Pizza Ready는 2026년에도 하이퍼캐주얼 다운로드 1위([Business of Apps](https://www.businessofapps.com/data/most-popular-mobile-games/)).
 
 ### 5. 로그 퍼트 (스포츠 아케이드, 2D)
 - 코어: 새총식 드래그 조준 미니골프.
