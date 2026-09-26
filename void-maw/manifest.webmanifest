@@ -1,0 +1,13 @@
+{
+  "name": "보이드 모 - Void Maw",
+  "short_name": "보이드 모",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#1a1030",
+  "theme_color": "#1a1030",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
