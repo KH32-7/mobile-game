@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdirSync, existsSync } from 'node:fs';
 
-const PORT = +(process.env.PORT || 4391);
+const PORT = +(process.env.PORT || 47390);
 const BASE = `http://localhost:${PORT}/`;
 const SHOTS = new URL('../shots/', import.meta.url).pathname;
 mkdirSync(SHOTS, { recursive: true });
@@ -62,6 +62,7 @@ async function waitState(page, states, timeout = 15000) {
   return info(page);
 }
 async function skipIntro(page) {
+  await dismissCoach(page);
   const s = await info(page);
   if (s.state === 'intro') await page.tap('#cv', { position: { x: 20, y: 400 } });
   return waitState(page, ['ready']);
@@ -71,6 +72,15 @@ async function autoDragShot(page, cdp, midShot) {
   const box = await page.locator('#cv').boundingBox();
   await touchDrag(cdp, box.x + d.x0, box.y + d.y0, box.x + d.x1, box.y + d.y1, 14, midShot);
   return d;
+}
+async function dismissCoach(page) {
+  for (const el of await page.locator('.coach-ok').all()) if (await el.isVisible()) await el.tap();
+}
+async function pickReward(page) {
+  await dismissCoach(page);
+  await page.locator(".relic-opt").first().tap();
+  await page.waitForTimeout(700);
+  await dismissCoach(page);
 }
 const metaOf = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('roguePutt.meta')));
 
@@ -108,7 +118,7 @@ try {
     check(s.state === 'reward', '홀 클리어 후 보상 화면');
     await page.waitForTimeout(500);
     await page.screenshot({ path: SHOTS + '07_reward.png' });
-    await page.locator('.relic-opt').first().tap();
+    await pickReward(page);
     s = await waitState(page, ['intro', 'ready']);
     check(s.relics.length === 1 && s.hole === 2, `유물 1개 획득 후 2번 홀 (${s.relics})`);
     s = await skipIntro(page);
@@ -117,7 +127,7 @@ try {
     if (s.state !== 'ready') {
       // 한 번에 들어간 경우: 다음 홀에서 하트 제거
       s = await waitState(page, ['reward'], 8000);
-      await page.locator('.relic-opt').first().tap();
+      await pickReward(page);
       await skipIntro(page);
     }
     // 하트가 0이 될 때까지 (여분의 심장 유물이면 여러 번)
@@ -159,17 +169,24 @@ try {
         if (bossSeen.length <= 3) await page.screenshot({ path: SHOTS + `10_boss_${s.boss}.png` });
       }
       if (hole === 10) await page.screenshot({ path: SHOTS + '11_back_nine.png' });
+      if (hole === 14 && (await page.isVisible('#hudRelics .more'))) {
+        await page.tap('#hudRelics .more');
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: SHOTS + '11b_relic_sheet.png' });
+        await page.tap('#sheetClose');
+      }
       await page.tap('[data-a="sink"]');
       s = await waitState(page, ['reward', 'result'], 10000);
       if (s.state === 'result') break;
       if (hole === 4) await page.screenshot({ path: SHOTS + '12_reward_mid.png' });
-      await page.locator('.relic-opt').first().tap();
-      await page.waitForTimeout(150);
+      await pickReward(page);
       if (await page.isVisible('#next')) {
         shopSeen++;
         if (shopSeen === 1) await page.screenshot({ path: SHOTS + '13_shop.png' });
+        await dismissCoach(page);
         const buy = page.locator('.relic-opt:not([disabled])').first();
         if (await buy.count()) await buy.tap();
+        await page.waitForTimeout(300);
         await page.tap('#next');
       }
     }
@@ -243,7 +260,7 @@ try {
     console.log('[3] 이어하기');
     await page.tap('[data-a="sink"]');
     await waitState(page, ['reward']);
-    await page.locator('.relic-opt').first().tap();
+    await pickReward(page);
     await waitState(page, ['intro', 'ready']);
     const relicsBefore = (await info(page)).relics;
     await page.reload();
@@ -300,6 +317,53 @@ try {
     await p2.waitForSelector('#tStart');
     check((await metaOf(p2)).v === 3, '손상된 저장 데이터에서 복구');
     await c2.close();
+  }
+
+  // ===== 6. 소프트락 재현 (컵인 직후 일시정지) + 세이브 스컴 차단 =====
+  console.log('[6] 소프트락/세이브 스컴');
+  {
+    const { page, cdp, ctx } = await newPage();
+    await page.goto(BASE + '?debug&seed=4242');
+    await page.waitForSelector('#tStart');
+    await page.tap('#tStart');
+    await skipIntro(page);
+    await page.tap('[data-a="sink"]');
+    await waitState(page, ['celebrate']);
+    await page.tap('#btnPause');
+    await page.waitForTimeout(3500);
+    let s = await info(page);
+    check(s.state === 'celebrate' && (await page.evaluate(() => window.__game.paused)) && (await page.isVisible('#pResume')), '컵인 직후 일시정지: 보상 화면으로 넘어가지 않고 대기');
+    await page.screenshot({ path: SHOTS + '40_pause_celebrate.png' });
+    await page.tap('#pResume');
+    s = await waitState(page, ['reward'], 6000);
+    check(s.state === 'reward', '재개 후 보상 화면');
+    await pickReward(page);
+    s = await waitState(page, ['ready'], 6000);
+    await dismissCoach(page);
+    s = await waitState(page, ['ready'], 6000);
+    check(s.state === 'ready' && !(await page.evaluate(() => window.__game.paused)), '다음 홀 인트로에서 멈추지 않고 플레이 가능');
+    // 세이브 스컴: 약하게 여러 번 쳐서 하트를 잃은 뒤 새로고침
+    const box = await page.locator('#cv').boundingBox();
+    const h0 = s.hearts;
+    for (let k = 0; k < 8; k++) {
+      s = await info(page);
+      if (s.hearts < h0 || s.state !== 'ready') break;
+      const cx = box.x + box.width / 2,
+        cy = box.y + box.height * 0.55;
+      await touchDrag(cdp, cx, cy, cx + (k % 2 ? 12 : -12), cy + 26, 6);
+      await waitState(page, ['ready', 'decide', 'result', 'reward'], 15000);
+      await page.waitForTimeout(200);
+    }
+    s = await info(page);
+    check(s.hearts < h0, `약한 샷으로 하트 감소 (${h0} -> ${s.hearts}, ${s.strokes}타)`);
+    const before = { hearts: s.hearts, strokes: s.strokes, x: Math.round(s.ball.x), y: Math.round(s.ball.y) };
+    await page.reload();
+    await page.waitForSelector('#tCont');
+    await page.tap('#tCont');
+    s = await skipIntro(page);
+    const after = { hearts: s.hearts, strokes: s.strokes, x: Math.round(s.ball.x), y: Math.round(s.ball.y) };
+    check(JSON.stringify(before) === JSON.stringify(after), `이어하기 후 하트/타수/공 위치 유지 ${JSON.stringify(before)} = ${JSON.stringify(after)}`);
+    await ctx.close();
   }
 
   // ===== 5. 여러 화면 크기 =====

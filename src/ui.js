@@ -1,5 +1,5 @@
 // DOM UI: HUD, 오버레이 화면들 (타이틀, 보상, 상점, 결과, 일시정지, 메타 화면)
-import { RELICS, RELIC_MAP, CONSUMABLES, drawRelicIcon } from './relics.js';
+import { RELICS, RELIC_MAP, CONSUMABLES, RARITY, defOf, drawRelicIcon } from './relics.js';
 import { WORLDS, WORLD_MAP, STAR_GOALS, BALL_SKINS, TRAILS, FLAGS } from './worlds.js';
 import { RUN } from './config.js';
 import { fmtToPar } from './storage.js';
@@ -69,9 +69,11 @@ export class UI {
     });
     $('#btnMulligan').addEventListener('click', () => game.useMulligan());
     $('#hudRelics').addEventListener('click', (e) => {
-      const id = e.target && e.target.dataset && e.target.dataset.id;
-      const r = RELIC_MAP[id];
-      if (r) this.toast(`<b>${r.name}</b><br>${r.desc}`);
+      const btn = e.target.closest && e.target.closest('button');
+      if (!btn) return;
+      if (btn.dataset.more) return this.relicSheet();
+      const r = RELIC_MAP[btn.dataset.id];
+      if (r) this.toast(`<b>${r.name}${(game.run.relicLv || {})[r.id] >= 2 ? ' Lv2' : ''}</b><br>${(game.run.relicLv || {})[r.id] >= 2 ? r.up : r.desc}`);
     });
     if (opts.debug) {
       const db = $('#debugBar');
@@ -98,9 +100,9 @@ export class UI {
   // ---------- HUD ----------
   hud(g, flash) {
     const r = g.run;
-    const show = !!r && ['intro', 'ready', 'rolling', 'celebrate', 'decide'].includes(g.state);
+    const show = !!r && ['intro', 'ready', 'rolling', 'celebrate', 'decide', 'reward', 'shop'].includes(g.state);
     $('#hud').classList.toggle('hidden', !show);
-    $('#bottomBar').classList.toggle('hidden', !show);
+    $('#bottomBar').classList.toggle('hidden', !show || g.state === 'reward' || g.state === 'shop');
     if (!show) {
       $('#hudTimer').classList.add('hidden');
       return;
@@ -119,14 +121,112 @@ export class UI {
       void coinsEl.offsetWidth;
       coinsEl.classList.add('bump');
     }
-    const rel = r.relics.map((id) => `<img data-id="${id}" src="${relicIcon(id, 48)}" alt="${esc(RELIC_MAP[id].name)}">`).join('');
-    if ($('#hudRelics').dataset.k !== r.relics.join()) {
-      $('#hudRelics').innerHTML = rel;
-      $('#hudRelics').dataset.k = r.relics.join();
+    // 유물 줄: 최대 6칸, 넘치면 +N 칩. 발동형은 사용 가능 시 발광
+    const active = {
+      mulligan: g.canMulligan(),
+      brake: g.state === 'rolling',
+      skiwax: g.state === 'rolling',
+      shield: g.shieldLeft > 0,
+      lifevest: g.vestLeft > 0,
+      lastchance: !r.lastUsed,
+      luckytee: g.firstShot,
+      split: g.firstShot,
+      comeback: r.hearts <= 2,
+    };
+    const list = r.relics.slice().reverse();
+    const maxShow = list.length > 6 ? 5 : 6;
+    let html = list
+      .slice(0, maxShow)
+      .map((id) => `<button data-id="${id}" class="${active[id] ? 'glow' : ''}"><img src="${relicIcon(id, 64)}" alt="${esc(RELIC_MAP[id].name)}">${(r.relicLv || {})[id] >= 2 ? '<i>2</i>' : ''}</button>`)
+      .join('');
+    if (list.length > maxShow) html += `<button data-more="1" class="more">+${list.length - maxShow}</button>`;
+    const key = html;
+    if ($('#hudRelics').dataset.k !== key) {
+      $('#hudRelics').innerHTML = html;
+      $('#hudRelics').dataset.k = key;
       requestAnimationFrame(() => this.layoutView());
     }
     $('#btnMulligan').classList.toggle('hidden', !(g.canMulligan() && g.state === 'ready'));
     $('#hudTimer').classList.toggle('hidden', !(g.hole.timeLimit > 0));
+  }
+  relicSheet() {
+    const g = this.g;
+    if (!g.run) return;
+    const wasPaused = g.paused;
+    g.paused = true;
+    const el = document.createElement('div');
+    el.className = 'sheet-wrap';
+    el.innerHTML = `<div class="sheet"><div class="sheet-h">보유 유물 ${g.run.relics.length}개</div><div class="list">${g.run.relics
+      .map((id) => {
+        const d = RELIC_MAP[id];
+        const lv2 = (g.run.relicLv || {})[id] >= 2;
+        return `<div class="shop-row sm"><img src="${relicIcon(id, 64)}" alt=""><div class="sr-t"><b>${d.name}${lv2 ? ' Lv2' : ''}</b><small>${lv2 ? d.up : d.desc}</small></div></div>`;
+      })
+      .join('')}</div><button class="btn small" id="sheetClose">닫기</button></div>`;
+    $('#app').appendChild(el);
+    const close = () => {
+      el.remove();
+      g.paused = wasPaused;
+    };
+    el.addEventListener('click', (e) => {
+      if (e.target === el || e.target.id === 'sheetClose') close();
+    });
+  }
+  // 1회성 코치마크
+  coach(key, text, highlight, pos) {
+    const m = meta.meta();
+    m.settings.coach = m.settings.coach || {};
+    if (m.settings.coach[key]) return;
+    m.settings.coach[key] = 1;
+    meta.persist();
+    const el = document.createElement('div');
+    el.className = 'coach' + (pos === 'bottom' ? ' bottom' : '');
+    el.innerHTML = `<div class="coach-t">${text}</div><button class="coach-ok">알겠어요</button>`;
+    $('#app').appendChild(el);
+    if (highlight === 'hearts') $('#hudHearts').classList.add('spot');
+    const done = () => {
+      el.remove();
+      $('#hudHearts').classList.remove('spot');
+    };
+    el.querySelector('.coach-ok').onclick = done;
+    setTimeout(done, 6000);
+  }
+  wipe() {
+    const w = $('#wipe');
+    w.classList.remove('go');
+    void w.offsetWidth;
+    w.classList.add('go');
+  }
+  // 아이콘이 포물선으로 HUD 로 날아감
+  flyTo(fromEl, toEl, src, done) {
+    const app = $('#app').getBoundingClientRect();
+    const a = fromEl.getBoundingClientRect();
+    const b = toEl ? toEl.getBoundingClientRect() : { left: app.left + 20, top: app.top + 70, width: 32, height: 32 };
+    const img = document.createElement('img');
+    img.src = src;
+    img.className = 'fly';
+    $('#app').appendChild(img);
+    const x0 = a.left - app.left + a.width / 2,
+      y0 = a.top - app.top + a.height / 2;
+    const x1 = b.left - app.left + b.width / 2,
+      y1 = b.top - app.top + b.height / 2;
+    const frames = [];
+    for (let i = 0; i <= 12; i++) {
+      const u = i / 12;
+      const x = x0 + (x1 - x0) * u,
+        y = y0 + (y1 - y0) * u - Math.sin(u * Math.PI) * 120;
+      frames.push({ transform: `translate(${x - 26}px,${y - 26}px) scale(${1.4 - u * 0.8}) rotate(${u * 360}deg)` });
+    }
+    const anim = img.animate(frames, { duration: 620, easing: 'ease-in' });
+    anim.onfinish = () => {
+      img.remove();
+      if (toEl) {
+        toEl.classList.remove('bump');
+        void toEl.offsetWidth;
+        toEl.classList.add('bump');
+      }
+      done && done();
+    };
   }
   timer(t) {
     const el = $('#hudTimer');
@@ -210,6 +310,14 @@ export class UI {
         <button class="icon-btn mute" id="tMute" aria-label="음소거">${SPK(!isMuted())}</button>
       </div>
       <div class="logo"><div class="l1">로그 퍼트</div><div class="l2">ROGUE PUTT</div><div class="l3">당겨서 치는 로그라이크 미니골프</div></div>
+      ${notices.length ? `<div class="notices">${notices.slice(-3).map((n) => `<div>${esc(n)}</div>`).join('')}</div>` : ''}
+      <div class="spacer"></div>
+      <div class="meta-row">
+        <button class="meta-btn" id="tMissions">${ICONS.mission}<span>미션</span>${badge ? `<em>${badge}</em>` : ''}</button>
+        <button class="meta-btn" id="tCollect">${ICONS.collect}<span>컬렉션</span>${affordable ? '<em>N</em>' : ''}</button>
+        <button class="meta-btn" id="tCodex">${ICONS.codex}<span>도감</span><small>${m.discovered.length}/${RELICS.length}</small></button>
+        <button class="meta-btn" id="tRecords">${ICONS.records}<span>기록</span><small>${Object.keys(m.ach).length}/${meta.ACHIEVEMENTS.length}</small></button>
+      </div>
       <div class="world-card" style="--wc:${w.themes[0].voidA};--wc2:hsl(${w.themes[0].hue},${w.themes[0].sat}%,${w.themes[0].light}%)">
         <button class="wc-arrow" id="wPrev" aria-label="이전 월드" ${wi === 0 ? 'disabled' : ''}>&lsaquo;</button>
         <div class="wc-body ${w.unlocked ? '' : 'locked'}">${worldCard}<div class="wc-dots">${wp.map((x, i) => `<i class="${i === wi ? 'on' : ''} ${x.unlocked ? '' : 'lk'}"></i>`).join('')}</div></div>
@@ -218,13 +326,6 @@ export class UI {
       ${run ? `<button class="btn gold" id="tCont">이어하기<small>${WORLD_MAP[run.world].name}${run.mode === 'daily' ? ' 데일리' : ''} · ${run.holeIdx + 1}번 홀 · 하트 ${run.hearts}</small></button>` : ''}
       <button class="btn" id="tStart" ${w.unlocked ? '' : 'disabled'}>${w.unlocked ? `${w.name} 런 시작` : '잠긴 월드'}</button>
       <button class="btn ghost small" id="tDaily">데일리 코스<small>${date} · ${dw.name}${dBest ? ` · 오늘 최고 ${dBest.holes}홀 ${fmtToPar(dBest.toPar)}` : ' · 모두 같은 코스'}</small></button>
-      <div class="meta-row">
-        <button class="meta-btn" id="tMissions">${ICONS.mission}<span>미션</span>${badge ? `<em>${badge}</em>` : ''}</button>
-        <button class="meta-btn" id="tCollect">${ICONS.collect}<span>컬렉션</span>${affordable ? '<em>N</em>' : ''}</button>
-        <button class="meta-btn" id="tCodex">${ICONS.codex}<span>도감</span><small>${m.discovered.length}/${RELICS.length}</small></button>
-        <button class="meta-btn" id="tRecords">${ICONS.records}<span>기록</span><small>${Object.keys(m.ach).length}/${meta.ACHIEVEMENTS.length}</small></button>
-      </div>
-      ${notices.length ? `<div class="notices">${notices.slice(-3).map((n) => `<div>${esc(n)}</div>`).join('')}</div>` : ''}
     `,
       'title'
     );
@@ -271,6 +372,7 @@ export class UI {
   }
   beginRun(cfg) {
     const m = meta.meta();
+    if (this.opts.debug && this.opts.world && cfg.mode === 'normal') cfg = { ...cfg, world: this.opts.world };
     const start = (startRelic) => {
       this.close();
       this.g.newRun({ ...cfg, seed: this.opts.seed, startRelic });
@@ -323,9 +425,14 @@ export class UI {
       `<div class="card-panel wide">
         <h2>오늘의 미션</h2><div class="sub">매일 자정에 새 미션 · 보유 ${GEM} <b id="gemCount">${m.gems}</b></div>
         <div class="streak ${canStreak ? 'ready' : ''}">
-          <div><b>${m.daily.streak}일 연속 출석</b><br><small>연속 출석할수록 보상 증가 (최대 7일)</small></div>
+          <div><b>${m.daily.streak}일 연속 출석</b><br><small>7일째에 큰 보상, 끊기면 1일부터</small></div>
           <button class="mini-btn" id="streak" ${canStreak ? '' : 'disabled'}>${canStreak ? `받기 ${GEM}${meta.streakReward()}` : '받음'}</button>
         </div>
+        <div class="cal">${meta.STREAK_REWARDS.map((g, i) => {
+          const day = meta.streakDay();
+          const st = i + 1 < day || (i + 1 === day && !canStreak) ? 'got' : i + 1 === day ? 'today' : '';
+          return `<div class="${st} ${i === 6 ? 'big' : ''}"><small>${i + 1}일</small>${GEM}<b>${g}</b></div>`;
+        }).join('')}</div>
         ${ms
           .map(
             (v) => `<div class="mission ${v.done ? 'done' : ''}">
@@ -333,9 +440,19 @@ export class UI {
           <button class="mini-btn" data-i="${v.i}" ${v.done && !v.claimed ? '' : 'disabled'}>${v.claimed ? '완료' : `${GEM}${v.reward}`}</button></div>`
           )
           .join('')}
+        <div class="mission set ${meta.canClaimSet() ? 'done' : ''}"><div class="m-t">보너스 상자: 오늘의 미션 3개 모두 완료<small> ${ms.filter((v) => v.claimed).length}/3</small></div>
+        <button class="mini-btn" id="setBonus" ${meta.canClaimSet() ? '' : 'disabled'}>${m.daily.setClaimed === m.daily.date ? '완료' : `${GEM}${meta.MISSION_SET_BONUS}`}</button></div>
       </div>${this.backBtn()}`
     );
     this.wireBack(root);
+    $('#setBonus', root).onclick = () => {
+      const n = meta.claimSet();
+      if (n) {
+        sfx.relic();
+        this.toast(`보너스 상자 ${GEM} +${n}`);
+      }
+      this.missionsScreen();
+    };
     $('#streak', root).onclick = () => {
       const n = meta.claimStreak();
       if (n) {
@@ -456,6 +573,7 @@ export class UI {
       ['stats', '통계'],
       ['ach', '업적'],
       ['worlds', '월드'],
+      ['hist', '히스토리'],
     ];
     let body = '';
     if (tab === 'stats') {
@@ -486,6 +604,16 @@ export class UI {
       body = meta.ACHIEVEMENTS.map(
         (a) => `<div class="ach ${m.ach[a.id] ? 'got' : ''}"><div class="ach-ic">${m.ach[a.id] ? '★' : '☆'}</div><div class="sr-t"><b>${a.name}</b><small>${a.desc}</small></div><div class="ach-r">${GEM}${a.gems}</div></div>`
       ).join('');
+    } else if (tab === 'hist') {
+      const h = m.history || [];
+      body = h.length
+        ? h
+            .map((x) => {
+              const d = new Date(x.t);
+              return `<div class="shop-row"><div class="wr-n sm" style="background:${WORLD_MAP[x.world].themes[0].voidA}">${WORLD_MAP[x.world].name}</div><div class="sr-t"><b>${x.complete ? '완주' : x.holes + '홀'} · ${fmtToPar(x.toPar)}</b><small>${x.mode === 'daily' ? '데일리 · ' : ''}${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${x.strokes}타 · 보석 +${x.gems}</small></div></div>`;
+            })
+            .join('')
+        : '<div class="sub">아직 기록이 없음. 한 판 쳐보기!</div>';
     } else {
       body = meta
         .worldProgress()
@@ -559,33 +687,57 @@ export class UI {
       g.gameOver();
     };
   }
+  // 시너지: 보유 유물과 태그가 겹치는지
+  synergy(g, def) {
+    const tags = def.tags || [];
+    const owned = g.run.relics.map((id) => RELIC_MAP[id]).filter(Boolean);
+    return tags.map((t) => ({ t, n: owned.filter((o) => o.id !== def.id && (o.tags || []).includes(t)).length }));
+  }
+  cardHtml(g, id, extra = '') {
+    const def = defOf(id);
+    const rar = RARITY[def.rarity || 1];
+    const isNew = RELIC_MAP[id] && !meta.meta().discovered.includes(id);
+    const syn = def.consumable ? [] : this.synergy(g, def);
+    const tagHtml = syn.map(({ t, n }) => `<span class="tag ${n ? 'on' : ''}">${t}${n ? ` 시너지 ${n}` : ''}</span>`).join('');
+    const trade = def.trade ? '<span class="tag trade">양날의 검</span>' : '';
+    return `<img src="${relicIcon(id, 104)}" alt=""><div class="rc-t"><div class="rn">${def.name}${isNew ? ' <span class="new">NEW</span>' : ''}</div><div class="rarity" style="color:${rar.color}">${def.consumable ? '소모품' : def.upgrade ? '강화' : rar.name}</div><div class="rd">${def.desc}</div><div class="tags">${trade}${tagHtml}</div></div>${extra}`;
+  }
   rewardScreen(g, options, cb) {
     this.hud(g);
+    this.showTutorial(false);
     const r = g.run;
     const last = r.scorecard[r.scorecard.length - 1];
     const d = last.strokes - last.par;
+    const boss = !!g.hole.boss;
     const root = this.screen(
       `<div class="card-panel"><h2>HOLE ${last.hole} 클리어</h2>
       <div class="sub">${last.strokes}타 (파 ${last.par}, ${fmtToPar(d)}) · 하트 ${r.hearts}/${r.maxHearts} · 코인 ${r.coins}</div>
-      <div class="sub" style="margin-bottom:4px"><b>유물을 하나 고르세요</b></div>
+      <div class="sub" style="margin-bottom:4px"><b>${boss ? '보스 보상: 희귀 이상 확정!' : '유물을 하나 고르세요'}</b></div>
       <div>${options
-        .map((id) => {
-          const def = RELIC_MAP[id] || CONSUMABLES.find((c) => c.id === id);
-          const isNew = RELIC_MAP[id] && !meta.meta().discovered.includes(id);
-          return `<button class="relic-opt" data-id="${id}"><img src="${relicIcon(id, 104)}" alt=""><div><div class="rn">${def.name}${isNew ? ' <span class="new">NEW</span>' : ''}</div><div class="rd">${def.desc}</div></div></button>`;
+        .map((id, i) => {
+          const def = defOf(id);
+          return `<button class="relic-opt r${def.rarity || 1}" style="animation-delay:${i * 0.08}s" data-id="${id}">${this.cardHtml(g, id)}</button>`;
         })
         .join('')}</div>
       <button class="btn ghost small" id="skip">건너뛰고 코인 +${RUN.skipCoins}</button></div>`,
-      'clear'
+      'clear reward'
     );
+    this.coach('reward', '유물은 런이 끝날 때까지 유지됨. 같은 태그 유물끼리 시너지가 생김', null, 'bottom');
     let done = false;
     root.querySelectorAll('.relic-opt').forEach(
       (b) =>
         (b.onclick = () => {
           if (done) return;
           done = true;
-          this.close();
-          cb(b.dataset.id);
+          b.classList.add('picked');
+          const id = b.dataset.id;
+          const target = $('#hudRelics').firstElementChild || $('#hudRelics');
+          const icon = id.startsWith('_heart') || id === '_maxheart' ? $('#hudHearts') : id === '_coins' ? $('#hudCoins') : target;
+          this.flyTo(b.querySelector('img'), icon, relicIcon(id, 104), () => {});
+          setTimeout(() => {
+            this.close();
+            cb(id);
+          }, 380);
         })
     );
     $('#skip', root).onclick = () => {
@@ -597,23 +749,29 @@ export class UI {
   }
   shopScreen(g, items, done) {
     const render = () => {
+      this.hud(g);
       const r = g.run;
       const root = this.screen(
         `<div class="card-panel"><h2>떠돌이 상점</h2><div class="coinline">보유 코인 ${r.coins} · 하트 ${r.hearts}/${r.maxHearts}</div>
         <div>${items
           .map((it, i) => {
-            const def = RELIC_MAP[it.id] || CONSUMABLES.find((c) => c.id === it.id);
             const dis = it.sold || r.coins < it.price || (it.id === '_heart' && r.hearts >= r.maxHearts);
-            return `<button class="relic-opt ${it.sold ? 'sold' : ''}" data-i="${i}" ${dis ? 'disabled' : ''}><img src="${relicIcon(it.id, 104)}" alt=""><div><div class="rn">${def.name}</div><div class="rd">${def.desc}</div></div><div class="price">${it.sold ? '판매됨' : it.price}</div></button>`;
+            const def = defOf(it.id);
+            return `<button class="relic-opt r${def.rarity || 1} ${it.sold ? 'sold' : ''}" style="animation-delay:${i * 0.08}s" data-i="${i}" ${dis ? 'disabled' : ''}>${this.cardHtml(g, it.id, `<div class="price">${it.sold ? '판매됨' : it.price}</div>`)}</button>`;
           })
           .join('')}</div>
         <button class="btn" id="next">다음 홀로</button></div>`,
-        'clear'
+        'clear reward'
       );
       root.querySelectorAll('[data-i]').forEach(
         (b) =>
           (b.onclick = () => {
-            if (g.buy(items[+b.dataset.i])) render();
+            const it = items[+b.dataset.i];
+            if (g.buy(it)) {
+              sfx.coin();
+              this.flyTo(b.querySelector('img'), $('#hudRelics').firstElementChild || $('#hudRelics'), relicIcon(it.id, 104));
+              render();
+            }
           })
       );
       $('#next', root).onclick = () => {
@@ -622,6 +780,22 @@ export class UI {
       };
     };
     render();
+  }
+  shareText(r, toPar) {
+    const w = WORLD_MAP[r.world];
+    const rows = [];
+    let line = '';
+    for (let i = 0; i < RUN.holes; i++) {
+      const sc = r.scorecard[i];
+      const e = !sc ? '\u2B1B' : sc.strokes === 1 ? '\u2B50' : sc.strokes < sc.par ? '\uD83D\uDFE9' : sc.strokes === sc.par ? '\uD83D\uDFE8' : '\uD83D\uDFE5';
+      line += e;
+      if (i === 8) {
+        rows.push(line);
+        line = '';
+      }
+    }
+    rows.push(line);
+    return `로그 퍼트 ${r.mode === 'daily' ? '데일리 ' + r.date : ''} ${w.name}\n${rows.join('\n')}\n${r.scorecard.length}홀 ${fmtToPar(toPar)} (${r.strokesTotal}타)\nhttps://kh32-7.github.io/rogue-putt/`;
   }
   resultScreen(g, d) {
     this.hud(g);
@@ -632,31 +806,82 @@ export class UI {
     const cells = [];
     for (let i = 0; i < RUN.holes; i++) {
       const sc = r.scorecard[i];
-      if (!sc) cells.push(`<div class="none"><small>${i + 1}</small>-<small>&nbsp;</small></div>`);
+      const delay = `style="animation-delay:${0.35 + i * 0.06}s"`;
+      if (!sc) cells.push(`<div class="none" ${delay}><small>${i + 1}</small>-<small>&nbsp;</small></div>`);
       else {
         const df = sc.strokes - sc.par;
-        cells.push(`<div class="${df < 0 ? 'under' : df > 0 ? 'over' : ''}"><small>${i + 1}</small>${sc.strokes}<small>P${sc.par}</small></div>`);
+        cells.push(`<div class="${df < 0 ? 'under' : df > 0 ? 'over' : ''}" ${delay}><small>${i + 1}</small>${sc.strokes}<small>P${sc.par}</small></div>`);
       }
     }
     const w = WORLD_MAP[r.world];
     const root = this.screen(
-      `<div class="card-panel wide">
+      `<div class="card-panel wide result">
         <h2>${d.complete ? '코스 완주!' : '런 종료'}</h2>
         <div class="sub">${w.name}${r.mode === 'daily' ? ` 데일리 (${r.date})` : ''} ${d.newBest ? '<span class="newbest">최고 기록!</span>' : ''}</div>
-        <div class="big-stat"><div>클리어<b>${d.holesCleared}</b></div><div>타수<b>${r.strokesTotal}</b></div><div>파 대비<b>${fmtToPar(d.toPar)}</b></div></div>
+        <div class="big-stat"><div>클리어<b data-count="${d.holesCleared}">0</b></div><div>타수<b data-count="${r.strokesTotal}">0</b></div><div>파 대비<b data-count="${d.toPar}" data-par="1">E</b></div></div>
         <div class="score-grid">${cells.join('')}</div>
         ${r.relics.length ? `<div class="relic-row">${r.relics.map((id) => `<img src="${relicIcon(id, 56)}" alt="">`).join('')}</div>` : ''}
-        <div class="gain list-like">${GEM} <b>+${d.gems}</b> 보석 <small>${d.breakdown.map(([k, v]) => `${k} ${v}`).join(' · ')}</small></div>
-        ${d.newStars.length ? `<div class="gain star">새 별 ${d.newStars.map(() => STAR(true)).join('')} ${d.newStars.map((i) => STAR_GOALS[i]).join(', ')}</div>` : ''}
+        <div class="gain list-like" id="gemGain">${GEM} <b data-count="${d.gems}">+0</b> 보석 <small>${d.breakdown.map(([k, v]) => `${k} ${v}`).join(' · ')}</small></div>
+        ${d.newStars.length ? `<div class="gain star">새 별 ${d.newStars.map((_, i) => `<span class="stamp" style="animation-delay:${1.6 + i * 0.25}s">${STAR(true)}</span>`).join('')} ${d.newStars.map((i) => STAR_GOALS[i]).join(', ')}</div>` : ''}
         ${d.unlockedWorlds.length ? `<div class="gain world">새 월드 해금: <b>${d.unlockedWorlds.map((id) => WORLD_MAP[id].name).join(', ')}</b></div>` : ''}
         ${d.ach.length ? `<div class="gain list-like">업적: ${d.ach.map((a) => `<b>${a.name}</b>`).join(', ')}</div>` : ''}
-        <div class="sub" style="margin:6px 0 0">최고 기록 ${m.stats.bestHoles}홀 · 완주 ${fmtToPar(m.stats.bestToPar)} · 보유 ${GEM}${m.gems}</div>
+        <div class="sub" style="margin:6px 0 0">최고 기록 ${m.stats.bestHoles}홀 · 완주 ${fmtToPar(m.stats.bestToPar)} · 보유 ${GEM}<b id="gemTotal">${m.gems - d.gems}</b></div>
         <button class="btn" id="again">다시 하기</button>
-        <button class="btn ghost small" id="title">타이틀로</button>
+        <div class="row2"><button class="btn ghost small" id="share">결과 복사</button><button class="btn ghost small" id="title">타이틀로</button></div>
       </div>`
     );
+    // 숫자 카운트업
+    root.querySelectorAll('[data-count]').forEach((el, k) => {
+      const target = +el.dataset.count;
+      const isPar = el.dataset.par;
+      const t0 = performance.now() + 150 + k * 120;
+      const step = (now) => {
+        const u = Math.max(0, Math.min(1, (now - t0) / 700));
+        const v = Math.round(target * (1 - Math.pow(1 - u, 3)));
+        el.textContent = isPar ? fmtToPar(v) : el.parentElement.id === 'gemGain' ? '+' + v : String(v);
+        if (u < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+    // 보석 비행
+    setTimeout(() => {
+      const from = $('#gemGain svg', root),
+        to = $('#gemTotal', root);
+      if (!from || !to || !d.gems) return;
+      const n = Math.min(6, d.gems);
+      for (let i = 0; i < n; i++)
+        setTimeout(() => {
+          this.flyTo(from, to, 'data:image/svg+xml,' + encodeURIComponent(GEM.replace('class="gem"', 'xmlns="http://www.w3.org/2000/svg"')), () => {
+            to.textContent = String(Math.min(m.gems, m.gems - d.gems + Math.ceil(((i + 1) / n) * d.gems)));
+            sfx.coin();
+          });
+        }, i * 110);
+    }, 1100);
     $('#again', root).onclick = () => this.beginRun({ mode: r.mode, world: r.world });
     $('#title', root).onclick = () => g.quitToTitle();
+    $('#share', root).onclick = () => {
+      const txt = this.shareText(r, d.toPar);
+      const fallback = () => {
+        const ta = document.createElement('textarea');
+        ta.value = txt;
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy');
+        } catch {
+          /* 무시 */
+        }
+        ta.remove();
+      };
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).catch(fallback);
+        else fallback();
+      } catch {
+        fallback();
+      }
+      this.lastShare = txt;
+      this.toast('스코어카드를 복사했어요. 친구에게 붙여넣기!');
+    };
   }
 }
 

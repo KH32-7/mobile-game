@@ -390,22 +390,31 @@ export function computePar(h) {
     legs++;
     i = best;
   }
-  // 위험 요소 가산
-  let hazard = 0;
+  // 위험 요소 특징값 (파 계산 + 보정용)
   let sand = 0,
-    water = 0;
+    water = 0,
+    ice = 0,
+    slope = 0;
   for (const v of h.grid.t) {
     if (v === SAND) sand++;
     if (v === WATER) water++;
+    if (v === ICE) ice++;
+    if (v >= TILE.SN) slope++;
   }
-  hazard += h.mills.length * 0.35 + h.movers.length * 0.25 + (water > 3 ? 0.35 : 0) + (sand > 5 ? 0.25 : 0);
-  hazard += h.bumpers.length * 0.1 + (h.wind ? 0.3 : 0) + h.crates.length * 0.08;
-  let par = legs + 1 + Math.round(hazard * 1.25 + (h.idx >= 9 ? 0.3 : 0));
-  if (legs <= 1 && totalLen > 12) par++;
-  par = clamp(par, 2, 5);
-  if (h.boss) par += 1;
-  return { par, legs, pathLen: path.length - 1 };
+  const feat = { legs, pathLen: path.length - 1, totalLen, mills: h.mills.length, movers: h.movers.length, water, sand, ice, slope, bumpers: h.bumpers.length, crates: h.crates.length, wind: h.wind ? 1 : 0, teles: h.teles.length, boss: h.boss || '' };
+  h.parFeat = feat;
+  const est = parEstimate(feat);
+  // 사람은 AI 보다 부정확하므로 살짝 넉넉하게 (+0.35)
+  let par = clamp(Math.round(est + 0.35), 2, 5);
+  if (h.boss) par = clamp(Math.round(est + 0.35), 3, 6);
+  return { par, legs, pathLen: path.length - 1, est };
 }
+
+// 사람 근사 AI 자동 플레이로 보정한 기대 타수 (scripts/verify-gen.mjs 가 파 대비 평균을 검사)
+export function parEstimate(f) {
+  return PAR_W.c + PAR_W.legs * f.legs + PAR_W.len * f.pathLen + PAR_W.mills * f.mills + PAR_W.movers * f.movers + PAR_W.water * Math.min(8, f.water) + PAR_W.sand * Math.min(12, f.sand) + PAR_W.wind * f.wind + PAR_W.bumpers * f.bumpers + PAR_W.slope * Math.min(12, f.slope) + PAR_W.ice * Math.min(20, f.ice);
+}
+export const PAR_W = { c: 1.572, legs: 0.437, len: 0.01, mills: 0.443, movers: 0.02, water: 0.124, sand: 0.039, wind: 0.21, bumpers: 0.317, slope: -0.032, ice: 0.002 };
 
 // ---------- 검증 ----------
 export function validateHole(h) {
@@ -620,7 +629,7 @@ function placeElements(h, rng, idx, meta, world) {
   ]
     .map(([k, from, w]) => [k, wt[k] > 2 ? Math.min(from, 1) : from, w * (wt[k] ?? 1)])
     .filter((p) => p[1] <= eff && p[2] > 0);
-  const n = Math.min(7, 1 + Math.floor(eff * 0.33) + rng.int(0, 1));
+  const n = Math.min(6, 1 + Math.floor(eff * 0.28) + rng.int(0, 1));
   const counts = {};
   for (let k = 0; k < n; k++) {
     let tw = 0;
@@ -669,7 +678,7 @@ function tryGenerate(rng, idx, world) {
   const midTypes = ['straight', 'dogleg', 'wide', 'fork', 'pillars', 'zigzag', 'funnel', 'bowl'];
   const unlocked = midTypes.slice(0, Math.min(midTypes.length, 3 + Math.floor((idx + (world.diff || 0)) / 2)));
   const plan = [{ type: 'start', h: 3 }];
-  let nMid = 2 + (idx >= 4 ? 1 : 0) + (idx >= 10 && rng.chance(0.5) ? 1 : 0) + (rng.chance(0.3) ? 1 : 0) - (idx < 2 ? 1 : 0);
+  let nMid = 1 + (idx >= 3 ? 1 : 0) + (idx >= 10 && rng.chance(0.5) ? 1 : 0) + (rng.chance(0.25) ? 1 : 0);
   if (boss) nMid = Math.min(nMid, 2);
   for (let i = 0; i < nMid; i++) {
     const type = rng.pick(unlocked);

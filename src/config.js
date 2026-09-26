@@ -43,14 +43,14 @@ export const RUN = {
   maxHearts: 6,
   bossHoles: [5, 11, 17], // 0-index (6, 12, 18번 홀)
   shopAfter: [3, 8, 13], // 0-index, 이 홀 다음 상점
-  coinBirdie: 3,
-  coinEagle: 6,
-  coinAce: 10,
-  coinPar: 1,
-  birdieHealChance: 0.3,
-  skipCoins: 3,
-  shopHeartPrice: 5,
-  relicPriceMin: 7,
+  coinBirdie: 2,
+  coinEagle: 4,
+  coinAce: 6,
+  coinPar: 0,
+  birdieHealChance: 0.25,
+  skipCoins: 2,
+  shopHeartPrice: 6,
+  relicPriceMin: 6,
   relicPriceMax: 12,
   timeLimit: 60,
 };

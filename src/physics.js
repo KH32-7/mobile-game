@@ -28,21 +28,28 @@ export function newBall(x, y) {
   return { x, y, vx: 0, vy: 0, moving: false, sunk: false, dead: false, stopT: 0, rollT: 0, ghostUsed: false, ghostComp: -1, skimUsed: false, skimming: false, teleLock: -1, lip: -1, waterHit: false, sinkCup: -1, steerUsed: false, trail: [] };
 }
 
-export function relicMods(R) {
+// R: 유물 id 집합, lv: {id: 레벨}, ctx: { hearts }
+export function relicMods(R, lv = {}, ctx = {}) {
   const has = (id) => R && R.has(id);
+  const L = (id) => (has(id) ? lv[id] || 1 : 0);
   return {
     sticky: has('sticky'),
     ghost: has('ghost'),
-    pull: has('magnet') ? 2 : 1,
-    bumperMul: has('bounceking') ? 1.5 : 1,
+    pull: L('magnet') === 2 ? 3 : L('magnet') ? 2 : 1,
+    bumperMul: (L('bounceking') === 2 ? 2 : L('bounceking') ? 1.5 : 1) * (has('bouncy') ? 1.25 : 1),
     sandproof: has('sandproof'),
     waterski: has('waterski'),
     windbreak: has('windbreak'),
     heavy: has('heavy'),
-    coinR: has('coinmag') ? 3 : 1,
+    coinR: L('coinmag') === 2 ? 4 : L('coinmag') ? 3 : 1,
     cushion: has('cushion'),
-    cupMul: has('bigcup') ? 1.35 : 1,
-    captureMul: has('bigcup') ? 1.3 : 1,
+    bouncy: has('bouncy'),
+    cupMul: (L('bigcup') === 2 ? 1.6 : L('bigcup') ? 1.35 : 1) * (has('comeback') && ctx.hearts != null && ctx.hearts <= 2 ? 1.5 : 1),
+    captureMul: (has('bigcup') ? 1.3 : 1) * (L('radar') === 2 ? 1.7 : L('radar') ? 1.4 : 1),
+    fricMul: L('feather') === 2 ? 0.65 : L('feather') ? 0.75 : 1,
+    sandMul: has('bouncy') ? 1.5 : 1,
+    slopeMul: has('sloperider') ? 1.6 : 1,
+    teleBoost: has('warpmaster') ? 1.4 : 1,
   };
 }
 
@@ -110,7 +117,7 @@ export function stepBall(h, st, b, dt, M, ev) {
     // 가속: 경사, 바람
     if (surf >= TILE.SN) {
       const [dx, dy] = SLOPE_DIR[surf];
-      const a = PHYS.slopeAccel * (M.windbreak ? 0.5 : 1) * (M.heavy ? 0.6 : 1);
+      const a = PHYS.slopeAccel * (M.windbreak ? 0.5 : 1) * (M.heavy ? 0.6 : 1) * (M.slopeMul || 1);
       b.vx += dx * a * sdt;
       b.vy += dy * a * sdt;
     }
@@ -123,7 +130,8 @@ export function stepBall(h, st, b, dt, M, ev) {
     const f = SURF[surf >= TILE.SN ? 5 : surf] || SURF[1];
     let sp = Math.hypot(b.vx, b.vy);
     if (sp > 0) {
-      const ns = Math.max(0, sp - (f.a + f.k * sp) * sdt);
+      const fm = (M.fricMul || 1) * (surf === TILE.SAND ? M.sandMul || 1 : 1);
+      const ns = Math.max(0, sp - (f.a + f.k * sp) * fm * sdt);
       b.vx *= ns / sp;
       b.vy *= ns / sp;
       sp = ns;
@@ -148,7 +156,7 @@ export function stepBall(h, st, b, dt, M, ev) {
     b.y += b.vy * sdt;
 
     // 벽 선분
-    const eWall = M.sticky ? 0.36 : M.cushion ? 0.9 : PHYS.wallE;
+    const eWall = M.sticky ? 0.36 : M.bouncy ? 0.93 : M.cushion ? 0.9 : PHYS.wallE;
     for (const sg of h.segs) {
       if (b.ghostComp >= 0 && sg.comp === b.ghostComp) continue;
       const [cx, cy] = closestOnSeg(b.x, b.y, sg.x1, sg.y1, sg.x2, sg.y2);
@@ -385,6 +393,10 @@ export function stepBall(h, st, b, dt, M, ev) {
           ev.push({ type: 'tele', x: from.x, y: from.y, tx: to.x, ty: to.y });
           b.x = to.x + (b.x - from.x) * 0.2;
           b.y = to.y + (b.y - from.y) * 0.2;
+          if (M.teleBoost > 1) {
+            b.vx *= M.teleBoost;
+            b.vy *= M.teleBoost;
+          }
           b.teleLock = key ^ 1;
           break;
         }

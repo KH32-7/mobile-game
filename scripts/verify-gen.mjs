@@ -3,10 +3,16 @@
 import { generateHole, TILE } from '../src/gen.js';
 import { T, RUN, PHYS } from '../src/config.js';
 import { makeState, newBall, stepWorld, relicMods, settleToFloor } from '../src/physics.js';
-import { planShot } from '../src/ai.js';
-import { hashStr, dateSeedStr } from '../src/rng.js';
+import { planShot, humanize } from '../src/ai.js';
+import { hashStr, dateSeedStr, mulberry32 } from '../src/rng.js';
+import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+import os from 'node:os';
 import { WORLDS } from '../src/worlds.js';
 
+if (!isMainThread) {
+  parentPort.postMessage(workerData.map((t) => playHole(...t)));
+  await new Promise(() => {}); // 메인이 terminate 함
+}
 const NSEEDS = +(process.argv[2] || 240);
 const NPLAY = +(process.argv[3] || 8);
 const errors = [];
@@ -104,64 +110,84 @@ for (const seed of seeds) {
 }
 const genMs = Date.now() - t0;
 
-// 실제 물리 자동 플레이
-const play = { holes: 0, cleared: 0, over: 0, strokes: 0, worst: [] };
-const M = relicMods(new Set());
-const t1 = Date.now();
-for (let si = 0; si < NPLAY; si++) {
-  const seed = seeds[si];
-  const W = WORLDS[si % WORLDS.length];
-  for (let idx = 0; idx < RUN.holes; idx++) {
-    const h = generateHole(seed, idx, W.id);
-    const st = makeState(h);
-    const b = newBall(h.tee.x, h.tee.y);
-    st.balls = [b];
-    let strokes = 0;
-    let done = false;
-    while (strokes < 14 && !done) {
-      const shot = planShot(h, st, b.x, b.y, M, PHYS.maxShotSpeed, { angles: 28, powers: [0.2, 0.35, 0.5, 0.7, 0.9] });
-      const px = b.x,
-        py = b.y;
-      b.vx = Math.cos(shot.a) * shot.p * PHYS.maxShotSpeed;
-      b.vy = Math.sin(shot.a) * shot.p * PHYS.maxShotSpeed;
-      Object.assign(b, { moving: true, stopT: 0, rollT: 0, ghostUsed: false, skimUsed: false, lip: -1, waterHit: false });
-      strokes++;
-      const ev = [];
-      let guard = 0;
-      while (b.moving && guard++ < 120 * 20) {
-        stepWorld(h, st, 1 / 120, M, ev);
-        for (const e of ev) {
-          if (e.type === 'cup') {
-            if (h.cups[e.cup].real) done = true;
-            else {
-              st.cupGone[e.cup] = true;
-              strokes++;
-              b.sunk = false;
-              b.x = px;
-              b.y = py;
-            }
+// 실제 물리 자동 플레이 (사람 근사 AI: 조준 오차 포함, 워커 병렬)
+function playHole(seed, idx, wid, rngSeed) {
+  const rng = mulberry32(rngSeed);
+  const M = relicMods(new Set());
+  const h = generateHole(seed, idx, wid);
+  const st = makeState(h);
+  const b = newBall(h.tee.x, h.tee.y);
+  st.balls = [b];
+  let strokes = 0;
+  let done = false;
+  while (strokes < 12 && !done) {
+    const shot = humanize(planShot(h, st, b.x, b.y, M, PHYS.maxShotSpeed, { angles: 20, powers: [0.2, 0.35, 0.5, 0.7, 0.9] }), rng);
+    const px = b.x,
+      py = b.y;
+    b.vx = Math.cos(shot.a) * shot.p * PHYS.maxShotSpeed;
+    b.vy = Math.sin(shot.a) * shot.p * PHYS.maxShotSpeed;
+    Object.assign(b, { moving: true, stopT: 0, rollT: 0, ghostUsed: false, skimUsed: false, lip: -1, waterHit: false });
+    strokes++;
+    const ev = [];
+    let guard = 0;
+    while (b.moving && guard++ < 120 * 20) {
+      stepWorld(h, st, 1 / 120, M, ev);
+      for (const e of ev) {
+        if (e.type === 'cup') {
+          if (h.cups[e.cup].real) done = true;
+          else {
+            st.cupGone[e.cup] = true;
+            strokes++;
+            b.sunk = false;
+            b.x = px;
+            b.y = py;
           }
         }
-        ev.length = 0;
       }
-      if (b.waterHit) {
-        strokes++;
-        b.x = px;
-        b.y = py;
-        b.waterHit = false;
-      }
-      if (!done && h.grid.t[Math.floor(b.y / T) * h.grid.cols + Math.floor(b.x / T)] === TILE.VOID) settleToFloor(h, b);
-      st.t += 0.7; // 샷 사이 시간 경과
+      ev.length = 0;
     }
+    if (b.waterHit) {
+      strokes++;
+      b.x = px;
+      b.y = py;
+      b.waterHit = false;
+    }
+    if (!done && h.grid.t[Math.floor(b.y / T) * h.grid.cols + Math.floor(b.x / T)] === TILE.VOID) settleToFloor(h, b);
+    st.t += 1.3;
+  }
+  return { seed, idx, wid, par: h.par, strokes, done };
+}
+
+const play = { holes: 0, cleared: 0, over: 0, strokes: 0, worst: [], front: [0, 0], back: [0, 0] };
+const t1 = Date.now();
+if (NPLAY) {
+  const tasks = [];
+  for (const W of WORLDS) for (let si = 0; si < NPLAY; si++) for (let idx = 0; idx < RUN.holes; idx++) tasks.push([seeds[si + 1], idx, W.id, hashStr(`h${si}-${idx}-${W.id}`)]);
+  const nW = Math.max(1, Math.min(4, os.cpus().length));
+  const results = await Promise.all(
+    Array.from({ length: nW }, (_, k) =>
+      new Promise((res, rej) => {
+        const w = new Worker(new URL(import.meta.url), { workerData: tasks.filter((_, i) => i % nW === k) });
+        w.on('message', (m) => {
+          res(m);
+          w.terminate();
+        });
+        w.on('error', rej);
+      })
+    )
+  );
+  for (const r of results.flat()) {
     play.holes++;
-    if (done) {
-      play.cleared++;
-      play.strokes += strokes;
-      play.over += strokes - h.par;
-      if (strokes - h.par >= 3) play.worst.push(`seed ${seed} hole ${idx + 1} par ${h.par} strokes ${strokes}`);
-    } else {
-      play.worst.push(`seed ${seed} hole ${idx + 1} NOT CLEARED`);
+    if (!r.done) {
+      play.worst.push(`seed ${r.seed} ${r.wid} hole ${r.idx + 1} NOT CLEARED`);
+      continue;
     }
+    play.cleared++;
+    play.strokes += r.strokes;
+    play.over += r.strokes - r.par;
+    const nine = r.idx < 9 ? play.front : play.back;
+    nine[0] += r.strokes - r.par;
+    nine[1]++;
   }
 }
 const playMs = Date.now() - t1;
@@ -178,8 +204,10 @@ for (const [w, o] of Object.entries(stats.worldTiles)) console.log(`  ${w}: 홀�
   if (!(wt.space.tele > wt.meadow.tele * 1.5)) errors.push('space should have more teleporters');
 }
 if (NPLAY) {
-  console.log(`자동 플레이: ${play.cleared}/${play.holes}홀 클리어, 평균 타수 ${(play.strokes / play.cleared).toFixed(2)}, 파 대비 평균 ${(play.over / play.cleared).toFixed(2)}, ${playMs}ms`);
-  if (play.worst.length) console.log('  어려웠던 홀:', play.worst.slice(0, 12).join(' | '));
+  const avg = play.over / Math.max(1, play.cleared);
+  console.log(`사람 근사 AI 자동 플레이: ${play.cleared}/${play.holes}홀 클리어, 평균 타수 ${(play.strokes / play.cleared).toFixed(2)}, 파 대비 평균 ${avg >= 0 ? '+' : ''}${avg.toFixed(2)} (전반 ${(play.front[0] / play.front[1]).toFixed(2)}, 후반 ${(play.back[0] / play.back[1]).toFixed(2)}), ${playMs}ms`);
+  if (play.worst.length) console.log('  미클리어:', play.worst.slice(0, 8).join(' | '));
+  if (Math.abs(avg) > 0.5) errors.push(`par calibration off: AI average vs par ${avg.toFixed(2)} (allowed +-0.5)`);
 }
 const clearRate = NPLAY ? play.cleared / play.holes : 1;
 if (clearRate < 0.97) errors.push(`autoplay clear rate too low: ${(clearRate * 100).toFixed(1)}%`);

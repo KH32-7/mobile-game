@@ -11,6 +11,7 @@ const opts = {
   debug: params.has('debug'),
   seed: params.has('seed') ? Number(params.get('seed')) >>> 0 : null,
   hearts: params.has('hearts') ? Math.max(1, +params.get('hearts') || 1) : null,
+  world: params.get('world'),
   startHole: params.has('hole') ? Math.max(0, Math.min(17, (+params.get('hole') || 1) - 1)) : 0,
 };
 

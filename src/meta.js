@@ -7,9 +7,12 @@ import { mulberry32, hashStr, dateSeedStr } from './rng.js';
 export const SAVE_VERSION = 3;
 
 // 처음부터 풀에 있는 유물 12종, 나머지는 보석으로 해금
-export const STARTER_RELICS = ['sticky', 'magnet', 'longaim', 'bounceking', 'sandproof', 'luckytee', 'echo', 'heavy', 'coinmag', 'cushion', 'tailwind', 'mulligan'];
-export const RELIC_PRICE = { ghost: 20, split: 30, skiwax: 12, waterski: 18, windbreak: 12, parplus: 40, harvest: 25, brake: 18, vitality: 30, bigcup: 25 };
-export const PERKS = [{ id: 'startRelic', name: '시작 유물 선택', desc: '런 시작 시 해금된 유물 3개 중 1개를 골라서 시작', price: 50 }];
+export const STARTER_RELICS = ['sticky', 'magnet', 'longaim', 'bounceking', 'sandproof', 'luckytee', 'echo', 'heavy', 'coinmag', 'cushion', 'tailwind', 'mulligan', 'feather', 'bouncy', 'carpenter', 'pinball', 'warpmaster', 'twincoin', 'radar'];
+// 잠긴 유물 21종 (보석 해금). 첫 해금은 3~4런, 전체는 20런 이상 걸리도록
+export const RELIC_PRICE = { skiwax: 12, windbreak: 12, sloperider: 12, lifevest: 14, gambler: 15, brake: 18, waterski: 18, glass: 20, ghost: 22, greed: 22, comeback: 24, harvest: 25, bigcup: 25, acehunter: 26, vitality: 30, split: 32, turtle: 30, shield: 36, parplus: 42, eagleeye: 40, lastchance: 45 };
+export const STREAK_REWARDS = [2, 2, 3, 3, 4, 4, 8];
+export const MISSION_SET_BONUS = 5;
+export const PERKS = [{ id: 'startRelic', name: '시작 유물 선택', desc: '런 시작 시 해금된 유물 3개 중 1개를 골라서 시작', price: 60 }];
 
 const STAT_KEYS = ['runs', 'holes', 'strokes', 'aces', 'albatross', 'eagles', 'birdies', 'parOrBetter', 'bogeys', 'bossClears', 'water', 'bumpers', 'crates', 'coins', 'relicsTaken', 'dailies', 'completes', 'underPar', 'gemsEarned', 'shots'];
 
@@ -30,7 +33,8 @@ function defaults() {
     selWorld: 'meadow',
     stats,
     ach: {},
-    daily: { date: '', missions: [], counters: {}, streak: 0, lastLogin: '', streakClaimed: '', best: {} },
+    daily: { date: '', missions: [], counters: {}, streak: 0, lastLogin: '', streakClaimed: '', best: {}, setClaimed: '' },
+    history: [],
     notices: [],
     run: null,
     settings: { muted: false, tutorial: false },
@@ -126,15 +130,15 @@ function dayStr(offset = 0, now = new Date()) {
 }
 
 export const MISSION_POOL = [
-  { id: 'holes', key: 'holes', text: (n) => `홀 ${n}개 클리어`, targets: [6, 10], reward: 6 },
-  { id: 'birdies', key: 'birdies', text: (n) => `버디 이하로 ${n}번 끝내기`, targets: [2, 4], reward: 8 },
-  { id: 'coins', key: 'coins', text: (n) => `코스 코인 ${n}개 줍기`, targets: [4, 7], reward: 5 },
-  { id: 'bumpers', key: 'bumpers', text: (n) => `범퍼 ${n}번 맞히기`, targets: [6, 10], reward: 5 },
-  { id: 'crates', key: 'crates', text: (n) => `나무 상자 ${n}개 부수기`, targets: [3, 5], reward: 5 },
-  { id: 'daily', key: 'dailies', text: () => '데일리 코스 완료하기', targets: [1], reward: 7 },
-  { id: 'boss', key: 'bossClears', text: () => '보스 홀 클리어', targets: [1], reward: 8 },
-  { id: 'relics', key: 'relicsTaken', text: (n) => `유물 ${n}개 얻기`, targets: [4, 6], reward: 5 },
-  { id: 'pars', key: 'parOrBetter', text: (n) => `파 이하로 홀 ${n}개`, targets: [5, 8], reward: 6 },
+  { id: 'holes', key: 'holes', text: (n) => `홀 ${n}개 클리어`, targets: [6, 10], reward: 3 },
+  { id: 'birdies', key: 'birdies', text: (n) => `버디 이하로 ${n}번 끝내기`, targets: [2, 4], reward: 4 },
+  { id: 'coins', key: 'coins', text: (n) => `코스 코인 ${n}개 줍기`, targets: [4, 7], reward: 2 },
+  { id: 'bumpers', key: 'bumpers', text: (n) => `범퍼 ${n}번 맞히기`, targets: [6, 10], reward: 2 },
+  { id: 'crates', key: 'crates', text: (n) => `나무 상자 ${n}개 부수기`, targets: [3, 5], reward: 2 },
+  { id: 'daily', key: 'dailies', text: () => '데일리 코스 완료하기', targets: [1], reward: 4 },
+  { id: 'boss', key: 'bossClears', text: () => '보스 홀 클리어', targets: [1], reward: 4 },
+  { id: 'relics', key: 'relicsTaken', text: (n) => `유물 ${n}개 얻기`, targets: [4, 6], reward: 2 },
+  { id: 'pars', key: 'parOrBetter', text: (n) => `파 이하로 홀 ${n}개`, targets: [5, 8], reward: 3 },
 ];
 
 export function rollDaily(now = new Date()) {
@@ -173,7 +177,18 @@ export function claimMission(i) {
   addGems(v.reward);
   return v.reward;
 }
-export const streakReward = () => 3 + 2 * Math.min(7, meta().daily.streak || 1);
+export const streakDay = () => ((Math.max(1, meta().daily.streak || 1) - 1) % 7) + 1;
+export const streakReward = () => STREAK_REWARDS[streakDay() - 1];
+export function canClaimSet() {
+  const d = meta().daily;
+  return d.setClaimed !== d.date && d.missions.length > 0 && d.missions.every((m) => m.claimed);
+}
+export function claimSet() {
+  if (!canClaimSet()) return 0;
+  meta().daily.setClaimed = meta().daily.date;
+  addGems(MISSION_SET_BONUS);
+  return MISSION_SET_BONUS;
+}
 export function canClaimStreak() {
   const d = meta().daily;
   return d.streakClaimed !== d.lastLogin;
@@ -186,7 +201,7 @@ export function claimStreak() {
   return r;
 }
 export function badgeCount() {
-  return missionView().filter((v) => v.done && !v.claimed).length + (canClaimStreak() ? 1 : 0);
+  return missionView().filter((v) => v.done && !v.claimed).length + (canClaimStreak() ? 1 : 0) + (canClaimSet() ? 1 : 0);
 }
 
 // ---------- 통계 추적 (통계 + 오늘의 미션 카운터) ----------
@@ -330,16 +345,17 @@ export function finishRun(r) {
   // 보석
   const c = r.counts || {};
   const breakdown = [
-    ['클리어한 홀', r.holesCleared],
-    ['버디', c.birdies || 0],
-    ['이글 이상', (c.eagles || 0) * 3],
-    ['홀인원', (c.aces || 0) * 5],
-    ['완주 보너스', r.complete ? 10 : 0],
-    ['새 별', newStars.length * 5],
-    ['데일리 보너스', r.mode === 'daily' ? 3 : 0],
+    ['클리어한 홀', Math.floor(r.holesCleared / 3)],
+    ['버디', Math.floor((c.birdies || 0) / 2)],
+    ['이글 이상', c.eagles || 0],
+    ['홀인원', (c.aces || 0) * 2],
+    ['완주 보너스', r.complete ? 5 : 0],
+    ['새 별', newStars.length * 2],
+    ['데일리 보너스', r.mode === 'daily' ? 1 : 0],
   ].filter((x) => x[1] > 0);
   const gems = breakdown.reduce((s, x) => s + x[1], 0);
   addGems(gems);
+  m.history = [{ t: Date.now(), date: r.date, world: r.world, mode: r.mode, holes: r.holesCleared, toPar: r.toPar, strokes: r.strokes, complete: r.complete, gems }, ...(m.history || [])].slice(0, 20);
   m.run = null;
   persist();
   const ach = checkAchievements();
@@ -348,27 +364,27 @@ export function finishRun(r) {
 
 // ---------- 업적 ----------
 export const ACHIEVEMENTS = [
-  { id: 'first', name: '첫 컵인', desc: '홀 1개 클리어', gems: 3, test: (s) => s.holes >= 1 },
-  { id: 'ace1', name: '홀인원!', desc: '홀인원 1회', gems: 10, test: (s) => s.aces >= 1 },
-  { id: 'ace5', name: '홀인원 장인', desc: '홀인원 누적 5회', gems: 25, test: (s) => s.aces >= 5 },
-  { id: 'birdie20', name: '버디 사냥꾼', desc: '버디 이하 누적 20회', gems: 10, test: (s) => s.birdies >= 20 },
-  { id: 'eagle', name: '이글 아이', desc: '이글 이상 1회', gems: 8, test: (s) => s.eagles >= 1 },
-  { id: 'front9', name: '전반 정복', desc: '한 런에서 9홀 클리어', gems: 5, test: (s) => s.bestHoles >= 9 },
-  { id: 'complete', name: '완주', desc: '18홀 완주', gems: 15, test: (s) => s.completes >= 1 },
-  { id: 'underpar', name: '언더파 골퍼', desc: '파 이하로 완주', gems: 20, test: (s) => s.underPar >= 1 },
-  { id: 'boss3', name: '보스 사냥', desc: '보스 홀 누적 3회 클리어', gems: 10, test: (s) => s.bossClears >= 3 },
-  { id: 'relic8', name: '수집가', desc: '한 런에서 유물 8개', gems: 8, test: (s) => s.maxRelicsRun >= 8 },
-  { id: 'codex11', name: '도감 절반', desc: '유물 11종 발견', gems: 10, test: (s, m) => m.discovered.length >= 11 },
-  { id: 'codex22', name: '도감 완성', desc: '유물 22종 모두 발견', gems: 40, test: (s, m) => m.discovered.length >= 22 },
-  { id: 'splash20', name: '물수제비', desc: '물에 누적 20번 빠지기', gems: 5, test: (s) => s.water >= 20 },
-  { id: 'crates30', name: '파괴왕', desc: '상자 누적 30개 부수기', gems: 8, test: (s) => s.crates >= 30 },
-  { id: 'bumper100', name: '범퍼카', desc: '범퍼 누적 100번', gems: 8, test: (s) => s.bumpers >= 100 },
-  { id: 'rich', name: '부자 골퍼', desc: '한 런에서 코인 40개 보유', gems: 8, test: (s) => s.maxCoinsRun >= 40 },
-  { id: 'streak7', name: '개근상', desc: '7일 연속 출석', gems: 20, test: (s) => s.maxStreak >= 7 },
-  { id: 'daily5', name: '매일 한 판', desc: '데일리 코스 5회', gems: 10, test: (s) => s.dailies >= 5 },
-  { id: 'stars6', name: '별 수집가', desc: '별 6개 모으기', gems: 10, test: () => totalStars() >= 6 },
-  { id: 'space', name: '우주 골프', desc: '우주 월드 해금', gems: 15, test: (s, m) => m.worlds.space.unlocked },
-  { id: 'fashion', name: '패셔니스타', desc: '꾸미기 아이템 3개 구매', gems: 5, test: (s, m) => m.cosmetics.owned.ball.length + m.cosmetics.owned.trail.length + m.cosmetics.owned.flag.length - 3 >= 3 },
+  { id: 'first', name: '첫 컵인', desc: '홀 1개 클리어', gems: 2, test: (s) => s.holes >= 1 },
+  { id: 'ace1', name: '홀인원!', desc: '홀인원 1회', gems: 5, test: (s) => s.aces >= 1 },
+  { id: 'ace5', name: '홀인원 장인', desc: '홀인원 누적 5회', gems: 12, test: (s) => s.aces >= 5 },
+  { id: 'birdie20', name: '버디 사냥꾼', desc: '버디 이하 누적 20회', gems: 5, test: (s) => s.birdies >= 20 },
+  { id: 'eagle', name: '이글 아이', desc: '이글 이상 1회', gems: 4, test: (s) => s.eagles >= 1 },
+  { id: 'front9', name: '전반 정복', desc: '한 런에서 9홀 클리어', gems: 2, test: (s) => s.bestHoles >= 9 },
+  { id: 'complete', name: '완주', desc: '18홀 완주', gems: 8, test: (s) => s.completes >= 1 },
+  { id: 'underpar', name: '언더파 골퍼', desc: '파 이하로 완주', gems: 10, test: (s) => s.underPar >= 1 },
+  { id: 'boss3', name: '보스 사냥', desc: '보스 홀 누적 3회 클리어', gems: 5, test: (s) => s.bossClears >= 3 },
+  { id: 'relic8', name: '수집가', desc: '한 런에서 유물 8개', gems: 4, test: (s) => s.maxRelicsRun >= 8 },
+  { id: 'codex11', name: '도감 절반', desc: '유물 20종 발견', gems: 5, test: (s, m) => m.discovered.length >= 20 },
+  { id: 'codex22', name: '도감 완성', desc: '유물 40종 모두 발견', gems: 20, test: (s, m) => m.discovered.length >= 40 },
+  { id: 'splash20', name: '물수제비', desc: '물에 누적 20번 빠지기', gems: 2, test: (s) => s.water >= 20 },
+  { id: 'crates30', name: '파괴왕', desc: '상자 누적 30개 부수기', gems: 4, test: (s) => s.crates >= 30 },
+  { id: 'bumper100', name: '범퍼카', desc: '범퍼 누적 100번', gems: 4, test: (s) => s.bumpers >= 100 },
+  { id: 'rich', name: '부자 골퍼', desc: '한 런에서 코인 40개 보유', gems: 4, test: (s) => s.maxCoinsRun >= 40 },
+  { id: 'streak7', name: '개근상', desc: '7일 연속 출석', gems: 10, test: (s) => s.maxStreak >= 7 },
+  { id: 'daily5', name: '매일 한 판', desc: '데일리 코스 5회', gems: 5, test: (s) => s.dailies >= 5 },
+  { id: 'stars6', name: '별 수집가', desc: '별 6개 모으기', gems: 5, test: () => totalStars() >= 6 },
+  { id: 'space', name: '우주 골프', desc: '우주 월드 해금', gems: 8, test: (s, m) => m.worlds.space.unlocked },
+  { id: 'fashion', name: '패셔니스타', desc: '꾸미기 아이템 3개 구매', gems: 2, test: (s, m) => m.cosmetics.owned.ball.length + m.cosmetics.owned.trail.length + m.cosmetics.owned.flag.length - 3 >= 3 },
 ];
 
 export function checkAchievements() {

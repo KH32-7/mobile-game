@@ -1,28 +1,49 @@
-// 유물 정의 (22종). 효과 구현은 physics.js / game.js 에서 id 로 참조함
+// 유물 정의 (40종). 효과 구현은 physics.js / game.js 에서 id 로 참조함
+// rarity: 1 일반, 2 희귀, 3 영웅. tags: 시너지 표시용. up: 강화 가능 (Lv2 설명)
 export const RELICS = [
-  { id: 'sticky', name: '끈끈이 공', desc: '벽에 닿으면 속도의 절반을 흡수해서 멀리 튀지 않음', color: '#8bc34a', rarity: 1 },
-  { id: 'ghost', name: '유령 공', desc: '샷마다 안쪽 벽 1번을 그대로 통과', color: '#b39ddb', rarity: 2 },
-  { id: 'magnet', name: '자석 컵', desc: '컵 흡입 반경 2배', color: '#ef5350', rarity: 2 },
-  { id: 'mulligan', name: '멀리건', desc: '홀마다 1번, 방금 친 샷을 되돌림', color: '#ffb300', rarity: 2 },
-  { id: 'split', name: '분열 샷', desc: '홀 첫 샷에 공이 2개로 갈라짐. 하나만 들어가도 성공', color: '#26c6da', rarity: 3 },
-  { id: 'longaim', name: '긴 조준선', desc: '조준선이 반사 3회까지 보임', color: '#42a5f5', rarity: 1 },
-  { id: 'bounceking', name: '바운스 킹', desc: '범퍼 반발 1.5배, 범퍼에 맞을 때마다 코인 +1', color: '#ec407a', rarity: 1 },
-  { id: 'skiwax', name: '스키 왁스', desc: '얼음 위를 구르는 중 화면을 탭하면 그 방향으로 꺾음 (샷당 1회)', color: '#80deea', rarity: 1 },
-  { id: 'sandproof', name: '모래 무시', desc: '모래가 잔디처럼 굴러감', color: '#e0c068', rarity: 1 },
-  { id: 'waterski', name: '수상 스키', desc: '샷마다 물 위를 한 번 스치고 지나감', color: '#29b6f6', rarity: 2 },
-  { id: 'windbreak', name: '바람막이', desc: '바람을 무시하고 경사 영향이 절반', color: '#a1887f', rarity: 1 },
-  { id: 'parplus', name: '파 여유', desc: '모든 홀의 파 +1', color: '#66bb6a', rarity: 3 },
-  { id: 'luckytee', name: '행운의 티', desc: '홀 첫 샷 파워 1.3배', color: '#ff7043', rarity: 1 },
-  { id: 'echo', name: '에코 샷', desc: '직전 샷의 궤적이 유령처럼 남음', color: '#9575cd', rarity: 1 },
-  { id: 'heavy', name: '쇳덩이 공', desc: '상자를 쉽게 부수고 경사와 바람을 덜 탐', color: '#78909c', rarity: 1 },
-  { id: 'coinmag', name: '동전 자석', desc: '코스 코인 줍는 범위 3배, 홀마다 코인 +1', color: '#fdd835', rarity: 1 },
-  { id: 'harvest', name: '하트 수확', desc: '버디 이하로 끝내면 하트가 반드시 회복', color: '#f06292', rarity: 2 },
-  { id: 'brake', name: '브레이크', desc: '공이 구르는 중 두 번 탭하면 즉시 멈춤 (샷당 1회)', color: '#e53935', rarity: 2 },
-  { id: 'cushion', name: '당구 달인', desc: '벽 반발 증가, 조준선 반사 +1', color: '#5c6bc0', rarity: 1 },
-  { id: 'vitality', name: '여분의 심장', desc: '최대 하트 +2, 하트 2 회복', color: '#d81b60', rarity: 2 },
-  { id: 'tailwind', name: '순풍', desc: '최대 파워 +25%', color: '#4db6ac', rarity: 1 },
-  { id: 'bigcup', name: '큰 컵', desc: '컵 크기 1.35배, 빠른 공도 잘 들어감', color: '#8d6e63', rarity: 2 },
+  { id: 'sticky', name: '끈끈이 공', desc: '벽에 닿으면 속도의 절반을 흡수해서 멀리 튀지 않음', color: '#8bc34a', rarity: 1, tags: ['벽'] },
+  { id: 'ghost', name: '유령 공', desc: '샷마다 안쪽 벽 1번을 그대로 통과', color: '#b39ddb', rarity: 2, tags: ['벽'] },
+  { id: 'magnet', name: '자석 컵', desc: '컵 흡입 반경 2배', color: '#ef5350', rarity: 2, tags: ['컵'], up: '컵 흡입 반경 3배' },
+  { id: 'mulligan', name: '멀리건', desc: '홀마다 1번, 방금 친 샷을 되돌림', color: '#ffb300', rarity: 2, tags: ['하트'], up: '홀마다 2번 되돌림' },
+  { id: 'split', name: '분열 샷', desc: '홀 첫 샷에 공이 2개로 갈라짐. 하나만 들어가도 성공', color: '#26c6da', rarity: 3, tags: ['첫 샷'] },
+  { id: 'longaim', name: '긴 조준선', desc: '조준선이 2배 길고 반사 3회까지 보임', color: '#42a5f5', rarity: 1, tags: ['조준', '벽'] },
+  { id: 'bounceking', name: '바운스 킹', desc: '범퍼 반발 1.5배, 범퍼에 맞을 때마다 코인 +1', color: '#ec407a', rarity: 1, tags: ['범퍼', '코인'], up: '범퍼 반발 2배, 코인 +2' },
+  { id: 'skiwax', name: '스키 왁스', desc: '얼음 위를 구르는 중 화면을 탭하면 그 방향으로 꺾음 (샷당 1회)', color: '#80deea', rarity: 1, tags: ['지형'] },
+  { id: 'sandproof', name: '모래 무시', desc: '모래가 잔디처럼 굴러감', color: '#e0c068', rarity: 1, tags: ['지형'] },
+  { id: 'waterski', name: '수상 스키', desc: '샷마다 물 위를 한 번 스치고 지나감', color: '#29b6f6', rarity: 2, tags: ['지형', '물'] },
+  { id: 'windbreak', name: '바람막이', desc: '바람을 무시하고 경사 영향이 절반', color: '#a1887f', rarity: 1, tags: ['지형'] },
+  { id: 'parplus', name: '파 여유', desc: '모든 홀의 파 +1', color: '#66bb6a', rarity: 3, tags: ['하트'] },
+  { id: 'luckytee', name: '행운의 티', desc: '홀 첫 샷 파워 1.3배', color: '#ff7043', rarity: 1, tags: ['첫 샷', '파워'], up: '홀 첫 샷 파워 1.5배' },
+  { id: 'echo', name: '에코 샷', desc: '직전 샷의 궤적이 유령처럼 남음', color: '#9575cd', rarity: 1, tags: ['조준'] },
+  { id: 'heavy', name: '쇳덩이 공', desc: '상자를 쉽게 부수고 경사와 바람을 덜 탐', color: '#78909c', rarity: 1, tags: ['지형', '상자'] },
+  { id: 'coinmag', name: '동전 자석', desc: '코스 코인 줍는 범위 3배, 홀마다 코인 +1', color: '#fdd835', rarity: 1, tags: ['코인'], up: '줍는 범위 4배, 홀마다 코인 +2' },
+  { id: 'harvest', name: '하트 수확', desc: '버디 이하로 끝내면 하트가 반드시 회복', color: '#f06292', rarity: 2, tags: ['하트'] },
+  { id: 'brake', name: '브레이크', desc: '공이 구르는 중 두 번 탭하면 즉시 멈춤 (샷당 1회)', color: '#e53935', rarity: 2, tags: ['조작'] },
+  { id: 'cushion', name: '당구 달인', desc: '벽 반발 증가, 조준선 반사 +1', color: '#5c6bc0', rarity: 1, tags: ['벽', '조준'] },
+  { id: 'vitality', name: '여분의 심장', desc: '최대 하트 +2, 하트 2 회복', color: '#d81b60', rarity: 2, tags: ['하트'] },
+  { id: 'tailwind', name: '순풍', desc: '최대 파워 +25%', color: '#4db6ac', rarity: 1, tags: ['파워'], up: '최대 파워 +40%' },
+  { id: 'bigcup', name: '큰 컵', desc: '컵 크기 1.35배, 빠른 공도 잘 들어감', color: '#8d6e63', rarity: 2, tags: ['컵'], up: '컵 크기 1.6배' },
+  // 신규 18종
+  { id: 'glass', name: '유리 공', desc: '코인 획득 2배. 대신 벽에 세게 부딪히면 벌타 +1 (샷당 1회)', color: '#b2ebf2', rarity: 2, tags: ['코인', '벽'], trade: true },
+  { id: 'feather', name: '깃털 공', desc: '마찰 25% 감소로 멀리 굴러감. 대신 최대 파워 -15%', color: '#fff9c4', rarity: 1, tags: ['파워'], trade: true, up: '마찰 35% 감소' },
+  { id: 'bouncy', name: '탱탱볼', desc: '벽과 범퍼에서 훨씬 잘 튐. 대신 모래에서 1.5배 느려짐', color: '#ff80ab', rarity: 1, tags: ['벽', '범퍼'], trade: true },
+  { id: 'greed', name: '탐욕의 주머니', desc: '코인 획득 +50%. 대신 최대 하트 -1', color: '#ffa000', rarity: 2, tags: ['코인'], trade: true },
+  { id: 'gambler', name: '도박사의 컵', desc: '버디 이하 코인 보상 2배. 대신 보기 이상이면 코인 -3', color: '#7cb342', rarity: 1, tags: ['코인'], trade: true },
+  { id: 'shield', name: '보호막', desc: '홀마다 첫 하트 손실 1번 막음', color: '#4fc3f7', rarity: 3, tags: ['하트'], up: '홀마다 2번 막음' },
+  { id: 'lifevest', name: '구명조끼', desc: '홀마다 1번, 물에 빠져도 벌타 없음', color: '#ff7043', rarity: 1, tags: ['물', '지형'], up: '홀마다 2번' },
+  { id: 'radar', name: '컵 레이더', desc: '컵에 들어가는 속도 한계 +40% (세게 쳐도 쏙)', color: '#26a69a', rarity: 1, tags: ['컵'], up: '속도 한계 +70%' },
+  { id: 'carpenter', name: '목수', desc: '상자를 부술 때마다 코인 +2', color: '#a1887f', rarity: 1, tags: ['상자', '코인'] },
+  { id: 'pinball', name: '핀볼 마법사', desc: '한 샷에 범퍼 3번 이상 맞히면 코인 +5', color: '#ab47bc', rarity: 1, tags: ['범퍼', '코인'] },
+  { id: 'comeback', name: '역전의 명수', desc: '하트가 2개 이하일 때 컵 크기 1.5배', color: '#ff5252', rarity: 2, tags: ['컵', '하트'] },
+  { id: 'warpmaster', name: '워프 전문가', desc: '워프를 지나면 속도 1.4배 + 코인 +1', color: '#e040fb', rarity: 1, tags: ['워프', '코인'] },
+  { id: 'sloperider', name: '경사 타기', desc: '경사 가속 1.6배', color: '#9ccc65', rarity: 1, tags: ['지형'], trade: true },
+  { id: 'lastchance', name: '마지막 기회', desc: '하트가 0이 되면 런당 1번 하트 1개로 버팀', color: '#c62828', rarity: 3, tags: ['하트'] },
+  { id: 'eagleeye', name: '독수리 눈', desc: '버디 이하 코인 보상 3배. 대신 모든 홀 파 -1 (최소 2)', color: '#5d4037', rarity: 3, tags: ['코인'], trade: true },
+  { id: 'twincoin', name: '쌍둥이 동전', desc: '코스 위 코인 1개가 2코인', color: '#ffd54f', rarity: 1, tags: ['코인'] },
+  { id: 'acehunter', name: '홀인원 사냥꾼', desc: '홀인원하면 하트 +2, 코인 +10', color: '#ffca28', rarity: 2, tags: ['첫 샷', '하트'] },
+  { id: 'turtle', name: '거북이 등껍질', desc: '모든 홀 파 +1. 대신 최대 파워 -25%', color: '#558b2f', rarity: 2, tags: ['파워', '하트'], trade: true },
 ];
+export const RARITY = { 1: { name: '일반', color: '#9e9e9e', w: 60 }, 2: { name: '희귀', color: '#2f80ff', w: 30 }, 3: { name: '영웅', color: '#a64dff', w: 10 } };
 
 export const RELIC_MAP = Object.fromEntries(RELICS.map((r) => [r.id, r]));
 
@@ -30,11 +51,21 @@ export const RELIC_MAP = Object.fromEntries(RELICS.map((r) => [r.id, r]));
 export const CONSUMABLES = [
   { id: '_heart', name: '하트 +1', desc: '하트 1개 회복', color: '#e91e63', consumable: true },
   { id: '_coins', name: '코인 주머니', desc: '코인 +6', color: '#fbc02d', consumable: true },
+  { id: '_maxheart', name: '튼튼한 심장', desc: '최대 하트 +1', color: '#ad1457', consumable: true },
 ];
+export const UPGRADE = { id: '_up', name: '유물 강화', color: '#00bfa5' };
+export function defOf(id) {
+  if (id && id.startsWith('_up:')) {
+    const r = RELIC_MAP[id.slice(4)];
+    return { id, name: `${r.name} 강화`, desc: `Lv2: ${r.up}`, color: UPGRADE.color, rarity: 2, tags: r.tags, upgrade: r.id };
+  }
+  return RELIC_MAP[id] || CONSUMABLES.find((c) => c.id === id);
+}
 
 // 코드로 그리는 유물 아이콘
 export function drawRelicIcon(ctx, id, s) {
-  const r = RELIC_MAP[id] || CONSUMABLES.find((c) => c.id === id);
+  const r = id.startsWith('_up') ? UPGRADE : RELIC_MAP[id] || CONSUMABLES.find((c) => c.id === id);
+  if (id.startsWith('_up:')) id = '_up';
   const c = s / 2;
   ctx.save();
   ctx.clearRect(0, 0, s, s);
@@ -268,6 +299,7 @@ export function drawRelicIcon(ctx, id, s) {
       break;
     case 'vitality':
     case '_heart':
+    case '_maxheart':
       heart(0, 0, 1.6, W);
       if (id === 'vitality') {
         ctx.fillStyle = r.color;
@@ -311,6 +343,171 @@ export function drawRelicIcon(ctx, id, s) {
         ctx.lineWidth = 2;
         ctx.stroke();
       }
+      break;
+    case 'glass':
+      ctx.globalAlpha = 0.85;
+      ball(0, 0, 14);
+      ctx.globalAlpha = 1;
+      line([[-4, -12], [2, -3], [-3, 3], [4, 12]], '#4dd0e1', 2.5);
+      break;
+    case 'feather':
+      ctx.fillStyle = W;
+      ctx.beginPath();
+      ctx.ellipse(2, -2, 8, 18, 0.6, 0, 7);
+      ctx.fill();
+      line([[-12, 16], [10, -14]], '#bdbdbd', 2);
+      break;
+    case 'bouncy':
+      ctx.fillStyle = W;
+      ctx.beginPath();
+      ctx.ellipse(0, -2, 13, 11, 0, 0, 7);
+      ctx.fill();
+      line([[-14, 16], [14, 16]], W, 4);
+      line([[-8, 12], [-4, 8]], W, 2);
+      line([[8, 12], [4, 8]], W, 2);
+      break;
+    case 'greed':
+    case 'gambler':
+    case 'twincoin':
+    case 'eagleeye': {
+      const n = id === 'twincoin' ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        ctx.fillStyle = '#fff59d';
+        ctx.beginPath();
+        ctx.arc(-5 * (n - 1) + i * 10, 2 - i * 4, 11, 0, 7);
+        ctx.fill();
+        ctx.strokeStyle = '#f9a825';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+      ctx.fillStyle = D;
+      ctx.font = 'bold 13px system-ui,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(id === 'greed' ? '+50' : id === 'gambler' ? 'x2' : id === 'eagleeye' ? 'x3' : '2', 0, 1);
+      break;
+    }
+    case 'shield':
+      ctx.fillStyle = W;
+      ctx.beginPath();
+      ctx.moveTo(0, -18);
+      ctx.lineTo(15, -11);
+      ctx.quadraticCurveTo(14, 10, 0, 19);
+      ctx.quadraticCurveTo(-14, 10, -15, -11);
+      ctx.closePath();
+      ctx.fill();
+      heart(0, 0, 0.9, r.color);
+      break;
+    case 'lifevest':
+      ctx.strokeStyle = W;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, 0, 7);
+      ctx.stroke();
+      ctx.strokeStyle = '#e53935';
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 13, (i * Math.PI) / 2 - 0.25, (i * Math.PI) / 2 + 0.25);
+        ctx.stroke();
+      }
+      break;
+    case 'radar':
+      ctx.strokeStyle = W;
+      ctx.lineWidth = 3;
+      for (const rr of [6, 12, 18]) {
+        ctx.beginPath();
+        ctx.arc(0, 0, rr, 0, 7);
+        ctx.stroke();
+      }
+      line([[0, 0], [13, -13]], '#b9f6ca', 3);
+      break;
+    case 'carpenter':
+      ctx.fillStyle = '#d99a52';
+      ctx.fillRect(-12, -8, 18, 18);
+      ctx.strokeStyle = '#7a4a1e';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-12, -8, 18, 18);
+      line([[6, -16], [16, -6]], W, 5);
+      line([[11, -11], [0, 6]], '#5d4037', 3);
+      break;
+    case 'pinball':
+      for (const [x, y] of [[-10, -6], [10, -6], [0, 10]]) {
+        ctx.fillStyle = W;
+        ctx.beginPath();
+        ctx.arc(x, y, 7, 0, 7);
+        ctx.fill();
+        ctx.fillStyle = r.color;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, 7);
+        ctx.fill();
+      }
+      break;
+    case 'comeback':
+      heart(-5, 2, 1.1, W);
+      line([[4, 12], [16, -10]], '#ffeb3b', 4);
+      line([[16, -10], [9, -9]], '#ffeb3b', 4);
+      break;
+    case 'warpmaster':
+      ctx.strokeStyle = W;
+      ctx.lineWidth = 3.5;
+      for (let k = 0; k < 3; k++) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 5 + k * 5, k * 1.5, k * 1.5 + 3.8);
+        ctx.stroke();
+      }
+      break;
+    case 'sloperider':
+      ctx.fillStyle = W;
+      ctx.beginPath();
+      ctx.moveTo(-18, 14);
+      ctx.lineTo(18, 14);
+      ctx.lineTo(18, -10);
+      ctx.closePath();
+      ctx.fill();
+      ball(-4, 0, 6);
+      break;
+    case 'lastchance':
+      heart(0, 2, 1.6, W);
+      line([[-2, -8], [3, 0], [-3, 4], [2, 12]], r.color, 2.5);
+      break;
+    case 'acehunter':
+      ctx.fillStyle = '#212121';
+      ctx.beginPath();
+      ctx.ellipse(0, 10, 14, 6, 0, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = W;
+      ctx.font = 'bold 18px system-ui,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('1', 0, -6);
+      break;
+    case 'turtle':
+      ctx.fillStyle = '#c5e1a5';
+      ctx.beginPath();
+      ctx.ellipse(0, 2, 16, 12, 0, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(-16, 1, 32, 5);
+      ctx.strokeStyle = '#33691e';
+      ctx.lineWidth = 2;
+      line([[-6, -8], [-6, 1]], '#33691e', 2);
+      line([[6, -8], [6, 1]], '#33691e', 2);
+      ctx.fillStyle = '#c5e1a5';
+      ctx.beginPath();
+      ctx.arc(19, 0, 4, 0, 7);
+      ctx.fill();
+      break;
+    case '_up':
+      ctx.fillStyle = W;
+      ctx.beginPath();
+      ctx.moveTo(0, -18);
+      ctx.lineTo(15, 0);
+      ctx.lineTo(6, 0);
+      ctx.lineTo(6, 16);
+      ctx.lineTo(-6, 16);
+      ctx.lineTo(-6, 0);
+      ctx.lineTo(-15, 0);
+      ctx.closePath();
+      ctx.fill();
       break;
     default:
       ball(0, 0, 10);
