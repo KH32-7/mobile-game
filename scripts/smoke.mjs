@@ -123,8 +123,7 @@ async function main() {
     console.log('[390x844] 타이틀 -> 3라운드 + 상점 + 보스 흐름');
     {
       const { page, cdp } = await newPage(browser, 390, 844, '?debug&seed=smoke1');
-      await page.screenshot({ path: 'shots/01-title-calendar.png' });
-      check(await vis(page, '#btn-claim'), '첫 방문 출석부 표시');
+      check(!(await vis(page, '#btn-claim')), '첫 실행에는 출석 모달을 띄우지 않음 (첫 런 이후로)');
       await clearOverlays(page);
       await page.screenshot({ path: 'shots/02-title.png' });
       await page.locator('#btn-help').tap();
@@ -156,6 +155,8 @@ async function main() {
         }
         await page.waitForTimeout(150);
         await page.screenshot({ path: 'shots/06-dragging.png' });
+        const pvOk = await page.evaluate(() => { const d = window.__bj.app.drag; return !!d && d.valid && (d.lines.lines === 0 || !!d.preview); });
+        check(pvOk, '드래그 중 줄 완성 자리면 점수 예고 계산');
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       }
       let sawNonBlocking = false, shotScore = false;
@@ -190,8 +191,8 @@ async function main() {
       await page.waitForTimeout(200);
       check((await state(page)).jokers.length === before + 1, '조커 구매');
       const lvBefore = await page.evaluate(() => Object.values(window.__bj.game.lineLv).reduce((a, b) => a + b, 0));
-      await page.evaluate(() => { window.__bj.game.coins += 40; window.__bj.game.shop.cards[0] = { kind: 'planet', id: 'p_double', price: 3, sold: false }; });
       await page.locator('#btn-reroll').tap(); await page.waitForTimeout(150);
+      await page.evaluate(() => { window.__bj.game.coins += 40; window.__bj.game.shop.cards[0] = { kind: 'planet', id: 'p_double', price: 3, sold: false }; window.__bj.ui.showShop(window.__bj.game); });
       await page.locator('.tile[data-card="0"]').tap(); await page.waitForTimeout(120);
       await page.locator('#pop-buy').tap(); await page.waitForTimeout(150);
       const lvAfter = await page.evaluate(() => Object.values(window.__bj.game.lineLv).reduce((a, b) => a + b, 0));
@@ -208,6 +209,14 @@ async function main() {
         await page.locator('#pop-buy').tap(); await page.waitForTimeout(150);
         check((await page.evaluate(() => window.__bj.game.vouchers.length)) >= 1, '바우처 구매');
       }
+      await page.evaluate(() => { window.__bj.game.shop.special = { id: 's_level', price: 15, sold: false }; window.__bj.game.coins += 20; });
+      await page.locator('#btn-reroll').tap(); await page.waitForTimeout(150);
+      await page.evaluate(() => { window.__bj.game.shop.special = { id: 's_level', price: 15, sold: false }; window.__bj.ui.showShop(window.__bj.game); });
+      const dblBefore = await page.evaluate(() => window.__bj.game.lineLv.double);
+      await page.locator('#tile-special').tap(); await page.waitForTimeout(150);
+      await page.screenshot({ path: 'shots/09-shop-special.png' });
+      await page.locator('#sp-double').tap(); await page.waitForTimeout(150);
+      check((await page.evaluate(() => window.__bj.game.lineLv.double)) === dblBefore + 1, '특수 서비스: 줄 레벨 선택 구매');
       await page.screenshot({ path: 'shots/09-shop-after.png' });
       await page.locator('.ownj').first().tap(); await page.waitForTimeout(150);
       await page.screenshot({ path: 'shots/12-shop-owned-popover.png' });
@@ -263,6 +272,13 @@ async function main() {
       await clearOverlays(page);
       await page.screenshot({ path: 'shots/17-showdown-play.png' });
       check((await state(page)).phase === 'play', '쇼다운 보스 라운드');
+      // 앤티 8 승리 후 최고 앤티가 9가 되지 않음
+      await page.evaluate(() => { const g = window.__bj.game; g.roundScore = g.target - 1; });
+      await playMove(page, cdp);
+      for (let k = 0; k < 40 && (await state(page)).ui !== 'victory'; k++) await page.waitForTimeout(150);
+      check((await state(page)).ui === 'victory', '앤티 8 쇼다운 격파 = 승리 화면');
+      await page.screenshot({ path: 'shots/17-victory.png' });
+      check((await page.evaluate(() => window.__bj.meta.d.stats.bestAnte)) === 8, '승리 후 최고 앤티 8 (9 아님)');
     }
 
     // ---------- 데일리 + 게임 오버 ----------
@@ -283,7 +299,8 @@ async function main() {
       await page.waitForTimeout(300);
       check((await state(page)).ui === 'setup', '데일리 다시하기는 일반 런 설정으로 (1일 1회 우회 차단)');
       await page.locator('#btn-back >> visible=true').tap();
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(700);
+      check(await vis(page, '#btn-claim'), '첫 런 이후 타이틀에서 출석 모달 표시');
       await clearOverlays(page);
       await page.locator('#btn-daily').tap();
       await page.waitForTimeout(250);
@@ -297,8 +314,11 @@ async function main() {
     {
       const { page, cdp } = await newPage(browser, 390, 844, '?debug&seed=meta1');
       await clearOverlays(page);
+      await page.locator('#btn-calendar').tap(); await page.waitForTimeout(200);
+      await page.screenshot({ path: 'shots/01-calendar.png' });
+      await page.locator('#btn-claim').tap(); await page.waitForTimeout(1200);
       let s = await state(page);
-      check(s.tokens > 0, `출석 보상 토큰 (${s.tokens})`);
+      check(s.tokens > 0, `출석부 보상 수령 (${s.tokens})`);
       const lockedId = 'lapidary';
       check(!(await page.evaluate((id) => window.__bj.meta.isJokerUnlocked(id), lockedId)), '세공사 조커는 처음에 잠김');
       await startGame(page);
@@ -306,6 +326,20 @@ async function main() {
       s = await playUntil(page, cdp, (st) => st.ui === 'shop', 90);
       check(s && s.ui === 'shop', '메타 런: 상점 진입');
       await clearOverlays(page);
+      await page.waitForTimeout(600); await clearOverlays(page);
+      // 팩 열어둔 채 새로고침 -> 이어하기 시 팩 모달 복원
+      await page.evaluate(() => { window.__bj.game.coins += 10; window.__bj.ui.showShop(window.__bj.game); });
+      const coinsBeforePack = await page.evaluate(() => window.__bj.game.coins);
+      await page.locator('.tile[data-pack="0"]').tap(); await page.waitForTimeout(120);
+      await page.locator('#pop-buy').tap(); await page.waitForTimeout(300);
+      const coinsAfterPack = await page.evaluate(() => window.__bj.game.coins);
+      await page.reload(); await page.waitForTimeout(700);
+      await page.locator('#btn-continue').tap(); await page.waitForTimeout(500);
+      check(await vis(page, '.pchoice'), '팩 선택 중 새로고침 후 팩 모달 복원');
+      check((await page.evaluate(() => window.__bj.game.coins)) === coinsAfterPack && coinsAfterPack < coinsBeforePack, '팩 복원 시 코인 이중 차감 없음');
+      await page.locator('.pchoice').first().tap(); await page.waitForTimeout(200);
+      if (await vis(page, '#pack-skip')) await page.locator('#pack-skip').tap();
+      await page.waitForTimeout(600); await clearOverlays(page);
       await buyFirst(page, '.tile.jt:not(.sold):not(.cant)');
       await page.locator('#btn-next').tap();
       await page.waitForTimeout(1600);
@@ -335,6 +369,10 @@ async function main() {
       await page.touchscreen.tap(P.x + P.w / 2, P.y + P.h / 2);
       await page.waitForTimeout(200);
       await page.locator('#btn-abandon').tap();
+      await page.waitForTimeout(200);
+      check(await vis(page, '#btn-abandon-ok'), '런 포기 2단계 확인');
+      await page.screenshot({ path: 'shots/20-abandon-confirm.png' });
+      await page.locator('#btn-abandon-ok').tap();
       await page.waitForTimeout(300);
       s = await state(page);
       check(s.tokens === tokBefore && !s.hasRun && (await page.evaluate(() => window.__bj.meta.d.stats.runs)) === runsBefore, '런 포기는 보상/통계 없음 (파밍 차단)');
@@ -375,6 +413,14 @@ async function main() {
       await page.locator('#btn-back >> visible=true').tap();
       await page.locator('#btn-profile').tap(); await page.waitForTimeout(150);
       await page.screenshot({ path: 'shots/23-profile.png' });
+      const claimBtn = page.locator('[id^="claim-a-"]').first();
+      if (await claimBtn.count()) {
+        const tb = await page.evaluate(() => window.__bj.meta.d.tokens);
+        await claimBtn.tap(); await page.waitForTimeout(300);
+        await page.screenshot({ path: 'shots/23-profile-claim.png' });
+        await page.waitForTimeout(900);
+        check((await page.evaluate(() => window.__bj.meta.d.tokens)) > tb, '업적 보상 수동 수령 (받기)');
+      } else check(false, '받을 업적 없음');
       await page.locator('#btn-back >> visible=true').tap();
       await page.locator('#btn-settings').tap(); await page.waitForTimeout(150);
       await page.screenshot({ path: 'shots/24-settings.png' });
@@ -386,16 +432,17 @@ async function main() {
       await page.locator('#btn-back').tap();
       const audio = await page.evaluate(async () => {
         const out = {};
-        for (const [n, a] of [['clear', [3, 2]], ['xmult', []], ['place', [4]], ['allClear', []], ['tick', [5]], ['bgm', []]]) {
-          const buf = await window.__bjAudio.renderOffline(n, a, 1.5);
-          const d = buf.getChannelData(0);
-          let sum = 0, peak = 0;
-          for (let i = 0; i < d.length; i++) { sum += d[i] * d[i]; peak = Math.max(peak, Math.abs(d[i])); }
-          out[n] = { rms: Math.sqrt(sum / d.length), peak };
+        for (const [n, a] of [['place', [4]], ['clear', [2, 1]], ['joker', [1]], ['combo', [2]], ['mult', [2]], ['chips', [2]], ['pickup', []], ['tick', [5]], ['xmult', []], ['allClear', []], ['bgm', []]]) {
+          out[n] = await window.__bjAudio.measure(n, a, n === 'bgm' ? 5 : 1.6);
         }
         return out;
       });
-      check(Object.values(audio).every((v) => v.peak > 0.02 && v.peak < 1.2), `효과음/BGM 오프라인 렌더 (${Object.entries(audio).map(([k, v]) => `${k} rms ${v.rms.toFixed(3)} peak ${v.peak.toFixed(2)}`).join(', ')})`);
+      const fmtA = (k) => `${k} 피크 ${audio[k].peakDb.toFixed(1)} / RMS ${audio[k].rmsDb.toFixed(1)}dB`;
+      console.log('  사운드:', Object.keys(audio).map(fmtA).join(', '), `| BGM 150Hz 이하 ${(audio.bgm.lowRatio * 100).toFixed(0)}%`);
+      check(Object.values(audio).every((v) => v.peakDb <= -2.9), '모든 효과음/BGM 피크 -3dBFS 이하');
+      check(['place', 'clear', 'joker', 'combo'].every((k) => audio[k].rmsDb >= -25 && audio[k].rmsDb <= -19.5), '주요 효과음 RMS -24~-20dB 대역');
+      check(['pickup', 'tick', 'chips', 'mult'].every((k) => audio[k].peakDb >= -9), '작은 효과음(집기/틱/칩/배수) 충분히 들림 (피크 -9dB 이상)');
+      check(audio.bgm.lowRatio <= 0.6, 'BGM 150Hz 이하 에너지 60% 이하');
       await page.evaluate(() => { localStorage.removeItem('blockJoker.meta'); localStorage.setItem('blockJoker.v1', JSON.stringify({ bestAnte: 4, bestHit: 1234, wins: 1, tutorialDone: true })); });
       await page.reload(); await page.waitForTimeout(500);
       const mig = await page.evaluate(() => ({ v: window.__bj.meta.d.version, a: window.__bj.meta.d.stats.bestAnte, h: window.__bj.meta.d.stats.bestHit }));

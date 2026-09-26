@@ -3,6 +3,7 @@ import { CONFIG, COLORS } from './config.js';
 import { JOKERS, JOKER_BY_ID, RARITY_LABEL, RARITY_COLOR, EDITIONS, jokerDesc, fmt } from './jokers.js';
 import { BOSS_BY_ID } from './bosses.js';
 import { Renderer, FONT, GEM_COLOR } from './render.js';
+import { drawBossIcon } from './art.js';
 import { DECKS, STAKES, SKINS, ACHIEVEMENTS, MISSION_BY_ID, WEEKLY_BY_ID, WEEKLY_CHEST, CALENDAR, DECK_BY_ID } from './metadata.js';
 import { HANDS, HAND_KEYS, PLANET_BY_ID, GEM_CARD_BY_ID, PACK_BY_ID, VOUCHER_BY_ID } from './items.js';
 import { DAILY_RULES } from './game.js';
@@ -70,6 +71,7 @@ function itemCanvas(kind, id, w, h) {
   if (kind === 'planet') { const p = PLANET_BY_ID[id]; col = p.color; label = p.name; }
   else if (kind === 'gem') { const p = GEM_CARD_BY_ID[id]; col = p.color; label = p.name; }
   else if (kind === 'pack') { const p = PACK_BY_ID[id]; col = p.color; label = p.name; }
+  else if (kind === 'special') { col = '#3ddc97'; label = { s_level: '줄 레벨', s_clone: '조커 복제', s_edition: '에디션' }[id]; }
   else { col = '#ffd23f'; label = VOUCHER_BY_ID[id] ? VOUCHER_BY_ID[id].name : '바우처'; }
   rr(0, 0, w, h, 8);
   const bg = g.createLinearGradient(0, 0, 0, h);
@@ -96,6 +98,11 @@ function itemCanvas(kind, id, w, h) {
     }
     g.restore();
     g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(0, h * 0.12, w, 3); g.fillRect(0, h * 0.72, w, 3);
+  } else if (kind === 'special') {
+    g.fillStyle = col; g.font = `900 ${Math.round(h * 0.34)}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = col; g.shadowBlur = 10;
+    g.fillText(id === 's_level' ? '▲' : id === 's_clone' ? '⧉' : '✦', cx, cy);
+    g.shadowBlur = 0;
   } else {
     // 티켓
     g.fillStyle = '#ffd23f';
@@ -112,6 +119,29 @@ function itemCanvas(kind, id, w, h) {
 }
 
 const tokenIcon = '<i class="tok"></i>';
+
+export function bossCanvas(id, size) {
+  const { c, r, padd } = cardCanvas(size, size);
+  c.className = 'bossic';
+  drawBossIcon(r.ctx, id, padd + size / 2, padd + size / 2, size / 2 - 1);
+  return c;
+}
+
+// 토큰이 카운터로 날아가는 연출
+function flyTokens(fromEl, toEl, n = 6) {
+  if (!fromEl || !toEl) return;
+  const a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+  for (let i = 0; i < n; i++) {
+    const t = el('i', 'tok fly');
+    const x0 = a.left + a.width / 2 + (Math.random() - 0.5) * 30, y0 = a.top + a.height / 2 + (Math.random() - 0.5) * 12;
+    t.style.left = x0 + 'px'; t.style.top = y0 + 'px';
+    document.body.appendChild(t);
+    const dx = b.left + b.width / 2 - x0, dy = b.top + b.height / 2 - y0;
+    setTimeout(() => { t.style.transform = `translate(${dx}px, ${dy}px) rotate(45deg) scale(0.7)`; t.style.opacity = '0.2'; }, 20 + i * 45);
+    setTimeout(() => t.remove(), 700 + i * 45);
+  }
+  setTimeout(() => { toEl.classList.add('bump'); setTimeout(() => toEl.classList.remove('bump'), 300); }, 550);
+}
 
 export class UI {
   constructor(cb) {
@@ -215,10 +245,12 @@ export class UI {
     const grid = el('div', 'menu-grid');
     const mdone = meta.missionsDone;
     const chest = meta.chestReady;
-    grid.appendChild(this.btn(`미션 <span class="pill${mdone < 3 || chest ? ' hot' : ''}">${chest ? '상자!' : mdone + '/3'}</span>`, 'small', () => this.showMissions(meta), 'btn-missions'));
+    const mPend = d.daily.missions.filter((m) => m.done && !m.claimed).length;
+    grid.appendChild(this.btn(`미션 <span class="pill${mdone < 3 || chest || mPend ? ' hot' : ''}">${chest ? '상자!' : mPend ? '받기 ' + mPend : mdone + '/3'}</span>`, 'small', () => this.showMissions(meta), 'btn-missions'));
     const affordable = JOKERS.some((j) => !meta.isJokerUnlocked(j.id) && meta.jokerCost(j.id) <= d.tokens);
     grid.appendChild(this.btn(`컬렉션${affordable ? ' <span class="pill hot">NEW</span>' : ''}`, 'small', () => this.showCollection(meta), 'btn-collection'));
-    grid.appendChild(this.btn('프로필', 'small', () => this.showProfile(meta), 'btn-profile'));
+    const achPend = ACHIEVEMENTS.filter((a) => d.achievements[a.id] && !d.achClaimed[a.id]).length;
+    grid.appendChild(this.btn(`프로필${achPend ? ` <span class="pill hot">받기 ${achPend}</span>` : ''}`, 'small', () => this.showProfile(meta), 'btn-profile'));
     grid.appendChild(this.btn('설정', 'small', () => this.showSettings(meta, muted), 'btn-settings'));
     box.appendChild(grid);
     const foot = el('div', 'row');
@@ -391,9 +423,10 @@ export class UI {
   }
 
   // ---------- 미션 / 데일리 ----------
-  missionRow(text, p, n, reward, done) {
+  missionRow(text, p, n, reward, done, claim) {
     const it = el('div', 'mission' + (done ? ' done' : ''));
-    it.innerHTML = `<div class="mt"><b>${text}</b><span>${reward != null ? tokenIcon + reward : ''}</span></div><div class="bar"><span style="width:${Math.round((Math.min(p, n) / n) * 100)}%"></span></div><div class="mp">${done ? '완료!' : `${fmt(Math.min(p, n))} / ${fmt(n)}`}</div>`;
+    it.innerHTML = `<div class="mt"><b>${text}</b><span>${reward != null ? tokenIcon + reward : ''}</span></div><div class="bar"><span style="width:${Math.round((Math.min(p, n) / n) * 100)}%"></span></div><div class="mp">${done ? (claim ? '' : '수령 완료') : `${fmt(Math.min(p, n))} / ${fmt(n)}`}</div>`;
+    if (claim) it.querySelector('.mp').appendChild(claim);
     return it;
   }
 
@@ -402,16 +435,31 @@ export class UI {
     const d = meta.d;
     s.innerHTML = '';
     const box = el('div', 'panel');
-    box.appendChild(el('h2', '', '미션'));
+    const mh = el('div', 'shop-head');
+    mh.appendChild(el('h2', '', '미션'));
+    mh.appendChild(el('div', 'coins tk', `${tokenIcon}<span class="tokc">${d.tokens}</span>`));
+    box.appendChild(mh);
     const now = new Date();
     const mid = new Date(now); mid.setHours(24, 0, 0, 0);
     const left = Math.max(0, mid - now);
     box.appendChild(el('div', 'label', `오늘의 미션 <small>자정까지 ${Math.floor(left / 3600000)}시간 ${Math.floor((left % 3600000) / 60000)}분</small>`));
     const list = el('div', 'missions');
-    for (const m of d.daily.missions) {
+    d.daily.missions.forEach((m, i) => {
       const def = MISSION_BY_ID[m.id];
-      list.appendChild(this.missionRow(def.text(m.n), m.p, m.n, def.reward, m.done));
-    }
+      let claim = null;
+      if (m.done && !m.claimed) {
+        claim = this.btn('받기', 'small gold claim', () => {
+          const r = this.cb.claimMission(i);
+          if (!r) return;
+          const cnt = box.querySelector('.tokc');
+          flyTokens(claim, cnt);
+          claim.disabled = true; claim.textContent = `+${r}`;
+          setTimeout(() => { if (cnt) cnt.textContent = d.tokens; }, 600);
+          setTimeout(() => this.showMissions(meta), 900);
+        }, 'claim-m-' + i);
+      }
+      list.appendChild(this.missionRow(def.text(m.n), m.p, m.n, def.reward, m.done, claim));
+    });
     box.appendChild(list);
     box.appendChild(el('div', 'label', `주간 미션 <small>3개 완료 시 주간 상자 ${WEEKLY_CHEST} 토큰</small>`));
     const wl = el('div', 'missions');
@@ -422,7 +470,7 @@ export class UI {
     box.appendChild(wl);
     const chestBtn = this.btn(d.weekly.chest ? '주간 상자 수령함' : meta.chestReady ? '주간 상자 열기!' : `주간 상자 (${meta.weeklyDone}/3)`, (meta.chestReady ? 'gold chest' : 'off'), () => {
       const r = this.cb.claimChest();
-      if (r) { this.toast(`주간 상자 +${r} 토큰`, 'ach'); this.showMissions(meta); }
+      if (r) { flyTokens(chestBtn, box.querySelector('.tokc'), 10); this.toast(`주간 상자 +${r} 토큰`, 'ach'); setTimeout(() => this.showMissions(meta), 900); }
     }, 'btn-chest');
     box.appendChild(chestBtn);
 
@@ -483,7 +531,10 @@ export class UI {
     s.innerHTML = '';
     const box = el('div', 'panel wide');
     const lv = levelInfo(d.xp);
-    box.appendChild(el('h2', '', `프로필 <small>Lv.${lv.lvl}</small>`));
+    const ph = el('div', 'shop-head');
+    ph.appendChild(el('h2', '', `프로필 <small>Lv.${lv.lvl}</small>`));
+    ph.appendChild(el('div', 'coins tk', `${tokenIcon}<span class="tokc">${d.tokens}</span>`));
+    box.appendChild(ph);
     box.appendChild(el('div', 'xpbar', `<span style="width:${Math.round((lv.cur / lv.need) * 100)}%"></span><em>${lv.cur} / ${lv.need} XP</em>`));
     const t = el('div', 'stats two');
     const rows = [
@@ -509,9 +560,24 @@ export class UI {
     const got = ACHIEVEMENTS.filter((a) => d.achievements[a.id]).length;
     box.appendChild(el('div', 'label', `업적 ${got}/${ACHIEVEMENTS.length}`));
     const al = el('div', 'achs');
-    for (const a of ACHIEVEMENTS) {
+    const sorted = ACHIEVEMENTS.slice().sort((x, y) => ((d.achievements[y.id] && !d.achClaimed[y.id]) ? 1 : 0) - ((d.achievements[x.id] && !d.achClaimed[x.id]) ? 1 : 0));
+    for (const a of sorted) {
       const ok = !!d.achievements[a.id];
-      al.appendChild(el('div', 'ach' + (ok ? ' ok' : ''), `<b>${a.name}</b><span>${a.desc}</span><em>${ok ? '달성' : tokenIcon + a.reward}</em>`));
+      const pend = ok && !d.achClaimed[a.id];
+      const it = el('div', 'ach' + (ok ? ' ok' : ''), `<b>${a.name}</b><span>${a.desc}</span><em>${ok ? (pend ? '' : '수령 완료') : tokenIcon + a.reward}</em>`);
+      if (pend) {
+        const cb2 = this.btn(`받기 ${a.reward}`, 'small gold claim', () => {
+          const r = this.cb.claimAchievement(a.id);
+          if (!r) return;
+          const cnt = box.querySelector('.tokc');
+          flyTokens(cb2, cnt);
+          cb2.disabled = true;
+          setTimeout(() => { if (cnt) cnt.textContent = d.tokens; }, 600);
+          setTimeout(() => { const st2 = s.scrollTop; this.showProfile(meta); s.scrollTop = st2; }, 900);
+        }, 'claim-a-' + a.id);
+        it.querySelector('em').appendChild(cb2);
+      }
+      al.appendChild(it);
     }
     box.appendChild(al);
     box.appendChild(this.backBtn());
@@ -648,8 +714,8 @@ export class UI {
     box.appendChild(el('div', 'bk', b.showdown ? '쇼다운 보스' : '보스 블라인드'));
     box.appendChild(el('h2', '', `<span style="color:${b.color}">${b.name}</span>`));
     const sigil = el('div', 'sigil');
-    sigil.style.background = `radial-gradient(circle, ${b.color} 0%, transparent 70%)`;
-    sigil.textContent = '☠';
+    sigil.style.background = `radial-gradient(circle, ${b.color}88 0%, transparent 70%)`;
+    sigil.appendChild(bossCanvas(g.boss, 96));
     box.appendChild(sigil);
     box.appendChild(el('div', 'curse big', `저주: ${b.desc}`));
     box.appendChild(el('div', 'hint', `목표 ${fmt(g.target)} (보통의 2배) · 클리어 보상 $${CONFIG.BLIND_REWARD[2]}`));
@@ -668,9 +734,20 @@ export class UI {
     box.appendChild(this.settingsBlock(settings, muted));
     box.appendChild(this.btn('게임 방법', 'small ghost', () => this.showHelp()));
     box.appendChild(this.btn('타이틀로 (이어하기 저장)', '', () => this.cb.toTitle(), 'btn-pause-title'));
-    box.appendChild(this.btn('런 포기 (보상 없음)', 'red', () => this.cb.abandon(), 'btn-abandon'));
+    box.appendChild(this.btn('런 포기', 'red', () => this.confirm('정말 포기할까?', '이번 런의 진행과 보상(토큰, 경험치)이 모두 사라짐.', '포기하기', () => this.cb.abandon(), 'btn-abandon-ok'), 'btn-abandon'));
     s.appendChild(box);
     this.show('pause');
+  }
+
+  confirm(title, desc, okLabel, onOk, okId) {
+    const box = el('div', 'panel confirm');
+    box.appendChild(el('h2', 'over', title));
+    box.appendChild(el('p', 'reason', desc));
+    const row = el('div', 'row');
+    row.appendChild(this.btn('취소', '', () => this.hideModal(), 'confirm-cancel'));
+    row.appendChild(this.btn(okLabel, 'red', () => { this.hideModal(); onOk(); }, okId));
+    box.appendChild(row);
+    this.showModal(box);
   }
 
   // ---------- 상점 ----------
@@ -775,6 +852,25 @@ export class UI {
       t.id = 'tile-voucher';
       cr.appendChild(t);
     }
+    const sp = sh.special;
+    if (sp) {
+      const names = { s_level: ['줄 레벨 선택', '원하는 줄 종류 레벨 +1'], s_clone: ['조커 복제', '보유 조커 1장을 그대로 복제 (슬롯 필요)'], s_edition: ['에디션 부여', '에디션 없는 조커 1장에 포일/홀로/폴리크롬 중 하나'] };
+      const [nmS, dsS] = names[sp.id];
+      const can = g.coins >= sp.price;
+      const extra = el('div', 'choices');
+      if (sp.id === 's_level') {
+        HAND_KEYS.forEach((k) => extra.appendChild(this.btn(`${HANDS[k].name} ${g.lineLv[k]}→${g.lineLv[k] + (g.hasVoucher('v_telescope') ? 2 : 1)}`, 'small' + (can ? '' : ' off'), () => { this.hideTip(); this.cb.buySpecial(k); }, 'sp-' + k)));
+      } else {
+        g.jokers.forEach((j, i) => {
+          const ok = sp.id === 's_clone' ? g.jokers.length < g.jokerSlots : !j.ed;
+          extra.appendChild(this.btn(JOKER_BY_ID[j.id].name, 'small' + (can && ok ? '' : ' off'), () => { if (!ok) return; this.hideTip(); this.cb.buySpecial(i); }, 'sp-j' + i));
+        });
+        if (!g.jokers.length) extra.appendChild(el('p', 'dim', '보유한 조커가 없음'));
+      }
+      const t = this.tile(itemCanvas('special', sp.id, 58, 74), sp.price, can, sp.sold, () => this.itemPopover(nmS, `특수 서비스 · $${sp.price}`, dsS + ' · 대상을 골라 구매', null, can, null, extra), 'st');
+      t.id = 'tile-special';
+      cr.appendChild(t);
+    }
     box.appendChild(cr);
 
     // 줄 레벨
@@ -787,7 +883,9 @@ export class UI {
     const bd = BOSS_BY_ID[g.boss];
     const nm = boss ? bd.name : CONFIG.BLIND_NAMES[g.blind];
     const next = el('div', 'next' + (boss ? ' boss' : ''));
-    next.innerHTML = `<div>다음: 앤티 ${g.ante} · <b>${nm}</b> · 목표 ${fmt(g.targetOf(g.ante, g.blind))}</div>` + (boss ? `<div class="curse">저주: ${bd.desc}</div>` : `<div class="dim">이번 앤티 보스: ${bd.name}</div>`);
+    next.innerHTML = `<div>다음: 앤티 ${g.ante} · <b>${nm}</b> · 목표 ${fmt(g.targetOf(g.ante, g.blind))}</div>` + (boss ? `<div class="curse">저주: ${bd.desc}</div>` : `<div class="dim">이번 앤티 보스: ${bd.name} (${bd.desc})</div>`);
+    const bi = bossCanvas(g.boss, 34);
+    next.prepend(bi);
     box.appendChild(next);
     const nb = el('div', 'next-bar');
     nb.appendChild(this.btn('다음 라운드', 'big gold', () => this.cb.next(), 'btn-next'));
@@ -964,7 +1062,8 @@ export class UI {
     const runInfo = `<p class="dim">${g.opts.daily ? `데일리 런 · ${rule ? rule.name : ''}` : `${stake.name} 스테이크 · ${deck.name}`}</p><p class="dim">줄 레벨: ${lv}</p>`;
     if (g.blind === 2) {
       const b = BOSS_BY_ID[g.boss];
-      this.showTipHtml(`<h3 style="color:${b.color}">보스: ${b.name}</h3><p>${b.desc}</p><p>목표 ${fmt(g.target)}</p>${runInfo}`);
+      const ic = el('div', 'row'); ic.appendChild(bossCanvas(g.boss, 64));
+      this.showTipHtml(`<h3 style="color:${b.color}">보스: ${b.name}</h3><p>${b.desc}</p><p>목표 ${fmt(g.target)}</p>${runInfo}`, ic);
     } else {
       const b = BOSS_BY_ID[g.boss];
       this.showTipHtml(`<h3>${g.blindName}</h3><p>목표 ${fmt(g.target)}</p><p>이번 앤티 보스: <b style="color:${b.color}">${b.name}</b> (${b.desc})</p>${runInfo}`);

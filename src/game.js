@@ -77,8 +77,8 @@ export class Game {
     this.baseSlots = CONFIG.JOKER_SLOTS - (o.deck === 'spare' ? 1 : 0);
     this.baseGrace = CONFIG.COMBO_GRACE + (o.deck === 'combo' ? 1 : 0) + (o.rule === 'comboparty' ? 2 : 0);
     this.baseGem = (o.deck === 'gem' ? CONFIG.GEM_PIECE_CHANCE : 0) + (o.rule === 'gemfest' ? 0.3 : 0);
-    this.handsBonus = (o.deck === 'spare' ? 1 : 0) - (o.stake >= 4 ? 1 : 0) - (o.rule === 'rush' ? 1 : 0);
-    this.stakeTargetMult = (o.stake >= 5 ? 1.6 : o.stake >= 3 ? 1.3 : 1) * (o.rule === 'rush' ? 0.8 : 1);
+    this.handsBonus = (o.deck === 'spare' ? 1 : 0) - (o.rule === 'rush' ? 1 : 0);
+    this.ruleTargetMult = o.rule === 'rush' ? 0.8 : 1;
   }
 
   get jokerSlots() {
@@ -89,14 +89,21 @@ export class Game {
     return this.baseGrace + (this.hasVoucher('v_grip') ? 1 : 0);
   }
   get gemBonus() { return this.baseGem + (this.hasVoucher('v_gemrain') ? 0.12 : 0); }
+  // 스테이크 목표 배율: 초반(앤티 1~2)은 완만, 앤티 3부터 본격 상승
+  stakeMult(ante) {
+    const st = this.opts.stake;
+    if (st >= 5) return ante <= 2 ? 1.2 : 1.6;
+    if (st >= 3) return ante <= 2 ? 1.1 : 1.3;
+    return 1;
+  }
   get interestCap() {
-    return CONFIG.INTEREST_MAX + (this.hasVoucher('v_vault') ? 5 : 0) + (this.hasPassive('interestUp') ? 5 : 0);
+    return CONFIG.INTEREST_MAX + (this.hasVoucher('v_vault') ? 5 : 0);
   }
 
   poolIds() { return this.opts.pool && this.opts.pool.length ? this.opts.pool.filter((id) => JOKER_BY_ID[id]) : JOKERS.map((j) => j.id); }
 
   targetOf(ante, blind, boss = this.boss) {
-    let m = this.stakeTargetMult;
+    let m = this.stakeMult(ante) * this.ruleTargetMult;
     if (blind === 2 && boss === 'greed') m *= 1.5;
     return targetFor(ante, blind, m);
   }
@@ -122,7 +129,7 @@ export class Game {
       voucherOffer: this.voucherOffer, voucherAnte: this.voucherAnte,
     };
     if (kind === 'shop') {
-      Object.assign(s, { shop: this.shop, rerollCost: this.rerollCost, rewards: this.rewards });
+      Object.assign(s, { shop: this.shop, rerollCost: this.rerollCost, rewards: this.rewards, packOpen: this.packOpen || null, freeRerolls: this.freeRerolls || 0 });
     } else if (kind === 'play') {
       Object.assign(s, {
         board: this.board, tray: this.tray.map(packPiece), target: this.target, roundScore: this.roundScore,
@@ -155,6 +162,9 @@ export class Game {
     if (s.kind === 'shop' && s.shop) {
       this.shop = s.shop;
       this.rerollCost = s.rerollCost || CONFIG.REROLL_BASE;
+      this.freeRerolls = s.freeRerolls || 0;
+      this.packOpen = s.packOpen && Array.isArray(s.packOpen.choices) ? s.packOpen : null;
+      if (!this.shop.special) this.shop.special = null;
       this.rewards = null;
       this.board.fill(null);
       this.tray = [null, null, null];
@@ -207,7 +217,7 @@ export class Game {
     this.placedCount = 0;
     this.trayClears = 0;
     this.lastClearLines = 0;
-    this.handsLeft = CONFIG.HANDS + this.handsBonus + (this.hasVoucher('v_tray') ? 1 : 0) - (this.curse === 'poor' ? 1 : 0);
+    this.handsLeft = CONFIG.HANDS + this.handsBonus + (this.hasVoucher('v_tray') ? 1 : 0) - (this.curse === 'poor' ? 1 : 0) - (this.opts.stake >= 4 && this.blind === 2 && this.ante >= 2 ? 1 : 0);
     this.gameOverReason = null;
     this.shop = null;
     this.packOpen = null;
@@ -330,6 +340,25 @@ export class Game {
     const b = this.board.slice();
     for (const [dr, dc] of piece.shape.cells) b[idx(r + dr, c + dc)] = { color: 0 };
     return this.fullLines(b);
+  }
+
+  // 드래그 중 예고: 조커/보석을 뺀 기본 점수
+  previewScore(piece, r, c) {
+    const b = this.board.slice();
+    for (const [dr, dc] of piece.shape.cells) b[idx(r + dr, c + dc)] = { color: 0 };
+    const { rows, cols, lines } = this.fullLines(b);
+    if (!lines) return null;
+    const set = new Set();
+    rows.forEach((rr) => { for (let x = 0; x < N; x++) set.add(idx(rr, x)); });
+    cols.forEach((cc) => { for (let x = 0; x < N; x++) set.add(idx(x, cc)); });
+    let cells = 0;
+    for (const k of set) if (!b[k].stone) cells++;
+    const hand = handType(rows.length, cols.length);
+    const hv = this.handValues(hand, lines);
+    const combo = this.curse === 'nocombo' ? 0 : this.combo;
+    const chips = cells * CONFIG.CHIP_PER_CELL + hv.c;
+    const mult = hv.m + combo;
+    return { hand, lv: hv.lv, chips, mult, total: chips * mult, rows, cols };
   }
 
   // ---------- 배치 + 점수 ----------
@@ -567,6 +596,7 @@ export class Game {
 
   openShop() {
     this.rerollCost = CONFIG.REROLL_BASE - (this.hasVoucher('v_coupon') ? 2 : 0);
+    this.freeRerolls = this.hasPassive('freeReroll') ? 1 : 0;
     if (this.voucherAnte !== this.ante) {
       const left = VOUCHERS.filter((v) => !this.vouchers.includes(v.id));
       this.voucherOffer = left.length ? { id: this.rng.pick(left).id, price: 10, sold: false } : null;
@@ -576,7 +606,36 @@ export class Game {
       jokers: this.rollJokers(CONFIG.SHOP_SIZE + (this.hasVoucher('v_wholesale') ? 1 : 0)),
       cards: this.rollCards(2),
       packs: this.rollPacks(2),
+      special: this.rollSpecial(),
     };
+  }
+
+  // 고가 특수 서비스 (코인 싱크)
+  rollSpecial() {
+    const opts = [{ id: 's_level', price: 15 }, { id: 's_clone', price: 20 }, { id: 's_edition', price: 12 }];
+    const o = this.rng.pick(opts);
+    return { ...o, price: this.price(o.price), sold: false };
+  }
+
+  // arg: s_level -> 줄 종류 키, s_clone/s_edition -> 조커 인덱스
+  buySpecial(arg) {
+    const o = this.shop && this.shop.special;
+    if (!o || o.sold || this.coins < o.price) return false;
+    if (o.id === 's_level') {
+      if (!HAND_KEYS.includes(arg)) return false;
+      this.lineLv[arg] += this.hasVoucher('v_telescope') ? 2 : 1;
+    } else if (o.id === 's_clone') {
+      const j = this.jokers[arg];
+      if (!j || this.jokers.length >= this.jokerSlots) return false;
+      this.jokers.push({ id: j.id, v: 0, price: j.price, ed: j.ed === 'neg' ? null : j.ed || null });
+    } else if (o.id === 's_edition') {
+      const j = this.jokers[arg];
+      if (!j || j.ed) return false;
+      j.ed = this.rng.pick(['foil', 'holo', 'poly']);
+    }
+    this.coins -= o.price;
+    o.sold = true;
+    return true;
   }
 
   rollEdition() {
@@ -710,10 +769,17 @@ export class Game {
   }
 
   reroll() {
-    if (this.coins < this.rerollCost) return false;
-    this.coins -= this.rerollCost;
-    this.rerollCost++;
+    if (this.freeRerolls > 0) this.freeRerolls--;
+    else {
+      if (this.coins < this.rerollCost) return false;
+      this.coins -= this.rerollCost;
+      this.rerollCost++;
+    }
+    // 리롤은 조커, 카드, 팩, 특수 서비스 줄을 모두 새로 뽑음
     this.shop.jokers = this.rollJokers(CONFIG.SHOP_SIZE + (this.hasVoucher('v_wholesale') ? 1 : 0));
+    this.shop.cards = this.rollCards(2);
+    this.shop.packs = this.rollPacks(2);
+    this.shop.special = this.rollSpecial();
     return true;
   }
 

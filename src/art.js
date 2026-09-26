@@ -59,6 +59,10 @@ export const ART = {
   hexed: { ch: 'witch', mood: 'smirk', prop: 'cauldron', pat: 'stars' },
   quadra: { ch: 'band', mood: 'happy', prop: 'notes', pat: 'rays' },
   momentum: { ch: 'jester', hat: 'helmet', mood: 'angry', prop: 'rocket', pat: 'speed' },
+  horizon: { ch: 'jester', hat: 'bells', mood: 'cool', prop: 'rowbar', pat: 'stripesH', acc: 'mustache' },
+  vertigo: { ch: 'jester', hat: 'bells2', mood: 'shock', prop: 'colbar', pat: 'stripesV', acc: 'glasses' },
+  zealot: { ch: 'monk', mood: 'crazy', prop: 'gems', pat: 'diamonds' },
+  sprinter: { ch: 'knight', mood: 'crazy', prop: 'rocket', pat: 'speed' },
   jesterking: { ch: 'jester', hat: 'kingcrown', mood: 'grin', prop: 'scepter', pat: 'rays', acc: 'beard' },
   infinity: { ch: 'cosmic', mood: 'calm', prop: 'infinity', pat: 'spiral' },
   midas: { ch: 'king', mood: 'smirk', prop: 'goldhand', pat: 'rays', acc: 'beard' },
@@ -362,5 +366,57 @@ export function drawJokerArt(g, id, w, h, hue) {
   drawPattern(g, a.pat, hue);
   character(g, a, hue);
   if (a.prop) prop(g, a.prop, hue);
+  g.restore();
+}
+
+// ---------- 보스 칩 아이콘 ----------
+import { BOSS_BY_ID } from './bosses.js';
+
+export function drawBossIcon(g, id, cx, cy, r) {
+  const b = BOSS_BY_ID[id];
+  const col = b ? b.color : '#ff4d6d';
+  g.save();
+  g.translate(cx, cy);
+  const s = r / 40;
+  // 칩 외곽
+  circle(g, 0, 0, r, col, INK, Math.max(1.5, r * 0.06));
+  for (let i = 0; i < 8; i++) {
+    g.save(); g.rotate((i / 8) * TAU);
+    g.fillStyle = 'rgba(255,255,255,0.85)'; g.fillRect(-r * 0.09, -r * 0.98, r * 0.18, r * 0.2);
+    g.restore();
+  }
+  circle(g, 0, 0, r * 0.72, '#1a0d24', 'rgba(255,255,255,0.5)', Math.max(1, r * 0.04));
+  g.scale(s, s);
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  const W = '#f6ecd8';
+  switch (id) {
+    case 'lock': rrect(g, -12, -4, 24, 18, 3, W, INK, 2); g.strokeStyle = W; g.lineWidth = 4; g.beginPath(); g.arc(0, -4, 8, Math.PI, 0); g.stroke(); circle(g, 0, 5, 3, INK); break;
+    case 'fog': // 구름 가면
+      [[-10, 2, 9], [0, -4, 11], [10, 2, 9], [0, 6, 10]].forEach(([x, y, rr2]) => circle(g, x, y, rr2, '#cfe0f0'));
+      ell(g, -6, 1, 3.5, 2.5, INK); ell(g, 6, 1, 3.5, 2.5, INK); break;
+    case 'giant': rrect(g, -11, -2, 22, 18, 6, '#ffb877', INK, 2); for (let i = 0; i < 4; i++) rrect(g, -11 + i * 5.8, -16, 5, 16, 2.5, '#ffb877', INK, 1.5); break;
+    case 'flat': case 'vertnull': {
+      g.save(); if (id === 'vertnull') g.rotate(Math.PI / 2);
+      rrect(g, -16, -5, 32, 10, 3, col, W, 2); g.restore();
+      g.strokeStyle = '#ff2e4d'; g.lineWidth = 4; g.beginPath(); g.moveTo(-14, -14); g.lineTo(14, 14); g.stroke(); break;
+    }
+    case 'poor': ell(g, 0, 4, 14, 11, '#a0703a', INK, 2); rrect(g, -8, -10, 16, 6, 2, '#a0703a', INK, 2); g.fillStyle = INK; g.font = '900 12px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('0', 0, 5); break;
+    case 'nocombo': ell(g, -8, 0, 8, 5, null, W, 3.5, -0.4); ell(g, 8, 0, 8, 5, null, W, 3.5, -0.4); g.strokeStyle = '#ff2e4d'; g.lineWidth = 3; g.beginPath(); g.moveTo(-2, -12); g.lineTo(2, -2); g.lineTo(-2, 4); g.lineTo(2, 12); g.stroke(); break;
+    case 'rubble': [[-9, 6, 8], [7, 7, 7], [0, -4, 8], [-12, -6, 5], [11, -5, 5]].forEach(([x, y, rr2]) => poly(g, [[x - rr2, y + rr2 * 0.6], [x - rr2 * 0.4, y - rr2], [x + rr2, y - rr2 * 0.3], [x + rr2 * 0.6, y + rr2 * 0.8]], '#8a6a4a', INK, 1.5)); break;
+    case 'seal': poly(g, [[-14, 6], [-10, -12], [0, -2], [10, -12], [14, 6]], '#8f6bff', INK, 2); circle(g, -10, -12, 3, '#ffd23f'); circle(g, 10, -12, 3, '#ffd23f'); g.strokeStyle = '#ff2e4d'; g.lineWidth = 4; g.beginPath(); g.moveTo(-14, -14); g.lineTo(14, 14); g.stroke(); break;
+    case 'heavy': poly(g, [[-8, -8], [8, -8], [14, 12], [-14, 12]], '#6b6b7a', INK, 2); circle(g, 0, -12, 4, null, W, 3); g.fillStyle = W; g.font = '900 11px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('9', 0, 3); break;
+    case 'nogem': poly(g, [[-12, -3], [-6, -11], [6, -11], [12, -3], [0, 13]], '#ff2e63', INK, 2); g.strokeStyle = INK; g.lineWidth = 2.5; g.beginPath(); g.moveTo(-2, -11); g.lineTo(3, -3); g.lineTo(-3, 3); g.lineTo(2, 11); g.stroke(); break;
+    case 'tax': // 저울
+      g.strokeStyle = '#ffd23f'; g.lineWidth = 3; g.beginPath(); g.moveTo(0, -14); g.lineTo(0, 12); g.moveTo(-14, -8); g.lineTo(14, -8); g.moveTo(-8, 12); g.lineTo(8, 12); g.stroke();
+      g.beginPath(); g.arc(-12, -1, 6, 0, Math.PI); g.moveTo(18, -1); g.arc(12, -1, 6, 0, Math.PI); g.stroke(); break;
+    case 'creep': g.strokeStyle = '#5dd46b'; g.lineWidth = 3.5; g.beginPath(); g.moveTo(-14, 14); g.bezierCurveTo(-14, -6, 10, 6, 6, -14); g.stroke(); ell(g, -6, 2, 5, 3, '#5dd46b', null, 0, -0.6); ell(g, 6, -6, 5, 3, '#5dd46b', null, 0, 0.6); break;
+    case 'lonely': ell(g, 0, 0, 14, 9, '#fff', INK, 2); circle(g, 0, 0, 5, INK); circle(g, 1.5, -1.5, 1.5, '#fff'); poly(g, [[-3, 10], [3, 10], [0, 16]], '#9fe8ff'); break;
+    case 'greed': ell(g, 0, 2, 15, 11, '#ffd23f', INK, 2); g.fillStyle = INK; g.fillRect(-11, 0, 22, 5); g.fillStyle = '#fff'; for (let i = 0; i < 5; i++) poly(g, [[-10 + i * 4.5, 0], [-6 + i * 4.5, 0], [-8 + i * 4.5, 4]], '#fff'); break;
+    case 'slow': circle(g, 3, 0, 10, null, '#ffb877', 4); g.strokeStyle = '#ffb877'; g.lineWidth = 2.5; g.beginPath(); g.arc(3, 0, 5, 0, Math.PI * 1.5); g.stroke(); ell(g, -6, 10, 14, 4, '#9fe8c8', INK, 1.5); g.beginPath(); g.moveTo(-16, 8); g.lineTo(-19, -2); g.moveTo(-13, 8); g.lineTo(-14, -2); g.strokeStyle = '#9fe8c8'; g.stroke(); break;
+    case 'crimson': poly(g, [[-14, 4], [-14, -10], [-7, -3], [0, -14], [7, -3], [14, -10], [14, 4]], '#ffd23f', INK, 2); circle(g, 0, 10, 6, '#ff2e4d', INK, 1.5); break;
+    case 'tower': rrect(g, -8, -10, 16, 24, 2, '#ffc21a', INK, 2); poly(g, [[-11, -10], [0, -18], [11, -10]], '#ffc21a', INK, 2); g.fillStyle = INK; g.fillRect(-3, 4, 6, 10); g.fillRect(-4, -5, 3, 4); g.fillRect(1, -5, 3, 4); break;
+    case 'night': circle(g, 0, 0, 13, '#d6d0ff'); circle(g, 6, -4, 11, '#1a0d24'); star(g, -8, 8, 3, '#fff'); star(g, 10, 10, 2.5, '#fff'); break;
+    default: star(g, 0, 0, 12, W);
+  }
   g.restore();
 }

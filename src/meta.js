@@ -33,6 +33,7 @@ function defaults() {
     deckWins: {}, // { deckId: 승리한 최고 스테이크 }
     sel: { stake: 1, deck: 'basic', skin: 'neon' },
     achievements: {},
+    achClaimed: {},
     daily: { date: '', missions: [], played: false, best: 0, bestAnte: 0 },
     dailyHistory: {}, // { 'YYYY-MM-DD': { ante, hit, won, rule } }
     weekly: { week: '', missions: [], chest: false },
@@ -85,6 +86,9 @@ export function migrate(raw) {
     d.sel.skin = d.unlocked.skins.includes(raw.sel.skin) ? raw.sel.skin : 'neon';
   }
   if (isObj(raw.achievements)) for (const a of ACHIEVEMENTS) if (raw.achievements[a.id]) d.achievements[a.id] = num(raw.achievements[a.id], 1);
+  // v3 이전 업적은 이미 지급된 것으로 처리
+  if (isObj(raw.achClaimed)) { for (const a of ACHIEVEMENTS) if (raw.achClaimed[a.id]) d.achClaimed[a.id] = true; }
+  else for (const k of Object.keys(d.achievements)) d.achClaimed[k] = true;
   if (isObj(raw.daily)) {
     d.daily.date = str(raw.daily.date);
     d.daily.played = !!raw.daily.played;
@@ -93,7 +97,7 @@ export function migrate(raw) {
     if (Array.isArray(raw.daily.missions)) {
       d.daily.missions = raw.daily.missions
         .filter((m) => isObj(m) && MISSION_BY_ID[m.id])
-        .map((m) => ({ id: m.id, n: num(m.n, MISSION_BY_ID[m.id].n), p: num(m.p), done: !!m.done }));
+        .map((m) => ({ id: m.id, n: num(m.n, MISSION_BY_ID[m.id].n), p: num(m.p), done: !!m.done, claimed: m.claimed !== false && !!m.done && (m.claimed === true || raw.version < 3 || !('claimed' in m)) }));
     }
   }
   if (isObj(raw.dailyHistory)) {
@@ -255,9 +259,9 @@ export class Meta {
       if (m.id !== id || m.done) continue;
       m.p = isMax ? Math.max(m.p, v) : m.p + v;
       if (m.p >= m.n) {
-        m.p = m.n; m.done = true;
+        m.p = m.n; m.done = true; m.claimed = false;
         const def = MISSION_BY_ID[m.id];
-        this.addTokens(def.reward, `미션 완료: ${def.text(m.n)}`);
+        this.toast(`미션 완료: ${def.text(m.n)} (미션에서 받기)`, 'ach');
       }
     }
     for (const m of this.d.weekly.missions) {
@@ -266,6 +270,29 @@ export class Meta {
       m.p = def.max ? Math.max(m.p, v) : m.p + v;
       if (m.p >= m.n) { m.p = m.n; m.done = true; this.toast(`주간 미션 완료: ${def.text(m.n)}`, 'ach'); }
     }
+  }
+
+  claimMission(i) {
+    const m = this.d.daily.missions[i];
+    if (!m || !m.done || m.claimed) return 0;
+    m.claimed = true;
+    const r = MISSION_BY_ID[m.id].reward;
+    this.d.tokens += r; this.d.stats.tokensEarned += r;
+    this.save();
+    return r;
+  }
+
+  claimAchievement(id) {
+    const a = ACHIEVEMENTS.find((x) => x.id === id);
+    if (!a || !this.d.achievements[id] || this.d.achClaimed[id]) return 0;
+    this.d.achClaimed[id] = true;
+    this.d.tokens += a.reward; this.d.stats.tokensEarned += a.reward;
+    this.save();
+    return a.reward;
+  }
+
+  get claimables() {
+    return this.d.daily.missions.filter((m) => m.done && !m.claimed).length + ACHIEVEMENTS.filter((a) => this.d.achievements[a.id] && !this.d.achClaimed[a.id]).length + (this.chestReady ? 1 : 0);
   }
 
   get missionsDone() { return this.d.daily.missions.filter((m) => m.done).length; }
@@ -291,8 +318,7 @@ export class Meta {
       if (this.d.achievements[a.id]) continue;
       if (a.check(this.d.stats, ctx)) {
         this.d.achievements[a.id] = Date.now();
-        this.toast(`업적 달성: ${a.name}`, 'ach');
-        this.addTokens(a.reward);
+        this.toast(`업적 달성: ${a.name} (프로필에서 받기)`, 'ach');
       }
     }
   }
@@ -346,7 +372,7 @@ export class Meta {
       if (game.clearedAnte % 8 === 0) s.showdowns++;
     }
     this.missionProgress('rounds', 1);
-    this.onAnte(game.ante, game);
+    this.onAnte(game.phase === 'victory' ? game.clearedAnte : game.ante, game);
     this.checkAchievements();
     this.save();
   }

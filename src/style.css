@@ -220,7 +220,7 @@ html, body {
   background: linear-gradient(115deg, transparent 35%, rgba(255,255,255,0.55) 50%, transparent 65%); background-size: 250% 100%; animation: shine 2.2s linear infinite; mix-blend-mode: screen; }
 .jwrap.ed-holo::after { background-image: linear-gradient(115deg, transparent 30%, rgba(255,120,240,0.6) 45%, rgba(120,220,255,0.6) 55%, transparent 70%); }
 .jwrap.ed-poly::after { background-image: linear-gradient(115deg, transparent 25%, #ff6b6b88 38%, #ffe06688 46%, #6bff9588 54%, #6bb8ff88 62%, transparent 75%); }
-.jwrap.ed-neg { filter: invert(0.85) hue-rotate(180deg); }
+
 @keyframes shine { from { background-position: 150% 0; } to { background-position: -100% 0; } }
 .pack .packrow { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 8px 0; }
 .pchoice { width: 104px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 4px 8px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.15);
@@ -312,3 +312,17 @@ html, body {
 @media (max-height: 700px) {
   .tile canvas { width: 58px !important; height: 72px !important; }
 }
+
+/* 3차 */
+.tok.fly { position: fixed; z-index: 50; width: 16px; height: 16px; transition: transform .55s cubic-bezier(.5,-0.3,.6,1), opacity .55s; pointer-events: none; }
+.bump { display: inline-block; animation: bump .3s ease-out; }
+@keyframes bump { 50% { transform: scale(1.5); color: #fff; } }
+.btn.claim { margin: 4px 0 0; min-height: 36px; padding: 0 12px; font-size: 14px; }
+.ach em .btn.claim { display: block; }
+.choices { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin: 6px 0; }
+.choices .btn.small { margin: 0; min-height: 44px; }
+.confirm .row .btn { flex: 1; margin: 10px 4px 0; width: auto; }
+.bossic { display: block; }
+.next { display: flex; flex-direction: column; align-items: center; }
+.next .bossic { margin-bottom: 2px; }
+.sigil { display: flex; align-items: center; justify-content: center; }

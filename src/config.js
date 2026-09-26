@@ -25,7 +25,7 @@ export const CONFIG = {
   GEM_STEEL_XMULT: 1.2,
 
   // 목표 점수 (Balatro 곡선 참고)
-  ANTE_BASE: [320, 780, 1600, 3000, 5000, 7500, 11000, 16000],
+  ANTE_BASE: [320, 780, 1920, 3600, 6000, 9000, 13200, 19200],
   ENDLESS_GROWTH: 1.9,
   BLIND_MULT: [1, 1.5, 2],
   BLIND_NAMES: ['스몰 블라인드', '빅 블라인드'],

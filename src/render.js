@@ -1,8 +1,9 @@
 // Canvas 2D 렌더러 (모든 그래픽 절차적 생성)
 import { COLORS, STONE_COLOR, CONFIG } from './config.js';
 import { JOKER_BY_ID, RARITY_COLOR, EDITIONS, fmt } from './jokers.js';
-import { drawJokerArt } from './art.js';
+import { drawJokerArt, drawBossIcon } from './art.js';
 import { SKINS } from './metadata.js';
+import { HANDS } from './items.js';
 
 export const FONT = 'system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 const N = CONFIG.BOARD;
@@ -33,7 +34,8 @@ export function computeLayout(vw, vh, safe) {
   const cardW = Math.floor((gw - pad * 2 - jgap * 4) / 5);
   const jokH = Math.round(Math.min(Math.max(cardW * 1.05, 54), 80));
   const calcH = 50;
-  const fixed = hudH + scoreH + jokH + calcH;
+  const stripH = 16;
+  const fixed = hudH + scoreH + jokH + stripH + calcH + 2;
   const avail = bottom - top - fixed - 16;
   const trayK = 2.7 / 8; // 트레이 높이 = 보드 * trayK + 8
   let board = Math.min(gw - pad * 2, (avail - 8) / (1 + trayK));
@@ -48,7 +50,8 @@ export function computeLayout(vw, vh, safe) {
   const L = { vw, vh, gx, gw, pad, cell, gap };
   L.hud = { x: gx + pad, y, w: gw - pad * 2, h: hudH }; y += hudH + gap * 0.5;
   L.score = { x: gx + pad, y, w: gw - pad * 2, h: scoreH }; y += scoreH + gap;
-  L.jokers = { x: gx + pad, y, w: gw - pad * 2, h: jokH, cardW, gap: jgap }; y += jokH + gap;
+  L.jokers = { x: gx + pad, y, w: gw - pad * 2, h: jokH, cardW, gap: jgap }; y += jokH + 2;
+  L.strip = { x: gx + pad, y, w: gw - pad * 2, h: stripH }; y += stripH + Math.min(gap, 6);
   L.calc = { x: gx + pad, y, w: gw - pad * 2, h: calcH }; y += calcH + gap;
   // 남는 공간은 보드와 트레이 주변에
   const rest = bottom - (y + board + trayH);
@@ -276,6 +279,14 @@ export class Renderer {
       vg.addColorStop(0, 'rgba(120,0,30,0)'); vg.addColorStop(1, `rgba(170,0,40,${pulse})`);
       ctx.fillStyle = vg; ctx.fillRect(0, 0, L.vw, L.vh);
     }
+    if (app.feltWave && app.feltWave.t < 0.7) {
+      const q = app.feltWave.t / 0.7;
+      const cx = L.board.x + L.board.w / 2, cy = L.board.y + L.board.h / 2;
+      const rad = (0.2 + q) * Math.max(L.board.w, L.board.h) * 1.1;
+      const wg = ctx.createRadialGradient(cx, cy, rad * 0.7, cx, cy, rad);
+      wg.addColorStop(0, 'rgba(0,0,0,0)'); wg.addColorStop(0.7, app.feltWave.color.replace('A', String(0.35 * (1 - q)))); wg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = wg; ctx.fillRect(L.gx, L.board.y - 14, L.gw, L.tray.y + L.tray.h - L.board.y + 20);
+    }
     const [sx, sy] = app.fx.offset();
     ctx.save();
     ctx.translate(sx, sy);
@@ -410,7 +421,8 @@ export class Renderer {
     this.text(`앤티 ${hd.ante}${hd.endless ? '' : ' / ' + CONFIG.FINAL_ANTE}`, bx, h.y + 15, { size: 13, color: '#c9b8ff', weight: 700 });
     const boss = hd.blind === 2;
     const bcol = boss ? hd.color : hd.blind === 1 ? '#ffb627' : '#36c9ff';
-    this.text((boss ? '보스 · ' : '') + hd.name, bx, h.y + 34, { size: 16, color: bcol, weight: 900, glow: boss ? bcol : null, maxW: h.w - 170 });
+    if (boss) drawBossIcon(ctx, hd.boss, bx + 9, h.y + 34, 9);
+    this.text((boss ? '보스 · ' : '') + hd.name, bx + (boss ? 22 : 0), h.y + 34, { size: 16, color: bcol, weight: 900, glow: boss ? bcol : null, maxW: h.w - 190 });
     app.hit.blind = { x: bx, y: h.y, w: h.w - 180, h: h.h };
     // 코인
     const cx = h.x + h.w;
@@ -517,6 +529,30 @@ export class Renderer {
     return c;
   }
 
+  // 네거티브 에디션: 픽셀 색 반전 + 보라 셰이드 (캐릭터가 또렷하게 보이도록)
+  negSprite(id, w, h) {
+    const key = 'neg|' + id + '|' + Math.round(w) + '|' + Math.round(h) + '|' + this.dpr;
+    let c = this.cardCache.get(key);
+    if (c) return c;
+    const src = this.jokerSprite(id, w, h);
+    c = document.createElement('canvas');
+    c.width = src.width; c.height = src.height;
+    const g = c.getContext('2d');
+    g.drawImage(src, 0, 0);
+    try {
+      const im = g.getImageData(0, 0, c.width, c.height);
+      const d = im.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (!d[i + 3]) continue;
+        const r = 255 - d[i], gg = 255 - d[i + 1], b = 255 - d[i + 2];
+        d[i] = r * 0.8 + 40; d[i + 1] = gg * 0.75 + 20; d[i + 2] = Math.min(255, b * 0.9 + 60);
+      }
+      g.putImageData(im, 0, 0);
+    } catch { /* 무시 */ }
+    this.cardCache.set(key, c);
+    return c;
+  }
+
   drawJokerCard(j, x, y, w, h, { scale = 1, disabled = false, time = 0, rot = 0 } = {}) {
     const { ctx } = this;
     const d = JOKER_BY_ID[j.id];
@@ -526,17 +562,14 @@ export class Renderer {
     ctx.scale(scale, scale);
     ctx.translate(-w / 2, -h / 2);
     if (!disabled) { ctx.shadowColor = d.rarity === 'legendary' ? '#c86bff' : 'rgba(0,0,0,0.5)'; ctx.shadowBlur = d.rarity === 'legendary' ? 12 : 6; ctx.shadowOffsetY = 2; }
-    ctx.drawImage(this.jokerSprite(j.id, w, h), 0, 0, w, h);
+    ctx.drawImage(j.ed === 'neg' && !disabled ? this.negSprite(j.id, w, h) : this.jokerSprite(j.id, w, h), 0, 0, w, h);
     ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     // 에디션 반짝임
     if (j.ed && !disabled) {
       ctx.save();
       rr(ctx, 2, 2, w - 4, h - 4, 7); ctx.clip();
       const band = ((time * 0.6) % 1.6) - 0.3;
-      if (j.ed === 'neg') {
-        ctx.globalCompositeOperation = 'difference'; ctx.fillStyle = 'rgba(200,200,255,0.55)'; ctx.fillRect(0, 0, w, h);
-        ctx.globalCompositeOperation = 'source-over';
-      }
+
       const gx = ctx.createLinearGradient(band * w - h, 0, band * w + h, h);
       const col = j.ed === 'foil' ? '200,235,255' : j.ed === 'holo' ? '255,160,240' : j.ed === 'poly' ? `${128 + 127 * Math.sin(time * 3) | 0},${128 + 127 * Math.sin(time * 3 + 2) | 0},${128 + 127 * Math.sin(time * 3 + 4) | 0}` : '220,220,255';
       gx.addColorStop(0, `rgba(${col},0)`); gx.addColorStop(0.45, `rgba(${col},0)`); gx.addColorStop(0.5, `rgba(${col},0.55)`); gx.addColorStop(0.55, `rgba(${col},0)`); gx.addColorStop(1, `rgba(${col},0)`);
@@ -585,9 +618,9 @@ export class Renderer {
         continue;
       }
       const bt = app.jokerBounce[i] ?? 9;
-      const sc = bt < 0.5 ? 1 + Math.sin(bt * Math.PI * 4) * 0.18 * (1 - bt / 0.5) : 1;
+      const sc = bt < 0.4 ? 1 + 0.15 * (1 - bt / 0.4) : 1;
       const lift = bt < 0.3 ? -Math.sin((bt / 0.3) * Math.PI) * 8 : 0;
-      const rot = bt < 0.4 ? Math.sin(bt * Math.PI * 5) * 0.12 * (1 - bt / 0.4) : Math.sin(time * 1.3 + i) * 0.015;
+      const rot = bt < 0.4 ? Math.sin(bt * 45) * 0.105 * (1 - bt / 0.4) : Math.sin(time * 1.3 + i) * 0.015;
       const dragOff = app.jokerDrag && app.jokerDrag.idx === i ? app.jokerDrag.dx : 0;
       this.drawJokerCard(j, r.x + dragOff, r.y + lift + (dragOff ? -6 : 0), r.w, r.h, { scale: dragOff ? 1.08 : sc, disabled: j.disabled, time, rot });
     }
@@ -605,16 +638,20 @@ export class Renderer {
     const m = k.merge || 0;
     const e = m * m * (3 - 2 * m);
     const cp = 1 + k.chipsPulse * 0.12, mp = 1 + k.multPulse * 0.12;
+    const pv = !k.active && app.drag && app.drag.valid && app.drag.preview;
+    const chipTxt = k.active ? fmt(Math.round(k.chipsShown ?? k.chips)) : pv ? fmt(pv.chips) : '칩';
+    const multTxt = k.active ? fmt(Math.round((k.multShown ?? k.mult) * 10) / 10) : pv ? fmt(pv.mult) : '배수';
+    const big = k.active || pv;
     if (e < 1) {
       ctx.save();
-      ctx.globalAlpha = 1 - e;
+      ctx.globalAlpha = Math.pow(1 - e, 2) * (pv ? 0.72 : 1);
       // 칩 박스
       ctx.save(); ctx.translate(c.x + bw / 2 + e * (bw / 2 + 20), c.y + c.h / 2); ctx.scale(cp, cp);
       rr(ctx, -bw / 2, -c.h / 2 + 4, bw, c.h - 8, 10);
       const cg = ctx.createLinearGradient(0, -c.h / 2, 0, c.h / 2);
       cg.addColorStop(0, '#1a8cff'); cg.addColorStop(1, '#0a4aa3');
       ctx.fillStyle = cg; ctx.shadowColor = '#36c9ff'; ctx.shadowBlur = 8 + k.chipsPulse * 20; ctx.fill(); ctx.shadowBlur = 0;
-      this.text(k.active ? fmt(k.chips) : '칩', 0, 1, { size: k.active ? 24 : 15, color: '#fff', weight: 900, align: 'center', maxW: bw - 12, stroke: 'rgba(0,0,0,0.35)', sw: 3 });
+      this.text(chipTxt, 0, 1, { size: big ? 24 : 15, color: '#fff', weight: 900, align: 'center', maxW: bw - 12, stroke: 'rgba(0,0,0,0.35)', sw: 3 });
       ctx.restore();
       this.text('X', c.x + c.w / 2, c.y + c.h / 2 + 1, { size: 22, color: '#fff', weight: 900, align: 'center', glow: '#ff4d6d' });
       // 배수 박스
@@ -623,14 +660,14 @@ export class Renderer {
       const mg = ctx.createLinearGradient(0, -c.h / 2, 0, c.h / 2);
       mg.addColorStop(0, '#ff3b5c'); mg.addColorStop(1, '#a3082a');
       ctx.fillStyle = mg; ctx.shadowColor = '#ff4d6d'; ctx.shadowBlur = 8 + k.multPulse * 20; ctx.fill(); ctx.shadowBlur = 0;
-      this.text(k.active ? fmt(k.mult) : '배수', 0, 1, { size: k.active ? 24 : 15, color: '#fff', weight: 900, align: 'center', maxW: bw - 12, stroke: 'rgba(0,0,0,0.35)', sw: 3 });
+      this.text(multTxt, 0, 1, { size: big ? 24 : 15, color: '#fff', weight: 900, align: 'center', maxW: bw - 12, stroke: 'rgba(0,0,0,0.35)', sw: 3 });
       ctx.restore();
       ctx.restore();
     }
     // 합쳐진 공식 막대: 칩 X 배수 = 합계
     if (e > 0) {
       ctx.save();
-      ctx.globalAlpha = Math.min(1, e * 1.5) * (k.fade ?? 1);
+      ctx.globalAlpha = Math.max(0, Math.min(1, (e - 0.45) * 2.2)) * (k.fade ?? 1);
       const pop = 1 + Math.max(0, 0.12 - Math.abs(e - 0.9)) * 2;
       ctx.translate(c.x + c.w / 2, c.y + c.h / 2); ctx.scale(pop, pop);
       rr(ctx, -c.w / 2, -c.h / 2 + 4, c.w, c.h - 8, 12);
@@ -654,13 +691,17 @@ export class Renderer {
       }
       ctx.restore();
     }
+    ctx.globalAlpha = 1;
     // 라벨 (줄 종류, 레벨, 콤보)
-    if (k.label && k.labelAlpha > 0) {
+    if (pv) {
+      this.text(`${HANDS[pv.hand].name} Lv.${pv.lv} · ${fmt(pv.chips)} X ${fmt(pv.mult)} 예상 (조커 제외)`, c.x + c.w / 2, L.strip.y + L.strip.h / 2, { size: 12, color: '#9fe8ff', weight: 900, align: 'center', stroke: 'rgba(0,0,0,0.8)', sw: 3, maxW: c.w });
+    } else if (k.label && k.labelAlpha > 0) {
       ctx.globalAlpha = k.labelAlpha;
-      this.text(k.label, c.x + c.w / 2, c.y - 1, { size: 12, color: '#ffe68a', weight: 900, align: 'center', stroke: 'rgba(0,0,0,0.8)', sw: 3 });
+      this.text(k.label, c.x + c.w / 2, L.strip.y + L.strip.h / 2, { size: 12, color: '#ffe68a', weight: 900, align: 'center', stroke: 'rgba(0,0,0,0.8)', sw: 3, maxW: c.w });
       ctx.globalAlpha = 1;
     } else if (!k.active && g.blind === 2 && g.phase === 'play') {
-      this.text('⚠ ' + g.bossDef.desc, c.x + c.w / 2, c.y - 1, { size: 11, color: g.bossDef.color, weight: 800, align: 'center', maxW: c.w, stroke: 'rgba(0,0,0,0.8)', sw: 3 });
+      drawBossIcon(ctx, g.boss, c.x + c.w / 2 - Math.min(c.w, ctx.measureText(g.bossDef.desc).width * 1.05) / 2 - 12, L.strip.y + L.strip.h / 2, 7);
+      this.text(g.bossDef.desc, c.x + c.w / 2, L.strip.y + L.strip.h / 2, { size: 11, color: g.bossDef.color, weight: 800, align: 'center', maxW: c.w - 30, stroke: 'rgba(0,0,0,0.8)', sw: 3 });
     }
   }
 
@@ -714,14 +755,37 @@ export class Renderer {
       }
     }
     // 제거 중인 칸
+    // 0.08초 흰 플래시 -> 1.2배 팽창 -> 파편
     for (const cl of app.clearing) {
-      const t = cl.t / cl.life;
-      if (t < 0 || t >= 1) continue;
+      const tt = cl.t;
+      if (tt < 0 || tt >= cl.life) continue;
       const x = b.x + cl.c * cell, y = b.y + cl.r * cell;
-      const s = cell * (1 - t * 0.6);
-      this.drawBlock(cl.color, x + (cell - s) / 2, y + (cell - s) / 2, s, 1 - t);
-      ctx.fillStyle = `rgba(255,255,255,${(1 - t) * 0.8})`;
+      let s = cell, a = 1, white = 0;
+      if (tt < 0.08) { white = 1; }
+      else { const q = (tt - 0.08) / (cl.life - 0.08); s = cell * (1 + 0.2 * Math.min(1, q * 2)); a = 1 - q; white = 0.5 * (1 - q); }
+      this.drawBlock(cl.color, x + (cell - s) / 2, y + (cell - s) / 2, s, a);
+      ctx.fillStyle = `rgba(255,255,255,${white})`;
       rr(ctx, x + (cell - s) / 2, y + (cell - s) / 2, s, s, s * 0.18); ctx.fill();
+    }
+    // 여러 줄 제거 시 보드 테두리 발광
+    if (app.boardGlow && app.boardGlow.t < 0.3) {
+      const q = 1 - app.boardGlow.t / 0.3;
+      rr(ctx, b.x - 6, b.y - 6, b.w + 12, b.h + 12, 12);
+      ctx.strokeStyle = app.boardGlow.color; ctx.globalAlpha = q; ctx.lineWidth = 4; ctx.shadowColor = app.boardGlow.color; ctx.shadowBlur = 26 * q; ctx.stroke();
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    }
+    // 예상 점수 칩 (하이라이트 줄 끝)
+    if (drag && drag.valid && drag.preview) {
+      const pv = drag.preview;
+      let px, py;
+      if (pv.rows.length) { px = b.x; py = b.y + (pv.rows[0] + 0.5) * cell; } else { px = b.x + (pv.cols[0] + 0.5) * cell; py = b.y + 12; }
+      const label = '+' + fmt(pv.total);
+      ctx.font = `900 13px ${FONT}`;
+      const w2 = ctx.measureText(label).width + 14;
+      px = Math.min(px, b.x + b.w - w2 / 2); px = Math.max(px, b.x + w2 / 2);
+      rr(ctx, px - w2 / 2, py - 11, w2, 22, 11);
+      ctx.fillStyle = 'rgba(20,6,40,0.92)'; ctx.fill(); ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 1.5; ctx.stroke();
+      this.text(label, px, py + 0.5, { size: 13, color: '#ffe68a', weight: 900, align: 'center' });
     }
     // 콤보 카운터 + 남은 유예
     if (g.combo > 0 && g.phase === 'play') {
@@ -754,6 +818,20 @@ export class Renderer {
   drawTray(app, time) {
     const { ctx, L } = this;
     const g = app.game;
+    // 트레이 슬롯 장식 (카지노 칩 자리)
+    for (let i = 0; i < 3; i++) {
+      const slot = L.traySlot(i);
+      const cx = slot.x + slot.w / 2, cy = slot.y + slot.h / 2;
+      const r = Math.min(slot.w, slot.h) * 0.36;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.14)'; ctx.fill();
+      ctx.setLineDash([5, 6]); ctx.strokeStyle = g.tray[i] ? 'rgba(255,215,120,0.12)' : 'rgba(255,215,120,0.28)'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+      if (!g.tray[i]) {
+        ctx.globalAlpha = 0.35;
+        this.text(['♠', '♦', '♣'][i], cx, cy + 1, { size: r * 0.8, color: '#ffd77a', weight: 900, align: 'center' });
+        ctx.globalAlpha = 1;
+      }
+    }
     for (let i = 0; i < 3; i++) {
       const p = g.tray[i];
       if (!p) continue;
@@ -842,11 +920,11 @@ export class Renderer {
       const w = Math.max(r.w, ctx.measureText(b.text).width + 14);
       let x = r.x + r.w / 2 - w / 2;
       x = Math.max(L.gx + 4, Math.min(L.gx + L.gw - w - 4, x));
-      const y = r.y - 32 - Math.min(t * 40, 6);
+      const y = r.y + r.h + 6 + Math.min(t * 30, 4);
       ctx.globalAlpha = a;
       rr(ctx, x, y, w, 24, 8);
       ctx.fillStyle = b.color; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - 6, y + 23); ctx.lineTo(r.x + r.w / 2, y + 30); ctx.lineTo(r.x + r.w / 2 + 6, y + 23); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - 6, y + 1); ctx.lineTo(r.x + r.w / 2, y - 6); ctx.lineTo(r.x + r.w / 2 + 6, y + 1); ctx.fill();
       this.text(b.text, x + w / 2, y + 12.5, { size: 13, color: '#fff', weight: 900, align: 'center', stroke: 'rgba(0,0,0,0.35)', sw: 3 });
       ctx.globalAlpha = 1;
     }
@@ -869,7 +947,8 @@ export class Renderer {
     ctx.fillRect(L.gx, cy - h / 2, L.gw, h);
     ctx.fillStyle = bn.color;
     ctx.fillRect(L.gx, cy - h / 2, L.gw, 3); ctx.fillRect(L.gx, cy + h / 2 - 3, L.gw, 3);
-    this.text(bn.title, x + L.gw / 2, cy - (bn.sub ? 14 : 0), { size: 30, color: bn.color, weight: 900, align: 'center', glow: bn.color, maxW: L.gw - 20 });
+    if (bn.boss) drawBossIcon(ctx, bn.boss, x + 34, cy, 24);
+    this.text(bn.title, x + L.gw / 2 + (bn.boss ? 18 : 0), cy - (bn.sub ? 14 : 0), { size: bn.boss ? 26 : 30, color: bn.color, weight: 900, align: 'center', glow: bn.color, maxW: L.gw - 20 });
     if (bn.sub) this.text(bn.sub, x + L.gw / 2, cy + 22, { size: 14, color: '#fff', weight: 700, align: 'center', maxW: L.gw - 24 });
     ctx.restore();
   }

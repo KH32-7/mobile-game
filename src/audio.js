@@ -23,8 +23,17 @@ function buildGraph(c) {
   master = c.createGain();
   master.gain.value = 0.9;
   const comp = c.createDynamicsCompressor();
-  comp.threshold.value = -16; comp.knee.value = 10; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.18;
-  master.connect(comp).connect(c.destination);
+  comp.threshold.value = -18; comp.knee.value = 8; comp.ratio.value = 3; comp.attack.value = 0.004; comp.release.value = 0.18;
+  // 메이크업 게인 + 브릭월 리미터 (피크 약 -3dBFS)
+  const makeup = c.createGain(); makeup.gain.value = 1.7;
+  const limiter = c.createDynamicsCompressor();
+  limiter.threshold.value = -6.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.08;
+  // 최종 소프트 클리퍼: 피크를 -3dBFS 아래로
+  const clip = c.createWaveShaper();
+  const cn = 2048, cc = new Float32Array(cn);
+  for (let i = 0; i < cn; i++) { const x = (i / (cn - 1)) * 4 - 2; cc[i] = 0.7 * Math.tanh(x / 0.7); }
+  clip.curve = cc;
+  master.connect(comp).connect(makeup).connect(limiter).connect(clip).connect(c.destination);
   // 노이즈 임펄스 리버브
   const conv = c.createConvolver();
   const len = Math.floor(c.sampleRate * 1.8);
@@ -38,10 +47,10 @@ function buildGraph(c) {
   const revOut = c.createGain(); revOut.gain.value = 0.32;
   revIn = c.createGain(); revIn.gain.value = 1;
   revIn.connect(conv).connect(revLp).connect(revOut).connect(master);
-  sfxBus = c.createGain(); sfxBus.gain.value = 0.62 * vol.sfx; sfxBus.connect(master);
+  sfxBus = c.createGain(); sfxBus.gain.value = 1.0 * vol.sfx; sfxBus.connect(master);
   const sfxSend = c.createGain(); sfxSend.gain.value = 0.35; sfxBus.connect(sfxSend).connect(revIn);
   bgmFilter = c.createBiquadFilter(); bgmFilter.type = 'lowpass'; bgmFilter.frequency.value = 9000;
-  bgmBus = c.createGain(); bgmBus.gain.value = 0.2 * vol.bgm; bgmBus.connect(bgmFilter).connect(master);
+  bgmBus = c.createGain(); bgmBus.gain.value = 0.14 * vol.bgm; bgmBus.connect(bgmFilter).connect(master);
   const bgmSend = c.createGain(); bgmSend.gain.value = 0.25; bgmFilter.connect(bgmSend).connect(revIn);
   // 디스토션 (xmult 슬램용)
   shaper = c.createWaveShaper();
@@ -56,8 +65,8 @@ function buildGraph(c) {
 
 function applyVolumes() {
   if (!ctx) return;
-  sfxBus.gain.setTargetAtTime(0.62 * vol.sfx, ctx.currentTime, 0.02);
-  bgmBus.gain.setTargetAtTime(0.2 * vol.bgm * (ducked ? 0.45 : 1), ctx.currentTime, 0.08);
+  sfxBus.gain.setTargetAtTime(1.0 * vol.sfx, ctx.currentTime, 0.02);
+  bgmBus.gain.setTargetAtTime(0.14 * vol.bgm * (ducked ? 0.45 : 1), ctx.currentTime, 0.08);
 }
 
 // 점수 연출 중 BGM 덕킹
@@ -133,13 +142,16 @@ function metal(t, base, v, dur) {
 const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28];
 
 export const sfx = {
-  pickup() { tone({ freq: 520, type: 'triangle', dur: 0.06, vol: 0.12, slideTo: 760 }); noise({ dur: 0.02, vol: 0.05, freq: 5000 }); },
+  pickup() { tone({ freq: 520, type: 'triangle', dur: 0.08, vol: 1.8, slideTo: 760 }); tone({ freq: 1040, type: 'sine', dur: 0.05, vol: 0.6, slideTo: 1520 }); noise({ dur: 0.03, vol: 0.75, freq: 5000 }); },
   // 착지음: 저음 쿵 + 나무 공명 + 짧은 클릭
   place(size = 4) {
-    tone({ freq: 130 - size * 5, type: 'sine', dur: 0.16, vol: 0.55, slideTo: 48, attack: 0.002 });
-    tone({ freq: 340 - size * 12, type: 'triangle', dur: 0.07, vol: 0.2, slideTo: 200 });
-    noise({ dur: 0.035, vol: 0.18, freq: 1800, type: 'bandpass', q: 1.5 });
-    noise({ dur: 0.08, vol: 0.06, freq: 400, type: 'lowpass' });
+    const f = 130 - size * 5;
+    tone({ freq: f, type: 'sine', dur: 0.16, vol: 2.16, slideTo: 48, attack: 0.002 });
+    // 250~800Hz 배음: 삼각파 2배음 + 짧은 나무 타격
+    tone({ freq: f * 2.6, type: 'triangle', dur: 0.09, vol: 1.62, slideTo: f * 1.8 });
+    tone({ freq: 480 - size * 10, type: 'triangle', dur: 0.05, vol: 0.99 });
+    noise({ dur: 0.045, vol: 1.8, freq: 620, type: 'bandpass', q: 3 });
+    noise({ dur: 0.03, vol: 0.9, freq: 1800, type: 'bandpass', q: 1.5 });
   },
   invalid() { tone({ freq: 140, type: 'square', dur: 0.14, vol: 0.09, filter: { freq: 600 } }); tone({ freq: 110, type: 'square', dur: 0.14, vol: 0.07, t: 0.07, filter: { freq: 500 } }); },
   // 줄 제거: 크래시 + 벨 코드 + 서브 붐, 줄 수에 따라 피치 상승
@@ -147,38 +159,38 @@ export const sfx = {
     const base = 60 + Math.min(lines - 1, 4) * 3 + Math.min(combo, 8);
     const n = 3 + Math.min(lines, 4);
     for (let i = 0; i < n; i++) {
-      tone({ freq: mtof(base + PENTA[i]), type: 'triangle', t: i * 0.04, dur: 0.28, vol: 0.18 });
-      tone({ freq: mtof(base + 12 + PENTA[i]), type: 'sine', t: i * 0.04, dur: 0.22, vol: 0.07 });
+      tone({ freq: mtof(base + PENTA[i]), type: 'triangle', t: i * 0.04, dur: 0.28, vol: 0.044 });
+      tone({ freq: mtof(base + 12 + PENTA[i]), type: 'sine', t: i * 0.04, dur: 0.22, vol: 0.018 });
     }
     // 크래시: 노이즈 버스트 + 밴드패스 스윕 + 저역 킥
-    noise({ dur: 0.45 + lines * 0.08, vol: 0.2 + lines * 0.04, freq: 9000, to: 2500 });
-    noise({ dur: 0.35, vol: 0.22, freq: 500, type: 'bandpass', q: 4, to: 5000 + lines * 800 });
-    noise({ dur: 0.12, vol: 0.25, freq: 1200, type: 'bandpass', q: 0.8 });
-    tone({ freq: 150, type: 'sine', dur: 0.22, vol: 0.5 + lines * 0.05, slideTo: 42, attack: 0.001 });
-    tone({ freq: 70, type: 'sine', dur: 0.35, vol: 0.3 + lines * 0.05, slideTo: 36 });
+    noise({ dur: 0.45 + lines * 0.08, vol: 0.05 + lines * 0.04, freq: 9000, to: 2500 });
+    noise({ dur: 0.35, vol: 0.054, freq: 500, type: 'bandpass', q: 4, to: 5000 + lines * 800 });
+    noise({ dur: 0.12, vol: 0.062, freq: 1200, type: 'bandpass', q: 0.8 });
+    tone({ freq: 150, type: 'sine', dur: 0.22, vol: 0.124 + lines * 0.05, slideTo: 42, attack: 0.001 });
+    tone({ freq: 70, type: 'sine', dur: 0.35, vol: 0.074 + lines * 0.05, slideTo: 36 });
   },
   // 칩 틱: 피치가 상승하는 짧은 클릭
   tick(i = 0) {
-    tone({ freq: mtof(72 + Math.min(i, 30)), type: 'square', dur: 0.03, vol: 0.1, filter: { freq: 3500 }, exact: true });
-    tone({ freq: mtof(84 + Math.min(i, 30)), type: 'sine', dur: 0.02, vol: 0.06, exact: true });
-    noise({ dur: 0.012, vol: 0.12, freq: 4000 + i * 200, type: 'bandpass', q: 2 });
+    tone({ freq: mtof(72 + Math.min(i, 30)), type: 'square', dur: 0.04, vol: 1.8, filter: { freq: 3500 }, exact: true });
+    tone({ freq: mtof(84 + Math.min(i, 30)), type: 'sine', dur: 0.03, vol: 1.2, exact: true });
+    noise({ dur: 0.015, vol: 2.0, freq: 4000 + i * 200, type: 'bandpass', q: 2 });
   },
-  chips(i = 0) { tone({ freq: mtof(67 + (i % 12)), type: 'sine', dur: 0.09, vol: 0.14 }); noise({ dur: 0.03, vol: 0.05, freq: 7000 }); },
-  mult(i = 0) { tone({ freq: mtof(74 + (i % 12)), type: 'triangle', dur: 0.11, vol: 0.18 }); tone({ freq: mtof(86 + (i % 12)), type: 'sine', dur: 0.08, vol: 0.05 }); },
+  chips(i = 0) { tone({ freq: mtof(67 + (i % 12)), type: 'triangle', dur: 0.12, vol: 1.875 }); tone({ freq: mtof(79 + (i % 12)), type: 'sine', dur: 0.08, vol: 0.75 }); noise({ dur: 0.03, vol: 0.7, freq: 7000 }); },
+  mult(i = 0) { tone({ freq: mtof(74 + (i % 12)), type: 'triangle', dur: 0.14, vol: 2.25 }); tone({ freq: mtof(86 + (i % 12)), type: 'sine', dur: 0.1, vol: 0.7 }); noise({ dur: 0.04, vol: 0.5, freq: 3000, type: 'bandpass' }); },
   joker(i = 0) {
     const f = mtof(79 + (i % 5) * 2);
-    tone({ freq: f, type: 'sine', dur: 0.35, vol: 0.18 });
-    tone({ freq: f * 2.76, type: 'sine', dur: 0.15, vol: 0.05 });
-    noise({ dur: 0.05, vol: 0.06, freq: 6000 });
+    tone({ freq: f, type: 'sine', dur: 0.35, vol: 0.36 });
+    tone({ freq: f * 2.76, type: 'sine', dur: 0.15, vol: 0.1 });
+    noise({ dur: 0.05, vol: 0.12, freq: 6000 });
   },
   // x배수: 금속 슬램
   xmult() {
     metal(0, 180, 0.28, 0.6);
     metal(0, 181.7, 0.12, 0.5);
-    tone({ freq: 110, type: 'sawtooth', dur: 0.3, vol: 0.18, slideTo: 60, dist: true, filter: { freq: 1800 } });
-    noise({ dur: 0.18, vol: 0.3, freq: 2500, type: 'bandpass', q: 0.6 });
-    tone({ freq: 90, type: 'sine', dur: 0.35, vol: 0.4, slideTo: 40 });
-    tone({ freq: 330, type: 'sawtooth', dur: 0.22, vol: 0.06, slideTo: 990, filter: { freq: 2500 } });
+    tone({ freq: 110, type: 'sawtooth', dur: 0.3, vol: 0.069, slideTo: 60, dist: true, filter: { freq: 1800 } });
+    noise({ dur: 0.18, vol: 0.116, freq: 2500, type: 'bandpass', q: 0.6 });
+    tone({ freq: 90, type: 'sine', dur: 0.35, vol: 0.154, slideTo: 40 });
+    tone({ freq: 330, type: 'sawtooth', dur: 0.22, vol: 0.023, slideTo: 990, filter: { freq: 2500 } });
   },
   glass() { noise({ dur: 0.35, vol: 0.28, freq: 6000 }); [2400, 3100, 4200].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.2, vol: 0.05, t: i * 0.03 })); },
   total(big = false) {
@@ -190,14 +202,14 @@ export const sfx = {
   // 콤보 문구: 단계별 상승 아르페지오
   combo(level = 1) {
     const base = 67 + level * 3;
-    [0, 4, 7, 12, 16].slice(0, 2 + level).forEach((n, i) => tone({ freq: mtof(base + n), type: 'square', t: i * 0.05, dur: 0.18, vol: 0.07, filter: { freq: 3500 } }));
-    tone({ freq: mtof(base + 24), type: 'sine', t: 0.05 * (2 + level), dur: 0.5, vol: 0.12 });
-    noise({ dur: 0.4, vol: 0.08, freq: 8000, to: 12000 });
+    [0, 4, 7, 12, 16].slice(0, 2 + level).forEach((n, i) => tone({ freq: mtof(base + n), type: 'square', t: i * 0.05, dur: 0.18, vol: 0.046, filter: { freq: 3500 } }));
+    tone({ freq: mtof(base + 24), type: 'sine', t: 0.05 * (2 + level), dur: 0.5, vol: 0.078 });
+    noise({ dur: 0.4, vol: 0.052, freq: 8000, to: 12000 });
   },
   allClear() {
-    [0, 4, 7, 11, 14, 19, 24].forEach((n, i) => { tone({ freq: mtof(60 + n), type: 'triangle', t: i * 0.06, dur: 0.6, vol: 0.18 }); tone({ freq: mtof(72 + n), type: 'sine', t: i * 0.06, dur: 0.5, vol: 0.06 }); });
-    noise({ dur: 1.2, vol: 0.2, freq: 3000, to: 12000 });
-    tone({ freq: 50, type: 'sine', dur: 0.9, vol: 0.5, slideTo: 30 });
+    [0, 4, 7, 11, 14, 19, 24].forEach((n, i) => { tone({ freq: mtof(60 + n), type: 'triangle', t: i * 0.06, dur: 0.6, vol: 0.01 }); tone({ freq: mtof(72 + n), type: 'sine', t: i * 0.06, dur: 0.5, vol: 0.003 }); });
+    noise({ dur: 1.2, vol: 0.011, freq: 3000, to: 12000 });
+    tone({ freq: 50, type: 'sine', dur: 0.9, vol: 0.027, slideTo: 30 });
     metal(0.42, 260, 0.2, 1.2);
   },
   buy() { tone({ freq: 988, type: 'square', dur: 0.08, vol: 0.1, filter: { freq: 4000 } }); tone({ freq: 1319, type: 'square', dur: 0.25, vol: 0.1, t: 0.07, filter: { freq: 4000 } }); noise({ dur: 0.05, vol: 0.06, freq: 8000, t: 0.07 }); },
@@ -267,7 +279,9 @@ function scheduleStep(s, time) {
     const q = song.bossa ? [0, 0, 0, 7, 12, 0, 0, 7][e] : [0, 7, 10, 13][e / 2];
     const next = song.chords[(bar + 1) % song.chords.length].root;
     const note = song.bossa ? ch.root + q : e === 6 ? next + 1 : ch.root + q;
-    tone({ freq: mtof(note - 12), type: 'triangle', t, dur: 0.45, vol: 0.5, bus: B, filter: { freq: mode === 'showdown' ? 900 : 500 } });
+    tone({ freq: mtof(note), type: 'triangle', t, dur: 0.42, vol: 0.42, bus: B, filter: { freq: 1400 } });
+    tone({ freq: mtof(note + 12), type: 'triangle', t, dur: 0.25, vol: 0.14, bus: B, filter: { freq: 2000 } });
+    noise({ t, dur: 0.03, vol: 0.05, freq: 700, type: 'bandpass', q: 3, bus: B });
   }
   // 컴핑
   if (song.comp.includes(e)) {
@@ -277,7 +291,7 @@ function scheduleStep(s, time) {
       if (!song.bossa && mode !== 'showdown') tone({ freq: mtof(n + 12), type: 'sine', t: t + i * 0.008, dur: 0.25, vol: 0.02, bus: B });
     });
   }
-  if (song.drone && e === 0) tone({ freq: mtof(ch.root - 24), type: 'sawtooth', t, dur: (60 / song.bpm) * 4, vol: 0.06, bus: B, filter: { freq: 300 } });
+  if (song.drone && e === 0) tone({ freq: mtof(ch.root - 12), type: 'sawtooth', t, dur: (60 / song.bpm) * 4, vol: 0.05, bus: B, filter: { freq: 900 } });
   // 멜로디 (앤티 3 이상 적층)
   if (intensity >= 2 && song.melodyBars && bar % 2 === 1 && (e === 1 || e === 4 || e === 6)) {
     const scale = ch.notes.map((n) => n + 12);
@@ -289,7 +303,7 @@ function scheduleStep(s, time) {
   // 드럼
   noise({ t, dur: e % 2 ? 0.05 : 0.09, vol: e % 2 ? 0.045 : 0.075, freq: 7000, bus: B });
   if (e === 2 || e === 6) noise({ t, dur: 0.18, vol: 0.06, freq: 1800, type: 'bandpass', bus: B });
-  if ((song.kick && e % 2 === 0) || (intensity >= 3 && e === 0)) tone({ freq: 90, type: 'sine', t, dur: 0.18, vol: 0.4, slideTo: 40, bus: B });
+  if ((song.kick && e % 2 === 0) || (intensity >= 3 && e === 0)) { tone({ freq: 90, type: 'sine', t, dur: 0.14, vol: 0.22, slideTo: 45, bus: B }); noise({ t, dur: 0.02, vol: 0.08, freq: 2500, type: 'bandpass', bus: B }); }
   if (song.tom && (e === 7 || (e === 5 && bar % 2))) tone({ freq: 140, type: 'sine', t, dur: 0.2, vol: 0.25, slideTo: 80, bus: B });
   if (intensity >= 4 && e % 2 === 1) noise({ t, dur: 0.03, vol: 0.05, freq: 9000, bus: B }); // 셰이커 (앤티 7+)
 }
@@ -345,4 +359,23 @@ export async function renderOffline(name, args = [], seconds = 1.6) {
     ({ ctx, master, sfxBus, bgmBus, bgmFilter, revIn, shaper, noiseBuf } = saved);
   }
 }
-if (typeof window !== 'undefined') window.__bjAudio = { renderOffline, sfxNames: () => Object.keys(sfx) };
+// 계측: 피크, 활성 구간 RMS(dB), 150Hz 이하 에너지 비율
+export async function measure(name, args = [], seconds = 1.6) {
+  const buf = await renderOffline(name, args, seconds);
+  if (!buf) return null;
+  const d = buf.getChannelData(0);
+  let peak = 0, first = -1, last = -1;
+  for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; if (a > 0.003) { if (first < 0) first = i; last = i; } }
+  let sum = 0, lowE = 0, totE = 0;
+  const k = 1 - Math.exp((-2 * Math.PI * 150) / buf.sampleRate);
+  let y1 = 0, y2 = 0;
+  for (let i = 0; i < d.length; i++) {
+    y1 += k * (d[i] - y1); y2 += k * (y1 - y2);
+    lowE += y2 * y2; totE += d[i] * d[i];
+    if (i >= first && i <= last) sum += d[i] * d[i];
+  }
+  const n = Math.max(1, last - first + 1);
+  const rms = Math.sqrt(sum / n);
+  return { peak, peakDb: 20 * Math.log10(peak + 1e-9), rmsDb: 20 * Math.log10(rms + 1e-9), lowRatio: lowE / (totE + 1e-12) };
+}
+if (typeof window !== 'undefined') window.__bjAudio = { renderOffline, measure, sfxNames: () => Object.keys(sfx) };

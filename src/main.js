@@ -77,10 +77,10 @@ function refreshFit() {
     app.fitCache[i] = !!p && !p.hidden && game.fitsAnywhere(p.shape);
   }
 }
-function banner(title, sub, color, life = 1.6) { app.banner = { title, sub, color, t: 0, life }; }
+function banner(title, sub, color, life = 1.6, boss = null) { app.banner = { title, sub, color, t: 0, life, boss }; }
 function saveRec() { rec.muted = isMuted(); meta.save(); }
 // 라운드 진행 중에는 알림을 모아뒀다가 클리어/상점/타이틀에서 표시
-function canToast() { return !app.inRun || game.phase !== 'play' || app.pendingEnd; }
+function canToast() { return !app.inRun || !!ui.current; }
 function flushToasts() {
   if (!canToast()) return;
   let delay = 0;
@@ -118,10 +118,11 @@ const ui = new UI({
   },
   skin: (id) => { rec.sel.skin = id; meta.save(); renderer.setTheme(SKIN_BY_ID[id]); sfx.click(); ui.showCollection(meta); },
   abandon: () => {
+    const daily = !!game.opts.daily;
     meta.onRunAbandon();
     app.inRun = false; app.paused = false;
     game.phase = 'title';
-    ui.showSetup(meta);
+    if (daily) toTitle(); else ui.showSetup(meta);
   },
   resume: () => resume(),
   restart: () => {
@@ -167,6 +168,13 @@ const ui = new UI({
     if (game.buyVoucher()) { sfx.buy(); sfx.levelUp(); vibrate(20); meta.onBuy(game, { kind: 'voucher' }); saveShop(); ui.showShop(game); }
     else { sfx.invalid(); ui.toast('코인이 부족함'); }
   },
+  buySpecial: (arg) => {
+    const o = game.shop.special;
+    if (game.buySpecial(arg)) { sfx.buy(); sfx.levelUp(); vibrate(20); meta.onBuy(game, { kind: o.id === 's_clone' ? 'joker' : 'special' }); saveShop(); ui.showShop(game); }
+    else { sfx.invalid(); ui.toast(game.coins < o.price ? '코인이 부족함' : '조건이 맞지 않음'); }
+  },
+  claimMission: (i) => { const r = meta.claimMission(i); if (r) { sfx.coins(6); vibrate([15, 20, 15]); } return r; },
+  claimAchievement: (id) => { const r = meta.claimAchievement(id); if (r) { sfx.coins(6); vibrate([15, 20, 15]); } return r; },
   sell: (i) => { if (game.sell(i)) { sfx.sell(); app.coinPulse = 1; saveShop(); ui.showShop(game); } },
   sellInRun: (i) => {
     if (game.phase !== 'play' || !game.sell(i)) return;
@@ -237,7 +245,7 @@ function startRun(opts = {}) {
 }
 
 function setHud() {
-  app.hud = { ante: game.ante, blind: game.blind, name: game.blindName, color: game.blind === 2 ? game.bossDef.color : null, endless: game.endless };
+  app.hud = { ante: game.ante, blind: game.blind, name: game.blindName, color: game.blind === 2 ? game.bossDef.color : null, endless: game.endless, boss: game.boss };
 }
 
 function beginRound() {
@@ -257,7 +265,7 @@ function beginRound() {
     sfx.showdown(); vibrate([40, 60, 40, 60, 120]);
     app.fx.shake(8, 0.6);
   } else if (game.blind === 2) {
-    banner('보스: ' + game.bossDef.name, game.bossDef.desc, game.bossDef.color, 2.4);
+    banner('보스: ' + game.bossDef.name, game.bossDef.desc, game.bossDef.color, 2.4, game.boss);
     sfx.boss(); vibrate(40);
     app.fx.shake(6, 0.4);
   } else {
@@ -282,7 +290,11 @@ function continueRun() {
   app.paused = false;
   resetRunVisuals();
   ui.hideAll();
-  if (game.phase === 'shop') { refreshFit(); setBgmMode('shop', game.ante); ui.showShop(game); return; }
+  if (game.phase === 'shop') {
+    refreshFit(); setBgmMode('shop', game.ante); ui.showShop(game);
+    if (!rec.coach.shop) setTimeout(() => ui.showCoach('shop'), 450);
+    return;
+  }
   if (snap.kind === 'play') {
     setHud();
     app.shownScore = game.roundScore; app.scoreHold = 0;
@@ -304,7 +316,7 @@ function toTitle() {
   app.drag = null;
   setBgmMode('normal', 1);
   ui.showTitle(meta, isMuted(), SEED_PARAM);
-  if (meta.calendarClaimable) setTimeout(() => { if (ui.current === 'title') ui.showCalendar(meta); }, 350);
+  if (meta.calendarClaimable && rec.stats.runs >= 1) setTimeout(() => { if (ui.current === 'title' && !ui.modalOpen) ui.showCalendar(meta); }, 350);
   flushToasts();
 }
 
@@ -364,9 +376,9 @@ function doPlace(i, r, c) {
 function clearFx(res) {
   const cell = L.cell;
   for (const cl of res.cleared.cells) {
-    app.clearing.push({ r: cl.r, c: cl.c, color: cl.color, t: -0.05 * Math.random(), life: 0.3 });
+    app.clearing.push({ r: cl.r, c: cl.c, color: cl.color, t: 0, life: 0.26 });
     const x = L.board.x + (cl.c + 0.5) * cell, y = L.board.y + (cl.r + 0.5) * cell;
-    app.fx.burst(x, y, cl.color, 5, 260, cell * 0.3);
+    later(0.2, () => app.fx.burst(x, y, cl.color, 6, 280, cell * 0.32));
     if (cl.broken) { app.fx.burst(x, y, 3, 12, 340, cell * 0.22); app.fx.ring(x, y, '#9ff0ff', cell); later(0.1, () => sfx.glass()); }
   }
   const lines = res.cleared.rows.length + res.cleared.cols.length;
@@ -374,6 +386,8 @@ function clearFx(res) {
   res.cleared.rows.forEach((row, k) => app.beams.push({ row, t: -k * 0.04, life: 0.22, color: col }));
   res.cleared.cols.forEach((c2, k) => app.beams.push({ col: c2, t: -k * 0.04, life: 0.22, color: col }));
   sfx.clear(lines, res.combo);
+  if (lines >= 2) app.boardGlow = { t: 0, color: col };
+  if (res.combo >= 3) app.feltWave = { t: 0, color: res.combo >= 5 ? 'rgba(255,77,109,A)' : 'rgba(255,182,39,A)' };
   vibrate(lines > 1 ? [20, 30, 20] : 20);
   app.fx.shake(2 + lines * 2.5, 0.25);
   if (lines >= 2) app.fx.hitstop(0.04 + lines * 0.02);
@@ -410,6 +424,7 @@ function nextSeq() {
   const base = res.steps[0];
   const k = app.calc;
   k.active = true; k.chips = base.chips; k.mult = base.mult; k.chipsPulse = 1; k.multPulse = 1; k.merge = 0; k.fade = 1;
+  k.chipsShown = 0; k.multShown = 0;
   let label = `${HANDS[base.hand].name} Lv.${base.lv}`;
   if (base.combo > 0) label += ` · 콤보 +${base.combo}`;
   k.label = label; k.labelAlpha = 1;
@@ -579,6 +594,7 @@ function updateDrag() {
   const valid = game.canPlace(d.piece.shape, row, col);
   if (valid && (!d.valid || d.lastRow !== row || d.lastCol !== col)) {
     d.lines = game.previewLines(d.piece, row, col);
+    d.preview = d.lines.lines ? game.previewScore(d.piece, row, col) : null;
     sfx.tick(d.lines.lines ? 6 : 0);
     if (d.lines.lines) vibrate(4);
   }
@@ -654,7 +670,7 @@ function endDrag(e) {
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 window.addEventListener('contextmenu', (e) => e.preventDefault());
-document.addEventListener('touchmove', (e) => { if (!e.target.closest || !e.target.closest('.screen, .tip, .coach, .modal')) e.preventDefault(); }, { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.cancelable && (!e.target.closest || !e.target.closest('.screen, .tip, .coach, .modal'))) e.preventDefault(); }, { passive: false });
 document.addEventListener('pointerdown', () => initAudio(), { capture: true });
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' || e.key === 'p') { if (app.paused) resume(); else pause(); }
@@ -665,7 +681,7 @@ document.addEventListener('visibilitychange', () => {
   else {
     resumeAudio();
     if (meta.refreshDaily() && ui.current === 'title') ui.showTitle(meta, isMuted(), SEED_PARAM);
-    if (ui.current === 'title' && meta.calendarClaimable) ui.showCalendar(meta);
+    if (ui.current === 'title' && meta.calendarClaimable && rec.stats.runs >= 1 && !ui.modalOpen) ui.showCalendar(meta);
   }
 });
 
@@ -684,6 +700,12 @@ function update(dt) {
   for (let i = 0; i < app.jokerBounce.length; i++) if (app.jokerBounce[i] != null) app.jokerBounce[i] += dt;
   for (let i = 0; i < 3; i++) app.trayAnim[i] = Math.min(1, app.trayAnim[i] + dt * 3.2);
   const k = app.calc;
+  // 칩/배수 숫자 0.12초 굴림
+  const tw = 1 - Math.exp(-dt / 0.035);
+  if (k.chipsShown != null) k.chipsShown += (k.chips - k.chipsShown) * tw;
+  if (k.multShown != null) k.multShown += (k.mult - k.multShown) * tw;
+  if (app.boardGlow) { app.boardGlow.t += dt; if (app.boardGlow.t > 0.3) app.boardGlow = null; }
+  if (app.feltWave) { app.feltWave.t += dt; if (app.feltWave.t > 0.7) app.feltWave = null; }
   k.chipsPulse = Math.max(0, k.chipsPulse - dt * 4);
   k.multPulse = Math.max(0, k.multPulse - dt * 4);
   if (!k.active) k.labelAlpha = Math.max(0, k.labelAlpha - dt * 0.8);
