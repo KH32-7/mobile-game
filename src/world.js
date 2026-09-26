@@ -100,7 +100,7 @@ export class World {
     this.bCount = 44;
     const bg = new THREE.BoxGeometry(1, 1, 1);
     bg.translate(0, 0.5, 0);
-    this.buildings = new THREE.InstancedMesh(bg, new THREE.MeshLambertMaterial({ color: 0xffffff }), this.bCount);
+    this.buildings = new THREE.InstancedMesh(bg, new THREE.MeshLambertMaterial({ color: 0xffffff, map: this.makeBuildingTex() }), this.bCount);
     this.bData = [];
     this.span = 240;
     for (let i = 0; i < this.bCount; i++) {
@@ -133,9 +133,52 @@ export class World {
     this.caps = new THREE.InstancedMesh(cap, new THREE.MeshLambertMaterial({ color: 0xffffff }), this.pCount);
     this.caps.frustumCulled = false;
     this.scene.add(this.caps);
+    // 가로등 소품
+    const pole = new THREE.CylinderGeometry(0.06, 0.08, 3.2, 5); pole.translate(0, 1.6, 0);
+    const arm = new THREE.BoxGeometry(0.7, 0.08, 0.08); arm.translate(-0.32, 3.15, 0);
+    const lampH = new THREE.BoxGeometry(0.3, 0.12, 0.22); lampH.translate(-0.62, 3.08, 0);
+    const lampG = mergeSimple([pole, arm, lampH], [new THREE.Color(0.35, 0.38, 0.45), new THREE.Color(0.35, 0.38, 0.45), new THREE.Color(1, 0.92, 0.55)]);
+    this.lampCount = 24;
+    this.lamps = new THREE.InstancedMesh(lampG, new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x222211 }), this.lampCount);
+    this.lamps.frustumCulled = false;
+    this.lampD = [];
+    for (let i = 0; i < this.lampCount; i++) this.lampD.push({ side: i % 2 ? 1 : -1, d: -30 + Math.floor(i / 2) * (this.span / (this.lampCount / 2)) + 6 });
+    this.scene.add(this.lamps);
+    this.writeLamps();
     this.m4 = new THREE.Matrix4();
     this.zero = new THREE.Matrix4().makeScale(0, 0, 0);
     this.refreshSceneryAll();
+  }
+
+  // 건물 텍스처: 창문 격자 + 간판 띠 + 낙서 (인스턴스 색으로 물듦)
+  makeBuildingTex() {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 512;
+    const g = c.getContext('2d');
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, 256, 512);
+    g.fillStyle = 'rgba(0,0,0,0.08)';
+    for (let y = 0; y < 512; y += 42) g.fillRect(0, y + 36, 256, 4);
+    for (let row = 0; row < 11; row++) {
+      for (let col = 0; col < 4; col++) {
+        const x = 18 + col * 60, y = 70 + row * 40;
+        const lit = (row * 7 + col * 3) % 5 === 0;
+        g.fillStyle = lit ? '#fff3b0' : '#3a4a6a';
+        g.fillRect(x, y, 38, 26);
+        g.fillStyle = 'rgba(255,255,255,0.35)';
+        g.fillRect(x + 3, y + 3, 10, 20);
+      }
+    }
+    g.fillStyle = '#ff4a6a'; g.fillRect(10, 14, 236, 40);
+    g.fillStyle = '#ffffff'; g.font = '900 28px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('SWARM', 128, 35);
+    g.strokeStyle = '#2ad0ff'; g.lineWidth = 7; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(20, 480); g.bezierCurveTo(60, 440, 90, 510, 130, 470); g.bezierCurveTo(160, 440, 200, 500, 236, 462); g.stroke();
+    g.strokeStyle = '#ffd23a'; g.lineWidth = 5;
+    g.beginPath(); g.arc(200, 488, 12, 0, Math.PI * 2); g.stroke();
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 2;
+    return t;
   }
 
   newBuilding(side, d) {
@@ -168,6 +211,18 @@ export class World {
     this.props.instanceMatrix.needsUpdate = true;
     this.props.instanceColor.needsUpdate = true;
     this.caps.instanceMatrix.needsUpdate = true;
+  }
+
+  writeLamps() {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+    this.lampD.forEach((l, i) => {
+      q.setFromAxisAngle(up, l.side > 0 ? 0 : Math.PI);
+      p.set(l.side * (CFG.trackHalfW + 0.55), 0, -l.d);
+      m.compose(p, q, sc);
+      this.lamps.setMatrixAt(i, m);
+    });
+    this.lamps.instanceMatrix.needsUpdate = true;
   }
 
   writeBuilding(i, b, m) {
@@ -225,6 +280,7 @@ export class World {
     this.applyColors();
     // dist 가 주어지면 배경 오브젝트를 현재 위치 기준으로 다시 깔기
     const bs = this.span / (this.bCount / 2), ps = this.span / (this.pCount / 2);
+    if (dist != null && this.lampD) { this.lampD.forEach((l, i) => { l.d = dist - 24 + Math.floor(i / 2) * (this.span / (this.lampCount / 2)); }); this.writeLamps(); }
     this.bData.forEach((b, i) => { this.bData[i] = this.newBuilding(b.side, dist == null ? b.d : dist - 30 + Math.floor(i / 2) * bs); });
     this.pData.forEach((p, i) => { this.pData[i] = this.newProp(p.side, dist == null ? p.d : dist - 27 + Math.floor(i / 2) * ps, i); });
     this.refreshSceneryAll();
@@ -277,6 +333,9 @@ export class World {
       const p = this.pData[i];
       if (p.d < dist - 30) { this.pData[i] = this.newProp(p.side, p.d + this.span, i); this.writeProp(i, this.pData[i], m); dirtyP = true; }
     }
+    let dirtyL = false;
+    for (const l of this.lampD) if (l.d < dist - 30) { l.d += this.span; dirtyL = true; }
+    if (dirtyL) this.writeLamps();
     if (dirtyB) { this.buildings.instanceMatrix.needsUpdate = true; this.buildings.instanceColor.needsUpdate = true; }
     if (dirtyP) { this.props.instanceMatrix.needsUpdate = true; this.props.instanceColor.needsUpdate = true; this.caps.instanceMatrix.needsUpdate = true; }
 
@@ -291,7 +350,8 @@ export class World {
       tx = focus.x * 0.55; ty = 7.8 + sp * 0.95 + (focus.lift || 0); tz = -(focus.d - 8.0 - sp * 1.5);
       lx = focus.x * 0.75; ly = (focus.lift || 0) * 0.8; lz = -(focus.d + 6.5);
     }
-    const kc = 1 - Math.exp(-dt * (mode === 'title' ? 2 : 6));
+    let kc = 1 - Math.exp(-dt * (mode === 'title' ? 2 : 6));
+    if (this.snapNext) { kc = 1; this.snapNext = false; } // 화면 전환 직후 카메라 즉시 이동
     this.camPos.x += (tx - this.camPos.x) * kc;
     this.camPos.y += (ty - this.camPos.y) * kc;
     this.camPos.z = mode === 'title' ? this.camPos.z + (tz - this.camPos.z) * kc : tz;

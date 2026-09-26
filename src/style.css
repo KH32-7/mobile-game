@@ -302,3 +302,34 @@ button { font-family: var(--font); border: 0; cursor: pointer; color: #fff; touc
 /* 결과/부활 패널 안의 큰 버튼이 .result .big 숫자 스타일을 물려받지 않게 */
 .result .btn.big { font-size: 26px; line-height: normal; font-weight: 800; }
 .result .btn.rvbtn { font-size: 22px; }
+
+/* ---------- 3라운드 ---------- */
+#ui.playing .toast { top: calc(var(--sat) + 190px); }
+.battleHint.up { bottom: calc(var(--sab) + 190px); }
+.enemyLbl .warn { display: block; font-size: 12px; background: #fff; color: #e8283c; border-radius: 99px; padding: 0 6px; margin: -2px auto 2px; width: max-content; }
+.enemyLbl.danger { animation: dblink .5s infinite alternate; background: #ff1f3a; box-shadow: 0 0 0 3px #fff, 0 3px 0 #8a1020; }
+@keyframes dblink { to { background: #8a0014; } }
+.enemyLbl.hit { animation: ehit .12s; }
+@keyframes ehit { 0% { scale: 1.25; rotate: -6deg; } 100% { scale: 1; rotate: 0deg; } }
+.combo { position: absolute; top: calc(var(--sat) + 110px); right: calc(var(--sar) + 12px); background: linear-gradient(#b07aff, #7a3af0); border-radius: 12px; padding: 4px 10px; font-weight: 800; font-size: 14px; box-shadow: 0 3px 0 #4a1aa8; }
+.combo b { font-size: 18px; }
+.combo small { font-size: 11px; opacity: .9; display: block; }
+.combo.bump { animation: bump .25s; }
+.reward .rtap { font-size: 12px; opacity: .7; margin-top: 6px; animation: hintbob .6s infinite alternate; }
+.skin .btn.small { min-height: 44px; }
+@media (max-height: 700px) {
+  .result .big { font-size: 40px; }
+  .result .grid { grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+  .result .grid div { padding: 6px 2px; }
+  .result .grid b { font-size: 16px; }
+  .result .grid .lbl { font-size: 10px; }
+  .split { margin: 4px 0 2px; }
+  .split b { font-size: 18px; }
+  .split small { display: none; }
+  .omis { display: none; }
+  .panel { padding: 14px 14px; }
+  .panel h2 { margin-bottom: 8px; font-size: 22px; }
+  .result .btn.big { min-height: 54px; font-size: 22px; }
+  .panel .actions { margin-top: 10px; gap: 8px; }
+  .cause { margin-top: 2px; }
+}

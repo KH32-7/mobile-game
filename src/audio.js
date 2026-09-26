@@ -34,6 +34,9 @@ function makeImpulse(sec = 2.2, decay = 3) {
 }
 
 let reverbIn = null;
+const MUSIC_VOL = 0.5;
+let xfade = null;
+let pending = null; // { kind, theme, at }
 let windSrc = null, windF = null, windG = null;
 
 function ensure() {
@@ -71,11 +74,15 @@ function ensure() {
   const sfxSend = ctx.createGain(); sfxSend.gain.value = 0.25;
   sfxBus.connect(sfxSend); sfxSend.connect(reverbIn);
   musicBus = ctx.createGain();
-  musicBus.gain.value = musicMuted ? 0 : 0.32;
+  musicBus.gain.value = musicMuted ? 0 : MUSIC_VOL;
   duckF = ctx.createBiquadFilter();
   duckF.type = 'lowpass';
   duckF.frequency.value = 18000;
-  musicBus.connect(duckF);
+  // 저역 과다 방지: 150Hz 이하 로우셸프 감쇠
+  const lowCut = ctx.createBiquadFilter();
+  lowCut.type = 'lowshelf'; lowCut.frequency.value = 160; lowCut.gain.value = -9;
+  xfade = ctx.createGain(); xfade.gain.value = 1;
+  musicBus.connect(xfade); xfade.connect(lowCut); lowCut.connect(duckF);
   duckF.connect(master);
   const musSend = ctx.createGain(); musSend.gain.value = 0.18;
   duckF.connect(musSend); musSend.connect(reverbIn);
@@ -110,10 +117,10 @@ export function setMusicMuted(m) {
   musicMuted = m;
   applyMusicGain();
 }
-function applyMusicGain() {
+function applyMusicGain(fade = 0) {
   if (!musicBus) return;
-  const v = musicMuted ? 0 : ducked ? 0.32 * 0.3 : 0.32;
-  musicBus.gain.setTargetAtTime(v, ctx.currentTime, 0.08);
+  const v = musicMuted ? 0 : ducked ? MUSIC_VOL * 0.3 : MUSIC_VOL;
+  musicBus.gain.setTargetAtTime(v, ctx.currentTime, fade ? fade / 3 : 0.08);
   duckF.frequency.setTargetAtTime(ducked ? 700 : 18000, ctx.currentTime, 0.08);
 }
 // 일시정지/부활 대기/게임 오버: 로우패스 + 30% 볼륨
@@ -134,13 +141,15 @@ function out(pan) {
 
 function tone(freq, dur, { type = 'sine', vol = 0.3, attack = 0.005, slide = 0, delay = 0, bus = null, pan = 0, lp = 0, detune = 0 } = {}) {
   if (!ctx || muted) return;
+  const ny = ctx.sampleRate * 0.45;
+  if (freq > ny) return; // 나이퀴스트 초과 부분음은 생략
   const t = ctx.currentTime + delay;
   const o = ctx.createOscillator();
   const g = ctx.createGain();
   o.type = type;
   o.frequency.setValueAtTime(freq, t);
   if (detune) o.detune.value = detune;
-  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq * slide), t + dur);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.min(ny, Math.max(30, freq * slide)), t + dur);
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(vol, t + attack);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -243,7 +252,7 @@ export const sfx = {
   },
   shieldBreak() {
     noise(0.35, { vol: 0.25, freq: 4500, type: 'highpass', sweep: 0.4 });
-    for (let i = 0; i < 8; i++) modal(2200 + Math.random() * 2400, { vol: 0.04, delay: Math.random() * 0.25, pan: Math.random() * 1.6 - 0.8, decays: [0.2, 0.12, 0.08, 0.05] });
+    for (let i = 0; i < 8; i++) modal(1800 + Math.random() * 1600, { vol: 0.04, delay: Math.random() * 0.25, pan: Math.random() * 1.6 - 0.8, ratios: [1, 1.52, 2.24, 2.91], decays: [0.2, 0.12, 0.08, 0.05] });
     tone(900, 0.3, { type: 'triangle', vol: 0.12, slide: 0.4 });
   },
   // 성문 타격: 나무 노크
@@ -289,80 +298,128 @@ const TITLE_MUSIC = { bpm: 100, prog: [[48, 55, 60, 64, 71], [45, 52, 57, 60, 67
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 const cur = () => (track === 'title' ? TITLE_MUSIC : THEME_MUSIC[theme % THEME_MUSIC.length]);
 
-function env(o, g, t, v, dur) {
-  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  o.connect(g); g.connect(musicBus); o.start(t); o.stop(t + dur + 0.02);
+let panL = null, panR = null, hatBus = null;
+function musicNodes() {
+  if (panL) return;
+  // 스테레오 버스: 아르페지오/리드는 좌우 ±0.4, 하이햇은 8kHz 하이셸프로 밝게
+  panL = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
+  panR = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
+  if (panL.pan) { panL.pan.value = -0.4; panR.pan.value = 0.4; }
+  panL.connect(musicBus); panR.connect(musicBus);
+  // 스테레오 핑퐁 딜레이 (좌 0.18초, 우 0.27초) 로 공간감
+  if (ctx.createStereoPanner) {
+    const send = ctx.createGain(); send.gain.value = 0.35;
+    const dl = ctx.createDelay(1), dr = ctx.createDelay(1);
+    dl.delayTime.value = 0.18; dr.delayTime.value = 0.27;
+    const fb = ctx.createGain(); fb.gain.value = 0.28;
+    const pl = ctx.createStereoPanner(), pr = ctx.createStereoPanner();
+    pl.pan.value = -1; pr.pan.value = 1;
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 500;
+    panL.connect(send); panR.connect(send);
+    send.connect(hp); hp.connect(dl); dl.connect(pl); pl.connect(musicBus);
+    dl.connect(dr); dr.connect(pr); pr.connect(musicBus); dr.connect(fb); fb.connect(dl);
+  }
+  const shelf = ctx.createBiquadFilter();
+  shelf.type = 'highshelf'; shelf.frequency.value = 8000; shelf.gain.value = 9;
+  hatBus = ctx.createGain(); hatBus.gain.value = 1;
+  hatBus.connect(shelf); shelf.connect(musicBus);
 }
 
+function env(o, g, t, v, dur, bus = musicBus) {
+  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + 0.02);
+}
+
+function hat(t, v, dur, freq = 7000, bus = hatBus) {
+  const s2 = ctx.createBufferSource(); s2.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = freq;
+  const g = ctx.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  s2.connect(f); f.connect(g); g.connect(bus); s2.start(t, Math.random() * 1.5); s2.stop(t + dur + 0.01);
+}
+
+function snare(t, v) {
+  const s3 = ctx.createBufferSource(); s3.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2200; f.Q.value = 0.6;
+  const g = ctx.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+  s3.connect(f); f.connect(g); g.connect(musicBus); s3.start(t, Math.random() * 1.5); s3.stop(t + 0.17);
+  const o = ctx.createOscillator(); const g2 = ctx.createGain(); o.frequency.setValueAtTime(240, t); o.frequency.exponentialRampToValueAtTime(160, t + 0.08);
+  env(o, g2, t, v * 0.3, 0.09);
+}
+
+// 8마디 구성: A(1~4마디) + B(5~8마디, 코드 진행 변형과 리드), 8마디 끝에 필인
 function scheduleNote(t, s) {
+  musicNodes();
   const M = cur();
-  const bar = Math.floor(s / 16) % 4;
+  const bar8 = Math.floor(s / 16) % 8;
+  const partB = bar8 >= 4;
+  const bar = partB ? [2, 3, 0, 1][bar8 - 4] : bar8;
   const i = s % 16;
   const chord = M.prog[bar];
   const title = track === 'title';
-  // 킥
-  if (!title ? i % 4 === 0 : i === 0 || i === 10) {
+  const fill = !title && bar8 === 7 && i >= 12;
+  const pan = i % 2 === 0 ? panL : panR;
+  // 킥 (저역 과다 방지로 낮춤)
+  if (!fill && (!title ? i % 4 === 0 : i === 0 || i === 10)) {
     const o = ctx.createOscillator(); const g = ctx.createGain();
-    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
-    env(o, g, t, title ? 0.5 : 0.9, 0.18);
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(50, t + 0.1);
+    env(o, g, t, title ? 0.32 : 0.5, 0.14);
   }
-  // 햇
-  if (!title && (i % 2 === 1 || intensity > 1 || theme === 4)) {
-    const s2 = ctx.createBufferSource(); s2.buffer = noiseBuf;
-    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = theme === 2 ? 9000 : 7000;
-    const g = ctx.createGain(); g.gain.setValueAtTime(i % 2 === 1 ? 0.18 : 0.07, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-    s2.connect(f); f.connect(g); g.connect(musicBus); s2.start(t, Math.random() * 0.5); s2.stop(t + 0.06);
-  }
-  // 스네어 / 정글은 탐 추가
-  if (!title && (i === 4 || i === 12)) {
-    const s3 = ctx.createBufferSource(); s3.buffer = noiseBuf;
-    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.7;
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
-    s3.connect(f); f.connect(g); g.connect(musicBus); s3.start(t, Math.random() * 0.5); s3.stop(t + 0.15);
-  }
+  // 하이햇: 8분 오프비트 + 16분 고스트, B 파트는 오픈햇
+  if (!title) {
+    if (i % 2 === 1) hat(t, 0.2, partB && i % 4 === 3 ? 0.14 : 0.05);
+    else hat(t, intensity > 0 || partB ? 0.09 : 0.06, 0.03, 9000);
+  } else { hat(t, i % 4 === 2 ? 0.08 : 0.03, 0.04, 9000); }
+  // 스네어 + 필인
+  if (!title && (i === 4 || i === 12) && !fill) snare(t, 0.3);
+  if (fill) snare(t, 0.14 + (i - 12) * 0.06);
   if (!title && theme === 4 && (i === 7 || i === 14 || i === 15)) {
     const o = ctx.createOscillator(); const g = ctx.createGain();
-    o.frequency.setValueAtTime(i === 7 ? 220 : 160, t); o.frequency.exponentialRampToValueAtTime(90, t + 0.15);
-    env(o, g, t, 0.35, 0.16);
+    o.frequency.setValueAtTime(i === 7 ? 260 : 190, t); o.frequency.exponentialRampToValueAtTime(110, t + 0.15);
+    env(o, g, t, 0.25, 0.16);
   }
-  // 베이스
+  // 베이스 (낮춤)
   if (title ? i % 8 === 0 : i % 2 === 0) {
     const n = chord[0] - 12 + (!title && i % 4 === 2 ? 12 : 0);
     const o = ctx.createOscillator(); const g = ctx.createGain(); const f = ctx.createBiquadFilter();
     o.type = title ? 'triangle' : 'sawtooth'; o.frequency.value = mtof(n);
-    f.type = 'lowpass'; f.frequency.setValueAtTime(title ? 600 : 900, t); f.frequency.exponentialRampToValueAtTime(200, t + 0.14);
-    g.gain.setValueAtTime(title ? 0.3 : 0.28, t); g.gain.exponentialRampToValueAtTime(0.001, t + (title ? 0.7 : 0.16));
+    f.type = 'lowpass'; f.frequency.setValueAtTime(title ? 700 : 1400, t); f.frequency.exponentialRampToValueAtTime(260, t + 0.14);
+    g.gain.setValueAtTime(title ? 0.2 : 0.18, t); g.gain.exponentialRampToValueAtTime(0.001, t + (title ? 0.7 : 0.16));
     o.connect(f); f.connect(g); g.connect(musicBus); o.start(t); o.stop(t + (title ? 0.72 : 0.18));
   }
-  // 아르페지오
-  if (title ? i % 2 === 0 : intensity > 0 || i % 4 === 0) {
+  // 아르페지오: 2.5배, 좌우 교대 팬, 한 옥타브 위 더블링
+  if (title ? i % 2 === 0 : intensity > 0 || i % 2 === 0 || partB) {
     const n = chord[M.arp[i % 8]] + 12;
     const o = ctx.createOscillator(); const g = ctx.createGain();
     o.type = M.wave; o.frequency.value = mtof(n);
-    env(o, g, t, title ? 0.07 : 0.05, title ? 0.28 : 0.1);
+    env(o, g, t, title ? 0.16 : 0.13, title ? 0.28 : 0.12, pan);
+    const o2 = ctx.createOscillator(); const g2 = ctx.createGain();
+    o2.type = 'triangle'; o2.frequency.value = mtof(n + 12);
+    env(o2, g2, t, title ? 0.05 : 0.05, 0.09, pan === panL ? panR : panL);
   }
-  // 리드 멜로디 (2마디마다)
-  if (!title && M.lead && Math.floor(s / 32) % 2 === 1 && i % 2 === 0) {
+  // 리드 멜로디: B 파트에서 연주, 2.5배
+  if (!title && M.lead && (partB || intensity > 1) && i % 2 === 0) {
     const n = chord[1 + M.lead[(i / 2) % 8]] + 24;
     const o = ctx.createOscillator(); const g = ctx.createGain();
     o.type = 'triangle'; o.frequency.value = mtof(n);
-    env(o, g, t, 0.045, 0.16);
+    o.detune.value = 6;
+    env(o, g, t, 0.11, 0.2, (i / 2) % 2 ? panL : panR);
   }
-  // 타이틀: 패드
-  if (title && i === 0) {
-    for (const n of chord.slice(1)) {
+  // 코드 패드 (마디 시작)
+  if (i === 0) {
+    for (const [k, n] of chord.slice(1).entries()) {
       const o = ctx.createOscillator(); const g = ctx.createGain();
       o.type = 'sine'; o.frequency.value = mtof(n + 12);
-      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03, t + 0.4); g.gain.exponentialRampToValueAtTime(0.001, t + 2.2);
-      o.connect(g); g.connect(musicBus); o.start(t); o.stop(t + 2.3);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(title ? 0.035 : 0.025, t + 0.3); g.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+      o.connect(g); g.connect(k % 2 ? panL : panR); o.start(t); o.stop(t + 1.9);
     }
   }
 }
 
 function scheduler() {
   if (!ctx || !musicOn) return;
-  const spb = 60 / cur().bpm / 4;
   while (nextNoteTime < ctx.currentTime + 0.12) {
+    if (pending && nextNoteTime >= pending.at) { track = pending.kind; theme = pending.theme; step = 0; pending = null; }
+    const spb = 60 / cur().bpm / 4;
     if (!musicMuted) scheduleNote(nextNoteTime, step);
     nextNoteTime += spb;
     step++;
@@ -386,11 +443,17 @@ export function stopMusic() {
 }
 
 // 곡 전환: 'title' 또는 'run' + 테마 번호
+// 곡 전환: 반 마디 페이드아웃 → 곡 교체 → 반 마디 페이드인 (1마디 크로스페이드, 오디오 클록 기준)
 export function setMusic(kind, themeIdx = 0) {
-  if (kind === track && themeIdx === theme) return;
-  track = kind;
-  theme = themeIdx;
-  step = 0;
+  if (kind === track && themeIdx === theme && !pending) return;
+  if (!ctx || !musicOn) { track = kind; theme = themeIdx; step = 0; pending = null; return; }
+  const half = (60 / cur().bpm) * 2;
+  const t = ctx.currentTime;
+  xfade.gain.cancelScheduledValues(t);
+  xfade.gain.setValueAtTime(xfade.gain.value, t);
+  xfade.gain.linearRampToValueAtTime(0.0001, t + half);
+  xfade.gain.linearRampToValueAtTime(1, t + half * 2);
+  pending = { kind, theme: themeIdx, at: t + half };
 }
 
 export function setIntensity(v) { intensity = v; }

@@ -16,6 +16,7 @@ export class Swarm {
     this.form = { R: 0, hw: 0, rz: 0 };
     this.bounds = { minX: 0, maxX: 0, minRel: 0, cx: 0 };
     this.ground = null;
+    this.lookBack = false;
     this.skin = SKINS[0];
     this.hat = null;
   }
@@ -33,7 +34,7 @@ export class Swarm {
   }
 
   newMember(x, rel, born = 0) {
-    return { x, rel, y: 0, vx: 0, vrel: 0, vy: 0, g: CFG.gravity, jumpIn: -1, jumpV: 0, slideIn: -1, slideT: 0, ph: Math.random() * 6.28, born, alt: Math.random() < 0.5, stag: 0 };
+    return { x, rel, y: 0, vx: 0, vrel: 0, vy: 0, g: CFG.gravity, jumpIn: -1, jumpV: 0, slideIn: -1, slideT: 0, ph: Math.random() * 6.28, born, alt: Math.random() < 0.5, stag: 0, sz: 0.92 + Math.random() * 0.16, spd: 0.9 + Math.random() * 0.2 };
   }
 
   get leader() { return this.members[0]; }
@@ -175,7 +176,7 @@ export class Swarm {
         const oz = Math.sin(th) * rr * rz;
         trel = -center + oz;
         tx = this.histX(dist + trel, dist) + ox;
-        if (attract) tx += (attract.x + ox * 0.35 - tx) * attract.k;
+        if (attract) tx += (attract.x + ox * 0.35 - tx) * Math.min(1, attract.k);
       }
       if (tx !== null) {
         m.vx += (K * (tx - m.x) - C * m.vx) * dt;
@@ -203,7 +204,7 @@ export class Swarm {
       }
       if (m.born < 1) m.born = Math.min(1, m.born + dt * 3);
       if (m.stag > 0) m.stag -= dt;
-      m.ph += dt * (6 + speed * 0.45);
+      m.ph += dt * (6 + speed * 0.45) * (m.spd || 1);
       if (m.x < minX) minX = m.x;
       if (m.x > maxX) maxX = m.x;
       if (m.rel < minRel) minRel = m.rel;
@@ -228,7 +229,7 @@ export class Swarm {
     for (let i = 0; i < n; i++) {
       const m = this.members[i];
       const leader = i === 0;
-      const sc = (leader ? 1.25 : 1) * (m.born < 1 ? easeBack(Math.max(0, m.born)) : 1);
+      const sc = (leader ? 1.25 : (m.sz || 1)) * (m.born < 1 ? easeBack(Math.max(0, m.born)) : 1);
       if (sc <= 0.01) continue;
       const gy = this.ground ? this.ground(dist + m.rel) : 0;
       let y = m.y + gy, sx = sc, sy = sc, sz = sc, pitch = 0;
@@ -245,8 +246,10 @@ export class Swarm {
       let roll = Math.max(-0.5, Math.min(0.5, -m.vx * 0.05));
       if (m.stag > 0) { roll += Math.sin(m.stag * 30) * 0.45 * m.stag; pitch += 0.3 * m.stag; }
       const col = leader ? this.skin.leader : (boots ? (m.alt ? 0x6aff8a : 0x4ae07a) : this.skin.crew[m.alt ? 1 : 0]);
-      chars.push(m.x, y, -(dist + m.rel), 0, sx, sy, sz, col, roll, pitch, true, limb, amp);
-      if (leader && this.hat) this.hat.place(m.x, y, -(dist + m.rel), sx, sy, sz, roll, pitch, true);
+      // 리더는 뒤를 돌아보며 달려서 얼굴이 보임
+      const yaw = leader && this.lookBack ? 2.35 + Math.sin(time * 2) * 0.15 : 0;
+      chars.push(m.x, y, -(dist + m.rel), yaw, sx, sy, sz, col, roll, pitch, true, limb, amp);
+      if (leader && this.hat) this.hat.place(m.x, y, -(dist + m.rel), sx, sy, sz, roll, pitch, true, yaw);
     }
     if (!n && this.hat) this.hat.place(0, 0, 0, 1, 1, 1, 0, 0, false);
     for (const f of this.flyers) {

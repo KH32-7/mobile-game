@@ -127,12 +127,31 @@ export const CHUNKS = [
     coinLine(it, gap, 8, 5);
     return { len: 28, items: it };
   } },
-  { id: 'laneHop', cat: 'obs', min: 0, w: 3, gen(rng) {
+  { id: 'laneHop', cat: 'obs', min: 0, w: 3, gen(rng, D, ctx) {
     const it = [];
-    const a = ri(rng, 0, 2);
+    // 초반에는 플레이어가 서 있는 레인을 막아서 피하는 법을 익히게 함
+    const a = D < 0.3 && ctx.lane != null ? ctx.lane : ri(rng, 0, 2);
     it.push(obs('train', a, 16, { len: 10 }));
     coinLine(it, (a + 1) % 3, 8, 6);
     return { len: 30, items: it };
+  } },
+  // 슬라이드로 뭉쳐야만 지나가는 좁은 틈 → 뒤에 보너스 게이트
+  { id: 'squeeze', cat: 'obs', min: 0.5, w: 2, gen(rng, D, ctx) {
+    const it = [obs('train', 0, 22, { len: 22 }), obs('train', 2, 22, { len: 22 })];
+    for (let d = 14; d <= 30; d += 2.2) { it.push({ t: 'obs', kind: 'cone', x: -1.02, d }); it.push({ t: 'obs', kind: 'cone', x: 1.02, d }); }
+    coinLine(it, 1, 12, 8);
+    it.push({ t: 'gates', d: 40, bonus: true, gates: [{ x: LX(0), w: CFG.laneW - 0.12, op: '+', v: 10 + Math.round(D * 6), good: true }, { x: LX(1), w: CFG.laneW - 0.12, op: 'x', v: 2, good: true }, { x: LX(2), w: CFG.laneW - 0.12, op: '+', v: 10 + Math.round(D * 6), good: true }] });
+    return { len: 50, items: it };
+  } },
+  // 경로 분기: 콘밭을 뚫는 레인에만 큰 보상 게이트, 나머지는 안전하지만 작은 보상
+  { id: 'riskRoute', cat: 'gate', min: 0.7, w: 2, gen(rng, D, ctx) {
+    const risk = ri(rng, 0, 2);
+    const it = [];
+    for (let d = 8; d <= 24; d += 2.4) it.push({ t: 'obs', kind: 'cone', x: LX(risk) + (rng() - 0.5) * 1.4, d });
+    it.push({ t: 'power', x: LX(risk), d: 16 });
+    const gates = [0, 1, 2].map((l) => (l === risk ? { x: LX(l), w: CFG.laneW - 0.12, op: 'x', v: ctx.count > 150 ? 2 : 3, good: true } : { x: LX(l), w: CFG.laneW - 0.12, op: '+', v: 4 + Math.round(D * 3), good: true }));
+    it.push({ t: 'gates', d: 32, gates });
+    return { len: 44, items: it };
   } },
   { id: 'narrowPass', cat: 'obs', min: 0.5, w: 3, gen(rng) {
     const open = ri(rng, 0, 2);
@@ -147,8 +166,11 @@ export const CHUNKS = [
   } },
   { id: 'enemyWall', cat: 'enemy', min: 1.0, w: 3, gen(rng, D, ctx) {
     const it = [];
+    // 두 레인을 막고 한 레인만 비움
     it.push({ t: 'gates', d: 6, gates: gateRow(rng, D, ctx, 3) });
-    it.push({ t: 'enemy', d: 34, x: 0, count: enemyCount(rng, D, ctx, 0.45), wide: true });
+    const free = ri(rng, 0, 2);
+    for (let l = 0; l < 3; l++) if (l !== free) it.push({ t: 'enemy', d: 34, x: LX(l), count: enemyCount(rng, D, ctx, 0.45) });
+    coinLine(it, free, 26, 6);
     return { len: 46, items: it };
   } },
   { id: 'enemyTwin', cat: 'enemy', min: 1.2, w: 2, gen(rng, D, ctx) {

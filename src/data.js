@@ -62,6 +62,8 @@ export function migrate(p) {
   if (Array.isArray(th.unlocked)) d.themes.unlocked = [...new Set([0, ...th.unlocked.filter((i) => Number.isInteger(i) && i >= 0 && i < THEMES.length)])];
   if (d.themes.unlocked.includes(th.sel)) d.themes.sel = th.sel;
   d.themes.seen = num(th.seen, d.themes.unlocked.length);
+  d.themes.forts = {};
+  for (const k in obj(th.forts)) d.themes.forts[k] = num(th.forts[k]);
   const ms = obj(p.mset);
   d.mset.level = Math.max(1, Math.min(30, Math.floor(num(ms.level, 1))));
   d.mset.done = num(ms.done);
@@ -173,6 +175,15 @@ export function addFrags(n, rnd = Math.random) {
 }
 export function selectSkin(id) { if (save.skins.owned.includes(id)) { save.skins.sel = id; persist(); } }
 export function selectTheme(i) { if (save.themes.unlocked.includes(i)) { save.themes.sel = i; persist(); } }
+// 해당 테마에서 요새 3개를 부수면 시작 테마로 해금. 해금되면 true
+export const THEME_FORTS = 3;
+export function themeFort(i) {
+  save.themes.forts = save.themes.forts || {};
+  save.themes.forts[i] = (save.themes.forts[i] || 0) + 1;
+  if (save.themes.forts[i] >= THEME_FORTS) return unlockTheme(i);
+  persist();
+  return false;
+}
 export function unlockTheme(i) {
   if (save.themes.unlocked.includes(i)) return false;
   save.themes.unlocked.push(i);
@@ -252,9 +263,11 @@ const MPOOL = [
 ];
 export const missionText = (m) => (MPOOL.find((x) => x.type === m.type) || { text: () => m.type }).text(m.target);
 
+// 미션 목표는 레벨마다 약 1.6배 (요새 계열은 완만하게)
+const GROW = { fortRun: 1.25, fortress: 1.4 };
 function makeMission(type, tier) {
   const p = MPOOL.find((x) => x.type === type);
-  const target = Math.max(1, Math.round(p.base + p.step * tier));
+  const target = Math.max(1, Math.round(p.base * Math.pow(GROW[type] || 1.6, tier)));
   return { type, target, progress: 0, done: false, reward: Math.round(60 + tier * 15) };
 }
 
@@ -266,7 +279,7 @@ function fillMissionSet() {
   while (ms.list.length < 3 && guard++ < 50) {
     const cand = MPOOL[Math.floor(rnd() * MPOOL.length)];
     if (ms.list.some((m) => m.type === cand.type)) continue;
-    ms.list.push(makeMission(cand.type, ms.level - 1 + Math.floor(ms.done / 3) * 0.5));
+    ms.list.push(makeMission(cand.type, ms.level - 1));
   }
 }
 
@@ -351,7 +364,7 @@ export function checkAchievements() {
   if (out.length) persist();
   return out;
 }
-export const achGem = (a) => Math.max(1, Math.round(a.gem / 3));
+export const achGem = () => 1;
 export const achCount = () => ACHS.filter((a) => save.ach[a.id]).length;
 
 // 타이틀 알림 뱃지

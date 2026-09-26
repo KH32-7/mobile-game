@@ -295,7 +295,7 @@ export class Entities {
   layoutEnemy(e) {
     const n = Math.min(e.count, CFG.enemyRender);
     const R = 0.3 * Math.sqrt(n);
-    const hw = e.wide ? Math.min(3.2, Math.max(R, 1.6)) : Math.min(R, 1.05);
+    const hw = Math.min(R, 1.0); // 적 무리는 항상 한 레인만 막음
     const rz = Math.min(R * R / Math.max(hw, 0.3), R * 2.2);
     e.hw = Math.max(hw, 0.35); e.rz = Math.max(rz, 0.35);
     e.members = [];
@@ -369,29 +369,41 @@ export class Entities {
   buildStairs() {
     const g = new THREE.Group();
     const cols = [0x4ad0ff, 0x4affb0, 0xb0ff4a, 0xffd84a, 0xff9a3a, 0xff4a8a];
+    const W = 6.6;
     this.stairSteps = CFG.stairMults.map((m, i) => {
-      const c = document.createElement('canvas'); c.width = 256; c.height = 64;
-      const x = c.getContext('2d');
-      x.fillStyle = '#' + cols[i].toString(16).padStart(6, '0'); x.fillRect(0, 0, 256, 64);
-      x.fillStyle = 'rgba(0,0,0,0.18)'; x.fillRect(0, 50, 256, 14);
-      x.font = '900 46px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
-      x.textAlign = 'center'; x.textBaseline = 'middle';
-      x.fillStyle = '#fff'; x.strokeStyle = 'rgba(0,0,0,0.3)'; x.lineWidth = 6;
-      x.strokeText('x' + m, 128, 28); x.fillText('x' + m, 128, 28);
-      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-      const front = new THREE.MeshBasicMaterial({ map: tex });
-      const side = new THREE.MeshLambertMaterial({ color: cols[i] });
-      const mats = [side, side, side, side, front, side];
       const h = (i + 1) * CFG.stairStepH;
+      // 앞면 세로 벽(보이는 부분은 맨 위 한 칸 높이)에 배수 글자를 그림
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = Math.max(16, Math.round(512 * h / W));
+      const x = c.getContext('2d');
+      const hex = '#' + cols[i].toString(16).padStart(6, '0');
+      x.fillStyle = hex; x.fillRect(0, 0, c.width, c.height);
+      const riser = 512 * CFG.stairStepH / W;
+      x.fillStyle = 'rgba(0,0,0,0.22)'; x.fillRect(0, riser - 4, 512, 4);
+      x.font = `900 ${Math.round(riser * 0.8)}px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
+      x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.lineWidth = 5; x.strokeStyle = 'rgba(0,0,0,0.35)'; x.fillStyle = '#fff';
+      for (const px of [96, 256, 416]) { x.strokeText('x' + m, px, riser * 0.52); x.fillText('x' + m, px, riser * 0.52); }
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      const front = new THREE.MeshBasicMaterial({ map: tex, color: 0xffffff });
+      const side = new THREE.MeshLambertMaterial({ color: cols[i], emissive: 0x000000 });
+      const mats = [side, side, side, side, front, side];
       const mesh = new THREE.Mesh(this.geo.box, mats);
-      mesh.scale.set(6.6, h, CFG.stairStepLen);
+      mesh.scale.set(W, h, CFG.stairStepLen);
       mesh.position.set(0, h / 2, -(i + 0.5) * CFG.stairStepLen);
       g.add(mesh);
-      return { mesh, h, mats };
+      return { mesh, h, mats, side, front };
     });
     g.visible = false;
     this.scene.add(g);
-    this.stairs = { g, d: 0, sink: 1, active: false, reached: -1, glow: 0 };
+    this.stairs = { g, d: 0, sink: 1, active: false, reached: -1, glow: -1 };
+  }
+
+  // 도달한 층 금색 발광
+  glowStep(i) {
+    if (!this.stairs) return;
+    this.stairs.glow = i;
+    this.stairSteps.forEach((st, k) => { st.side.emissive.setHex(k === i ? 0xffb020 : 0x000000); st.side.emissiveIntensity = 0.8; st.front.color.setHex(k === i ? 0xfff0a0 : 0xffffff); });
   }
 
   placeStairs(d) {
@@ -401,6 +413,7 @@ export class Entities {
     st.g.visible = true;
     st.g.position.set(0, 0, -d);
     st.g.scale.set(1, 1, 1);
+    this.glowStep(-1);
   }
 
   // 계단 위 높이 (d 는 월드 진행 거리)
@@ -494,6 +507,7 @@ export class Entities {
       p.mesh.userData.ring.rotation.set(Math.PI / 2 + Math.sin(p.t) * 0.3, 0, p.t);
     }
 
+    if (this.stairs && this.stairs.glow >= 0) this.stairSteps[this.stairs.glow].side.emissiveIntensity = 0.55 + Math.sin(time * 10) * 0.35;
     const f = this.fortress;
     if (f && f.active && !f.broken) {
       if (f.shake > 0) f.shake = Math.max(0, f.shake - dt * 4);

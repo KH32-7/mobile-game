@@ -53,6 +53,7 @@ export class UI {
       </div>
       <div class="progress"><i id="hProg" style="width:0%"></i><div class="castle">${SVG.castle}</div><div class="lbl" id="hSect">구간 1</div></div>
       <div class="pus" id="hPus"></div>
+      <div class="combo hidden" id="combo"></div>
       <div id="countLbl">0</div>
       <div id="enemyLbls"></div>
       <div class="battleHint hidden" id="bHint"><b>탭 연타!</b> 돌격 속도 UP<div class="rushbar"><i id="rushBar"></i></div></div>
@@ -94,7 +95,7 @@ export class UI {
     this.skins = panel('skinP', '컬렉션', `<div class="curr"><div class="coinpill">${GEM}<span class="cG">0</span></div></div><div class="pvwrap" id="pvHost"></div><div class="pvinfo" id="pvInfo"></div><div class="hint">보석이나 조각 ${SKIN_UNLOCK_FRAGS}개로 해금, 조각을 모아 레벨업하면 보너스가 커져요</div><div id="skinList" class="skingrid"></div>`);
     this.mis = panel('misP', '미션', '<div id="misBody"></div>');
     this.ach = panel('achP', '업적과 통계', '<div class="tabs"><button data-tab="a" class="on">업적</button><button data-tab="s">통계</button></div><div id="achBody"></div>');
-    this.theme = panel('themeP', '시작 테마', '<div class="hint">구간을 넘어 새 테마에 도착하면 해금돼요</div><div id="themeList"></div>');
+    this.theme = panel('themeP', '시작 테마', '<div class="hint">각 테마에서 요새를 3개 부수면 시작 테마로 고를 수 있어요</div><div id="themeList"></div>');
     for (const p of [this.shop, this.skins, this.mis, this.ach, this.theme]) {
       r.appendChild(p);
       $('[data-close]', p).addEventListener('click', (e) => { e.stopPropagation(); this.hd.click(); this.closePanel(p); });
@@ -221,7 +222,7 @@ export class UI {
     const set = (id, v) => $('#' + id + ' .dot', r).classList.toggle('on', !!v);
     set('tShop', b.shop); set('tSkins', b.skins); set('tMis', b.missions); set('tAch', b.ach); set('tTheme', b.themes);
     // 새로 열린 기능 연출
-    const fresh = newFeatures();
+    const fresh = newFeatures().slice(0, 2); // NEW 표시는 최대 2개
     for (const k of fresh) {
       const btn = nav.querySelector(`[data-f="${k}"]`);
       if (btn) btn.classList.add('fresh');
@@ -380,7 +381,7 @@ export class UI {
       const un = save.themes.unlocked.includes(i);
       const sel = save.themes.sel === i;
       const row = h(`<div class="themeRow ${un ? '' : 'locked'} ${sel ? 'sel' : ''}"><div class="sw" style="background:linear-gradient(${hex(t.sky)} 50%, ${t.track} 50%)"></div>
-        <div class="info"><div class="name">${t.name}</div><div class="desc">${un ? (sel ? '시작 테마로 사용 중' : '해금됨') : '아직 도착하지 못한 곳'}</div></div>
+        <div class="info"><div class="name">${t.name}</div><div class="desc">${un ? (sel ? '시작 테마로 사용 중' : '해금됨') : `이 테마에서 요새 ${(save.themes.forts || {})[i] || 0}/3 격파하면 해금`}</div></div>
         <button class="btn ${sel ? 'gray' : ''}" ${un ? '' : 'disabled'}>${sel ? '사용 중' : un ? '선택' : '잠김'}</button></div>`);
       row.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); this.hd.click(); if (un) { this.hd.selectTheme(i); this.openThemes(); } });
       list.appendChild(row);
@@ -451,7 +452,10 @@ export class UI {
       el.style.display = '';
       el.style.transform = `translate(${it.x.toFixed(1)}px, ${it.y.toFixed(1)}px) translate(-50%, -100%)`;
       const t = fmt(it.n);
-      if (el.textContent !== t) el.textContent = t;
+      const html = it.danger ? `<span class="warn">피하세요!</span>${t}` : t;
+      if (el._h !== html) { el._h = html; el.innerHTML = html; }
+      el.classList.toggle('danger', !!it.danger);
+      if (it.hit) { el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit'); }
     }
   }
 
@@ -466,9 +470,12 @@ export class UI {
   }
 
   battleHint(on) {
-    if (on === this._bh) return;
-    this._bh = on;
-    $('#bHint', this.hud).classList.toggle('hidden', !on);
+    const up = !!$('.tut', this.fx);
+    if (on === this._bh && up === this._bhUp) return;
+    this._bh = on; this._bhUp = up;
+    const b = $('#bHint', this.hud);
+    b.classList.toggle('hidden', !on);
+    b.classList.toggle('up', up);
   }
   rushPulse() {
     const b = $('#bHint', this.hud);
@@ -509,9 +516,24 @@ export class UI {
   rewardCard(r) {
     const el = h(`<div class="reward"><div class="rt">요새 격파!</div><div class="rm">x${r.mult}</div>
       <div class="rr">${COIN}<b>+${fmt(r.coins)}</b></div>${r.gems ? `<div class="rr">${GEM}<b>+${r.gems}</b></div>` : ''}${r.frag ? `<div class="rf">${r.frag.name} 조각 +${r.frag.n}</div>` : ''}</div>`);
+    el.insertAdjacentHTML('beforeend', '<div class="rtap">탭해서 계속</div>');
     this.fx.appendChild(el);
-    setTimeout(() => el.classList.add('out'), 1500);
-    setTimeout(() => el.remove(), 1900);
+    this.rewardEl = el;
+  }
+  closeReward() {
+    const el = this.rewardEl;
+    if (!el) return;
+    this.rewardEl = null;
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 400);
+  }
+
+  combo(n, mult) {
+    const el = $('#combo', this.hud);
+    if (!n) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    el.innerHTML = `콤보 <b>${n}</b> <small>점수 x${mult.toFixed(2)}</small>`;
+    el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
   }
 
   // 화면 중앙에서 HUD 코인 칸으로 코인이 날아감

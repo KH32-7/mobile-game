@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { CFG, THEMES, COLORS, REVIVE_COSTS } from './config.js';
 import { pickChunk, applyGate, gateLabel, makeRng, TUT_CHUNKS } from './chunks.js';
-import { save, persist, startCount, magnetTime, bootsTime, recruitTime, startShieldChance, gateLuck, coinMult, fortMult, skin, track, checkAchievements, addGems, addFrags, unlockTheme, weekInfo, reportWeekly } from './data.js';
+import { save, persist, startCount, magnetTime, bootsTime, recruitTime, startShieldChance, gateLuck, coinMult, fortMult, skin, track, checkAchievements, addGems, addFrags, themeFort, weekInfo, reportWeekly } from './data.js';
 import { sfx, setIntensity, setMusic, duck, setWind } from './audio.js';
 import { PU_NAMES } from './entities.js';
 
@@ -41,7 +41,8 @@ export class Game {
     this.world.resetTheme(save.themes.sel, 0);
     this.applySkin();
     this.swarm.reset(14, 0, 0);
-    this.world.camPos.set(3, 3, -8);
+    this.swarm.lookBack = false;
+    this.world.snapNext = true;
     this.ui.show('title');
     this.ui.tutorial(null);
     this.ui.battleHint(false);
@@ -73,6 +74,7 @@ export class Game {
     this.section = Math.floor(this.dist / CFG.sectionLen);
     this.themeBase = weekly ? this.weekly.seed % THEMES.length : save.themes.sel;
     this.world.resetTheme(this.themeIdx(), this.dist);
+    this.world.snapNext = true;
     this.applySkin();
     this.mult = save.mset.level;
     this.crowdScore = 0;
@@ -90,9 +92,14 @@ export class Game {
     this.jumpBuf = 0;
     this.rush = 0;
     this.attract = null;
+    this.attractT = 0;
+    this.laneT = -1;
+    this.combo = 0;
+    this.distAcc = 0;
     this.swarm.ground = null;
     const n = o.count || (this.tutorial ? 15 : weekly ? 12 : startCount());
     this.swarm.reset(n, this.dist, 0);
+    this.swarm.lookBack = true;
     this.coinsRun = 0;
     this.coinTally = 0;
     this.maxCount = n;
@@ -157,7 +164,7 @@ export class Game {
       const ch = pickChunk(this.rng, D, this.slot++, this.opts.chunks);
       // 700~950m 구간에는 좋은 게이트 줄 1개 보장
       const allGood = frac > 0.7 && frac < 0.95 && !this.goodForced.has(sec) && (ch.cat === 'gate');
-      const ctx = { count: this.swarm.count, luck: gateLuck(), allGood };
+      const ctx = { count: this.swarm.count, luck: gateLuck(), allGood, lane: this.lane };
       const c = ch.gen(this.rng, D, ctx);
       if (ctx.usedGood) this.goodForced.add(sec);
       if (this.genD + c.len > fortD - 60 && !this.fortPlaced.has(fortD)) {
@@ -174,7 +181,13 @@ export class Game {
       if (it.t === 'obs') this.ents.addObstacle(it, base);
       else if (it.t === 'gates') this.ents.addGateRow(it, base);
       else if (it.t === 'coin') this.ents.addCoin(it, base);
-      else if (it.t === 'enemy') this.ents.addEnemy(it, base);
+      else if (it.t === 'enemy') {
+        this.ents.addEnemy(it, base);
+        const e = this.ents.enemies[this.ents.enemies.length - 1];
+        // 조우 직전에 현재 인원 기준으로 다시 정할 비율. 가끔은 피해야 하는 큰 무리
+        const sec = Math.floor((base + it.d) / CFG.sectionLen);
+        e.frac = it.tut ? null : this.rng() < 0.18 + sec * 0.04 ? 0.85 + this.rng() * 0.5 : 0.22 + this.rng() * 0.3 + sec * 0.07;
+      }
       else if (it.t === 'power') this.ents.addPower(it, base, this.rollPower());
     }
   }
@@ -189,7 +202,7 @@ export class Game {
   }
 
   fortHp(sec, count) {
-    const raw = CFG.fortHpBase + CFG.fortHpPerSec * sec + count * (CFG.fortHpFrac + CFG.fortHpFracPerSec * sec);
+    const raw = Math.max(count * CFG.fortHpFloor, CFG.fortHpBase + CFG.fortHpPerSec * sec + count * (CFG.fortHpFrac + CFG.fortHpFracPerSec * sec));
     const cap = count * Math.min(CFG.fortHpCapMax, CFG.fortHpCap + CFG.fortHpCapPerSec * sec);
     return Math.max(1, Math.min(Math.round(raw * (this.opts.fortHp || 1)), Math.floor(cap)));
   }
@@ -210,6 +223,7 @@ export class Game {
     if (a === 'pause') { this.pause(); return; }
     if (this.mode === 'dying') return;
     if (a === 'tap') {
+      if (this.mode === 'stairs' && this.stair && this.stair.phase === 'hold') { this.stair.hold = Math.min(this.stair.hold, 0.05); this.ui.closeReward(); return; }
       if (this.mode === 'battle' || this.mode === 'siege') {
         this.rush = Math.min(1, this.rush + 0.2);
         this.ui.rushPulse();
@@ -229,7 +243,7 @@ export class Game {
     if (this.mode === 'stairs') return;
     if (a === 'left' || a === 'right') {
       const nl = Math.max(0, Math.min(2, this.lane + (a === 'left' ? -1 : 1)));
-      if (nl !== this.lane) { this.lane = nl; sfx.lane(); }
+      if (nl !== this.lane) { this.lane = nl; this.laneT = this.time; sfx.lane(); }
     } else if (a === 'up') {
       if (!this.tryJump()) this.jumpBuf = CFG.jumpBuffer;
     } else if (a === 'down') {
@@ -323,6 +337,7 @@ export class Game {
     let vel = this.speed * this.speedF;
     if (this.mode === 'stairs') vel = this.updateStairs(dt, dtReal);
     this.dist += vel * dt;
+    this.distAcc += vel * dt * this.mult * this.comboMult();
     const f = this.ents.fortress;
     if (f && f.active && !f.broken && this.dist > f.d - 2.6) this.dist = f.d - 2.6;
 
@@ -342,7 +357,7 @@ export class Game {
 
     if (this.mode !== 'dying') {
       this.updateTutorial();
-      this.checkGates();
+      this.checkGates(dt);
       this.checkObstacles();
       this.checkCoins(dt);
       this.checkPowerups();
@@ -398,18 +413,25 @@ export class Game {
     if (inten !== this._inten) { this._inten = inten; setIntensity(inten); }
     this.world.update(dt, this.dist, vel, focus, sr, 'play');
 
+    let my = null;
     if (L) {
-      const p = this.project(L.x, L.y + lift + 1.55, -this.dist);
-      this.ui.setCount(sw.count, p.x, p.y, p.ok, this.mode === 'battle' || this.mode === 'siege');
+      my = this.project(L.x, L.y + lift + 1.55, -this.dist);
+      this.ui.setCount(sw.count, my.x, my.y, my.ok, this.mode === 'battle' || this.mode === 'siege');
     } else this.ui.setCount(0, 0, 0, false);
 
     const labels = [];
+    const f = this.ents.fortress;
+    const wall = f && f.active && !f.broken ? f.d : Infinity;
     for (const e of this.ents.enemies) {
       if (e.dead || e.count <= 0) continue;
       const ed = e.d - e.adv;
-      if (ed - this.dist > 70) continue;
+      if (ed - this.dist > 55 || ed > wall) continue; // 멀거나 성벽 너머는 표시 안 함
       const p = this.project(e.x, 1.5, -(ed + e.rz * 0.3));
-      if (p.ok) labels.push({ n: e.count, x: p.x, y: p.y });
+      if (!p.ok) continue;
+      // 내 인원 배지와 겹치면 위로 올림
+      if (my && Math.abs(p.x - my.x) < 90 && Math.abs(p.y - my.y) < 44) p.y = my.y - 46;
+      labels.push({ n: e.count, x: p.x, y: p.y, danger: e.danger && e.state !== 'battle', hit: e.hitT > 0 });
+      if (e.hitT > 0) e.hitT -= dt;
     }
     this.ui.setEnemyLabels(labels);
 
@@ -464,54 +486,75 @@ export class Game {
   }
 
   // ---------- 게이트 ----------
-  pickGate(row, x) {
-    let best = null, bd = 1e9;
-    for (const g of row.gates) { const d = Math.abs(x - g.x); if (d < bd) { bd = d; best = g; } }
-    return best && bd <= best.w / 2 + 0.8 ? best : null;
+  // 게이트 선택은 목표 레인 기준 (2개짜리 줄의 가운데 레인은 리더 x 로 결정)
+  pickGate(row) {
+    const L = this.swarm.leader;
+    const lx = (this.lane - 1) * CFG.laneW;
+    let best = null, bd = 1e9, second = 1e9;
+    for (const g of row.gates) {
+      const d = Math.abs(lx - g.x);
+      if (d < bd) { second = bd; bd = d; best = g; } else if (d < second) second = d;
+    }
+    if (best && Math.abs(second - bd) < 0.05 && L) {
+      bd = 1e9;
+      for (const g of row.gates) { const d = Math.abs(L.x - g.x); if (d < bd) { bd = d; best = g; } }
+    }
+    return best;
   }
 
-  checkGates() {
+  checkGates(dt) {
     const sw = this.swarm;
     if (!sw.leader) return;
-    const cx = sw.bounds.cx;
     const vel = Math.max(4, this.speed * this.speedF);
+    if (this.attractT > 0) { this.attractT -= dt; if (this.attractT <= 0) this.attract = null; }
     for (const row of this.ents.gateRows) {
       if (row.used) continue;
       const ahead = row.d - this.dist;
-      // 빼기 게이트 상한: 가까워지면 현재 인원 기준으로 다시 계산
+      // 가까워지면 현재 인원 기준으로 게이트 값 보정
       if (ahead < 45 && !row.capped) {
         row.capped = true;
         const growCap = CFG.growCapBase + CFG.growCapPerSec * this.section;
         for (const g of row.gates) {
+          let changed = false;
           if (g.op === '-') {
-            const cap = Math.max(1, Math.floor(sw.count * 0.6));
-            if (g.v > cap) { g.v = cap; this.ents.drawGate(g.mesh, g); this.dbg.capped++; }
-          } else if (g.op === 'x' && sw.count * (g.v - 1) > growCap) {
-            // 큰 무리에서는 곱하기 대신 상한 있는 더하기로 바뀜 (인원 폭주 방지)
-            g.op = '+'; g.v = Math.round(growCap / 10) * 10;
-            this.ents.drawGate(g.mesh, g);
+            const cap = Math.max(1, Math.floor(sw.count * 0.5));
+            if (g.v > cap) { g.v = cap; changed = true; }
+          } else if (g.op === '÷' && g.v > 2 && sw.count >= 200) { g.v = 2; changed = true; }
+          else if (g.op === 'x' && sw.count * (g.v - 1) > growCap) {
+            g.op = '+'; g.v = Math.max(10, Math.round(growCap / 10) * 10); changed = true;
           }
+          if (changed) { this.ents.drawGate(g.mesh, g); this.dbg.capped++; }
         }
       }
-      // 판정 0.2초 전: 무리 중심 기준으로 게이트 선택 후 흡착
-      if (!row.target && ahead < vel * CFG.gateSnapTime + 0.4 && ahead > -1) {
-        row.target = this.pickGate(row, cx);
-        if (row.target) this.attract = { x: row.target.x, k: 0.35 };
+      // 통과 직전: 현재 목표 레인의 게이트 쪽으로 무리 전체를 흡착 (레인을 바꾸면 따라감)
+      if (ahead < vel * 0.6 && ahead > -1) {
+        const g = this.pickGate(row);
+        if (g) { this.attract = { x: g.x, k: 1.1, w: g.w }; this.attractT = 0.6; }
       }
       if (this.dist < row.d) continue;
       row.used = true;
-      this.attract = null;
-      const best = row.target || this.pickGate(row, cx);
+      const best = this.pickGate(row);
+      row.target = best;
       if (!best) continue;
+      this.attract = { x: best.x, k: 1.1, w: best.w };
+      this.attractT = Math.max(0.35, (sw.form.rz * 2 + 1) / vel);
       best.chosen = true;
       const before = sw.count;
       let after = Math.max(0, Math.min(CFG.maxCount, applyGate(before, best)));
-      if (after < before) after = Math.max(Math.min(before, 1), after); // 게이트 하나로 전멸하지 않음
-      const removed = sw.setCount(after, 0.2, best.x);
+      // 손해 게이트 상한: 통과 직전 인원의 50% 까지만 잃음
+      if (after < before) after = Math.max(Math.ceil(before * 0.5), after, Math.min(before, 1));
+      // 아슬아슬: 통과 0.3초 안에 레인을 바꿔 이득 게이트를 잡으면 +10%
+      let clutch = 0;
+      if (after > before && this.time - this.laneT < 0.3 && this.laneT > 0) {
+        clutch = Math.max(1, Math.round(after * 0.1));
+        after = Math.min(CFG.maxCount, after + clutch);
+      }
+      const removed = sw.setCount(after, 0.2, best.x, best.w * 0.8);
       const delta = after - before;
-      this.dbg.gates.push({ label: gateLabel(best), before, after });
+      this.dbg.gates.push({ label: gateLabel(best), before, after, lane: this.lane, x: best.x });
       const good = delta >= 0;
       this.popups.show(best.x, 2.2, -row.d, (delta >= 0 ? '+' : '') + delta, good ? 'good' : 'bad');
+      if (clutch) { this.popups.show(best.x, 3.2, -row.d, `아슬아슬! +${clutch}`, 'big'); sfx.stamp(); }
       if (good) {
         sfx.gateGood(best.op === 'x');
         vib(10);
@@ -538,6 +581,15 @@ export class Game {
     const lo = this.dist + sw.bounds.minRel - 1.5, hi = this.dist + 1.5;
     for (const o of this.ents.obstacles) {
       if (o.dead) continue;
+      // 무리 꼬리까지 지나간 장애물: 손실 없으면 콤보 +1, 잃었으면 콤보 끊김
+      if (!o.scored && o.d + o.halfL < lo && o.d + o.halfL > lo - 6 && !this.tutorial) {
+        o.scored = true;
+        const near = Math.abs(o.x - (sw.bounds.minX + sw.bounds.maxX) / 2) < o.halfW + 2.5;
+        if (near) {
+          if (o.kills > 0) { if (this.combo >= 3) this.popups.show(o.x, 2, -o.d, '콤보 끊김', 'bad'); this.combo = 0; }
+          else { this.combo++; if (this.combo >= 3) this.ui.combo(this.combo, this.comboMult()); }
+        }
+      }
       if (o.d + o.halfL < lo || o.d - o.halfL > hi) continue;
       if (o.x + o.halfW < sw.bounds.minX - r || o.x - o.halfW > sw.bounds.maxX + r) continue;
       for (let j = sw.members.length - 1; j >= 0; j--) {
@@ -551,6 +603,7 @@ export class Game {
         if (this.shield && !this.tutorial) { this.breakObstacle(o); break; }
         // 튜토리얼 중이거나 피해 상한에 도달한 장애물: 튕겨 나며 비틀거림
         if (this.tutorial || o.spent) { this.stumble(m, o); continue; }
+        o.kills = o.kills || 0;
         if (!o.cap) o.cap = Math.max(CFG.obstacleCapMin, Math.ceil(sw.count * (o.kind === 'train' ? CFG.trainCapFrac : CFG.obstacleCapFrac)));
         const rep = Math.max(1, Math.round(sw.count / sw.members.length));
         this.hitMember(j, o);
@@ -589,6 +642,7 @@ export class Game {
     const dir = m.x >= o.x ? 1 : -1;
     const md = this.dist + m.rel;
     sw.kill(j, this.dist, dir);
+    if (this.combo) { this.combo = 0; this.ui.combo(0); }
     this.parts.burst(m.x, m.y + 0.4, -md, 5, { color: wasLeader ? this.swarm.skin.leader : this.swarm.skin.crew[0], speed: 4, up: 3, size: 0.12 });
     if (this.time - this.hitSfxT > 0.05) { sfx.hit(); this.hitSfxT = this.time; }
     this.world.shake = Math.max(this.world.shake, wasLeader ? 0.6 : 0.22);
@@ -678,17 +732,28 @@ export class Game {
     for (const e of this.ents.enemies) {
       if (e.dead) continue;
       const front = e.d - e.adv - e.rz;
+      // 조우 30m 전: 현재 인원 기준으로 적 인원 재계산
+      if (!e.sized && e.frac && front - this.dist < 30) {
+        e.sized = true;
+        e.count = e.startCount = Math.max(3, Math.round(sw.count * e.frac));
+        this.ents.layoutEnemy(e);
+      }
+      e.danger = e.count > sw.count * 0.7;
       if (e.state === 'idle' && front - this.dist < 18) e.state = 'alert';
       if (e.state === 'alert') {
         e.adv += dt * 2.2;
-        const lateral = B.maxX + 0.25 > e.x - e.hw && B.minX - 0.25 < e.x + e.hw;
+        const L = sw.leader;
+        const lateral = L && Math.abs(L.x - e.x) < e.hw + 0.7;
         if (lateral && this.dist + 0.4 >= front && this.mode === 'run') {
           e.state = 'battle';
           this.mode = 'battle';
           this.modeT = 0;
           this.battleE = e;
-          this.battleAcc = 0;
+          this.battleAcc = -0.3 * CFG.battleRateBase; // 0.3초 서로 파고드는 푸시 후 상쇄 시작
           this.rush = 0;
+          for (const m of sw.members) m.vrel += 5;
+          e.adv += 1.2;
+          this.world.shake = Math.max(this.world.shake, 0.4);
           sfx.alarm();
           vib(20);
         } else if (this.dist + B.minRel > e.d + e.rz + 1) e.state = 'passed';
@@ -722,8 +787,15 @@ export class Game {
       const mx = m ? m.x : ex, md = m ? this.dist + m.rel : ed;
       sw.remove(bi, 1);
       const px = (ex + mx) / 2, pd = (ed + md) / 2;
-      this.parts.burst(px, 0.5, -pd, 3, { color: COLORS.enemy, speed: 4, up: 3, size: 0.13 });
-      this.parts.burst(px, 0.5, -pd, 3, { color: this.swarm.skin.crew[0], speed: 4, up: 3, size: 0.13 });
+      this.parts.burst(px, 0.5, -pd, 2, { color: COLORS.enemy, speed: 4, up: 3, size: 0.12 });
+      this.parts.burst(px, 0.5, -pd, 2, { color: this.swarm.skin.crew[0], speed: 4, up: 3, size: 0.12 });
+      // 상쇄된 두 캐릭터가 서로 튕겨 나가는 미니 래그돌
+      if (sw.flyers.length < 60) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        sw.flyers.push({ x: mx, y: 0.3, z: -md, vx: side * (2 + Math.random() * 3), vy: 5 + Math.random() * 3, vz: 3 + Math.random() * 2, rx: 0, rz: 0, vrx: (Math.random() - 0.5) * 16, vrz: side * 10, life: 0.9, color: this.swarm.skin.crew[0] });
+        sw.flyers.push({ x: ex, y: 0.3, z: -ed, vx: -side * (2 + Math.random() * 3), vy: 5 + Math.random() * 3, vz: -3 - Math.random() * 2, rx: 0, rz: 0, vrx: (Math.random() - 0.5) * 16, vrz: -side * 10, life: 0.9, color: COLORS.enemy });
+      }
+      e.hitT = 0.12;
       sfx.clash();
     }
     if (this.modeT % 0.1 < dt) this.world.shake = Math.max(this.world.shake, 0.12);
@@ -737,7 +809,14 @@ export class Game {
       this.notify(track('enemies', killed));
       this.battleE = null;
       sfx.gateGood(false);
-      this.popups.show(e.x, 2, -(e.d - e.adv), '격파!', 'good');
+      sfx.stamp();
+      this.ui.stamp('격파', true);
+      this.slowT = 0.2;
+      // 코인 분수
+      const bonus = Math.max(3, Math.round(killed * 0.3));
+      this.coinTally += bonus;
+      this.popups.show(e.x, 2.4, -(e.d - e.adv), `+${bonus} 코인`, 'coin');
+      this.parts.burst(e.x, 0.8, -(e.d - e.adv), 24, { color: COLORS.coin, speed: 3, up: 8, size: 0.16, gravity: 16 });
       if (e.tut && this.tutorial) this.finishTutorial();
     } else if (sw.count <= 0) {
       this.deathCause = '적 무리에게 전멸';
@@ -855,6 +934,12 @@ export class Game {
     save.stats.maxFortsRun = Math.max(save.stats.maxFortsRun, this.forts);
     this.notify(track('fortress', 1));
     this.notify(track('fortRun', this.forts));
+    // 테마 해금: 그 테마에서 요새 3개 격파
+    if (!this.weekly) {
+      const ti = this.themeIdx();
+      if (themeFort(ti)) this.ui.toast(`시작 테마 해금: ${THEMES[ti].name}`);
+      else if (!save.themes.unlocked.includes(ti)) this.ui.toast(`${THEMES[ti].name} 요새 ${save.themes.forts[ti]}/3`);
+    }
     this.section++;
     // 무리 보너스 점수: 남은 인원 x 구간 x 10
     const crowd = sw.count * this.section * CFG.crowdBonusPerSec;
@@ -864,8 +949,8 @@ export class Game {
     // 보너스 계단
     const sec = this.section - 1;
     const base = CFG.stairThr0 + CFG.stairThrPerSec * sec;
-    let reached = -1;
-    CFG.stairMults.forEach((_, i) => { if (sw.count >= Math.round(base * Math.pow(CFG.stairThrGrow, i))) reached = i; });
+    let reached = 0; // 첫 칸(x1)은 항상
+    CFG.stairMults.forEach((_, i) => { if (i > 0 && sw.count >= Math.round(base * Math.pow(CFG.stairThrGrow, i))) reached = i; });
     const sd = f.d + 1.2;
     this.ents.placeStairs(sd);
     sw.ground = (d) => this.ents.stairHeight(d);
@@ -890,7 +975,8 @@ export class Game {
       }
       if (this.dist >= st.target - 0.05) {
         st.phase = 'hold';
-        st.hold = 1.8;
+        st.hold = 3.0;
+        this.ents.glowStep(st.reached);
         const mult = st.reached >= 0 ? CFG.stairMults[st.reached] : 1;
         const coins = Math.round((CFG.stairCoinBase + CFG.stairCoinPerSec * (this.section - 1)) * mult * fortMult());
         const gems = st.reached >= 3 ? 1 : 0;
@@ -909,7 +995,7 @@ export class Game {
     }
     if (st.phase === 'hold') {
       st.hold -= dtReal;
-      if (st.hold <= 0) { st.phase = 'sink'; st.sinkT = 0.5; }
+      if (st.hold <= 0) { st.phase = 'sink'; st.sinkT = 0.5; this.ui.closeReward(); }
       return 0;
     }
     st.sinkT -= dtReal;
@@ -924,7 +1010,7 @@ export class Game {
       this.stair = null;
       this.world.setTheme(this.themeIdx());
       setMusic('run', this.themeIdx());
-      if (!this.weekly && unlockTheme(this.themeIdx())) this.ui.toast(`새 테마 해금: ${THEMES[this.themeIdx()].name}`);
+
       setIntensity(Math.min(2, this.section));
       this.ui.banner(`구간 ${this.section + 1} · ${THEMES[this.themeIdx()].name}`, '속도 UP! 더 어려워져요');
     }
@@ -943,7 +1029,8 @@ export class Game {
     this.ui.battleHint(false);
   }
 
-  distScore() { return Math.floor(Math.max(0, this.dist - this.startDist) * this.mult); }
+  comboMult() { return 1 + Math.min(this.combo || 0, 20) * 0.05; }
+  distScore() { return Math.floor(this.distAcc || 0); }
   score() { return this.distScore() + this.crowdScore; }
 
   trackRun() {
