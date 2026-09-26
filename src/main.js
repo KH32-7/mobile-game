@@ -6,7 +6,7 @@ import {
 import { Battle, shuffle } from './battle.js';
 import { AI } from './ai.js';
 import { Renderer, buildCardFace } from './render.js';
-import { UI, setFaceMaker, cardImg, relicImg, iconImg, crownSvg } from './ui.js';
+import { UI, setFaceMaker, cardImg, lockedImg, relicImg, iconImg, crownSvg } from './ui.js';
 import { initAudio, sfx, playBgm, setMuted, suspendAudio } from './audio.js';
 import { loadRun, writeRun } from './storage.js';
 import { newRun, availableNodes, runRng, rollCards, rollRelics, enemySetup, NODE_INFO, copies } from './campaign.js';
@@ -383,14 +383,12 @@ class Game {
       },
       tier(arg) {
         const p = this.p;
+        const before = p.tierSelected;
         p.tierSelected = Math.max(1, Math.min(p.tierUnlocked, p.tierSelected + Number(arg)));
-        if (Number(arg) > 0 && p.tierSelected === p.tierUnlocked && p.tierUnlocked < RUN_TIERS.length) {
-          // 잠긴 단계 안내
-        }
         this.save();
         this.showTitle();
-        if (Number(arg) > 0 && p.tierSelected < RUN_TIERS.length && p.tierSelected === p.tierUnlocked) {
-          this.toast(`원정을 ${RUN_TIERS[p.tierSelected - 1].name} 난이도로 클리어하면 다음 단계 해금`);
+        if (Number(arg) > 0 && before === p.tierSelected && p.tierSelected < RUN_TIERS.length) {
+          this.toast(`${RUN_TIERS[p.tierSelected - 1].name} 난이도 원정을 클리어하면 ${RUN_TIERS[p.tierSelected].name} 해금`);
         }
       },
       quick() {
@@ -622,7 +620,7 @@ class Game {
       const c = p.cards[id];
       if (!c) {
         const ai = unlockArena(id);
-        return `<div class="ccard locked"><img class="sil" src="${cardImg(id)}"><b>???</b><span>${ai >= 0 ? `${ARENAS[ai].name}` : '원정 보상'}</span></div>`;
+        return `<div class="ccard locked"><img src="${lockedImg(id)}"><b>???</b><span>${ai >= 0 ? `${ARENAS[ai].name}` : '원정 보상'}</span></div>`;
       }
       const cost = M.upgradeCost(p, id);
       const can = M.canUpgrade(p, id);
@@ -630,8 +628,7 @@ class Game {
       const pct = cost ? Math.min(100, (c.shards / need) * 100) : 100;
       return `<div class="ccard${can ? ' can' : ''}" data-act="carddetail" data-arg="${id}" data-testid="card-${id}">
         <img src="${cardImg(id)}"><span class="lv">Lv.${c.level}</span>
-        <div class="sbar ${can ? 'full' : ''}"><i style="width:${pct}%"></i><em>${cost ? `${c.shards}/${need}` : 'MAX'}</em></div>
-        ${can ? '<i class="up">강화!</i>' : ''}</div>`;
+        <div class="sbar ${can ? 'full' : ''}"><i style="width:${pct}%"></i><em>${cost ? `${can ? '강화! ' : ''}${c.shards}/${need}` : 'MAX'}</em></div></div>`;
     });
     this.ui.show(`
       <div class="page">
@@ -748,7 +745,7 @@ class Game {
     const list = ARENAS.map((A, i) => {
       const reached = i <= top;
       const claimed = p.arenaClaimed.includes(i);
-      const cards = A.unlock.map((id) => `<img class="mini ${p.cards[id] ? '' : 'sil'}" src="${cardImg(id)}">`).join('');
+      const cards = A.unlock.map((id) => `<img class="mini" src="${p.cards[id] ? cardImg(id) : lockedImg(id)}">`).join('');
       return `<div class="road-item ${reached ? 'reached' : 'locked'}" style="--ac:${A.color}">
         <div class="road-head"><b>${i + 1}. ${A.name}</b><span>${crownSvg('#ffd040')} ${A.min}</span></div>
         <div class="road-body">${i === 0 ? '<span class="d">시작 아레나</span>' : `<div class="minis">${cards}</div><span class="d">${COIN}${A.coins} + 신규 카드</span>`}
@@ -952,7 +949,7 @@ class Game {
       playerDeck: cfg.playerDeck, enemyDeck: cfg.enemyDeck, relics: cfg.relics, params: cfg.params,
       kingHpFrac: cfg.kingHpFrac, debug: DEBUG, rng, hooks, infElixir: INF_ELIXIR, cardLevels: M.cardLevels(this.p),
     });
-    this.ai = new AI(this.battle, cfg.params, rng);
+    this.ai = new AI(this.battle, DEBUG ? { ...cfg.params, react: cfg.params.react * 2 } : cfg.params, rng);
     R.syncCrowns(this.battle);
     this.info = { label: cfg.label, sub: cfg.sub };
     this.scene = 'battle';
@@ -1049,7 +1046,7 @@ class Game {
     playBgm('menu');
     const title = res.winner === 0 ? '승리!' : res.winner === 1 ? '패배' : '무승부';
     const cls = res.winner === 0 ? 'win' : res.winner === 1 ? 'lose' : 'draw';
-    const crowns = (n, col) => [0, 1, 2].map((i) => `<span class="cr ${i < n ? 'on' : ''}">${crownSvg(i < n ? col : '#555a70')}</span>`).join('');
+    const crowns = (n, col) => `<div class="crow">${[0, 1, 2].map((i) => `<span class="cr ${i < n ? 'on' : ''}" style="animation-delay:${0.2 + i * 0.25}s">${crownSvg(i < n ? col : '#555a70')}</span>`).join('')}</div>`;
     let lines = '';
     let btns = '';
     if (cfg.mode === 'quick') {

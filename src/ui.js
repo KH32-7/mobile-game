@@ -13,6 +13,67 @@ export function cardImg(id) {
   const key = 'card:' + id;
   if (imgCache.has(key)) return imgCache.get(key);
   const c = faceMaker(id, 80, 98, 2);
+  // 비용 방울
+  const g = c.getContext('2d');
+  g.setTransform(2, 0, 0, 2, 0, 0);
+  const x = 12;
+  const y = 14;
+  const r = 9;
+  g.fillStyle = '#c04ae0';
+  g.beginPath();
+  g.moveTo(x, y - r * 1.25);
+  g.bezierCurveTo(x + r * 0.9, y - r * 0.3, x + r, y + r * 0.2, x + r * 0.95, y + r * 0.35);
+  g.arc(x, y + r * 0.2, r, 0.15, Math.PI - 0.15);
+  g.bezierCurveTo(x - r, y + r * 0.2, x - r * 0.9, y - r * 0.3, x, y - r * 1.25);
+  g.fill();
+  g.strokeStyle = '#fff';
+  g.lineWidth = 1.5;
+  g.stroke();
+  g.fillStyle = '#fff';
+  g.font = '900 12px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(String(CARDS[id].cost), x, y + 2);
+  const url = c.toDataURL();
+  imgCache.set(key, url);
+  return url;
+}
+
+// 미발견 카드: 어두운 카드 + 아이콘 실루엣
+export function lockedImg(id) {
+  const key = 'locked:' + id;
+  if (imgCache.has(key)) return imgCache.get(key);
+  const w = 80;
+  const h = 98;
+  const c = document.createElement('canvas');
+  c.width = w * 2;
+  c.height = h * 2;
+  const g = c.getContext('2d');
+  g.scale(2, 2);
+  const grad = g.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#3a4262');
+  grad.addColorStop(1, '#1e2238');
+  g.fillStyle = grad;
+  g.beginPath();
+  g.roundRect(0, 0, w, h, 9);
+  g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.18)';
+  g.lineWidth = 2;
+  g.stroke();
+  const ic = document.createElement('canvas');
+  ic.width = ic.height = 120;
+  const ig = ic.getContext('2d');
+  ig.translate(60, 60);
+  drawIcon(ig, id, 44);
+  ig.setTransform(1, 0, 0, 1, 0, 0);
+  ig.globalCompositeOperation = 'source-in';
+  ig.fillStyle = '#0e1020';
+  ig.fillRect(0, 0, 120, 120);
+  g.drawImage(ic, w / 2 - 30, h * 0.44 - 30, 60, 60);
+  g.fillStyle = 'rgba(255,255,255,0.35)';
+  g.font = '900 22px system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.fillText('?', w / 2, h - 12);
   const url = c.toDataURL();
   imgCache.set(key, url);
   return url;

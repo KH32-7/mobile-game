@@ -30,8 +30,8 @@ export const LEVEL_MULT = [1, 1.65, 2.5];
 export const SIZE_MULT = [1, 1.18, 1.36];
 
 export const TOWERS = {
-  princess: { hp: 1400, dmg: 52, hitSpeed: 0.8, range: 7.5, r: 1.25, proj: 'arrow', projSpeed: 16 },
-  king: { hp: 2400, dmg: 70, hitSpeed: 1.0, range: 7.0, r: 1.6, proj: 'cannon', projSpeed: 12 },
+  princess: { hp: 1250, dmg: 48, hitSpeed: 0.8, range: 7.5, r: 1.25, proj: 'arrow', projSpeed: 16 },
+  king: { hp: 2300, dmg: 66, hitSpeed: 1.0, range: 7.0, r: 1.6, proj: 'cannon', projSpeed: 12 },
   pos: {
     // 팀 0 기준. 팀 1 은 y 반전
     king: { x: 9, y: 29.2 },
@@ -191,11 +191,11 @@ export function stageParams(row, type) {
   const elite = type === 'elite';
   const boss = type === 'boss';
   return {
-    react: lerp(2.3, 0.75, t) * (elite ? 0.85 : 1) * (boss ? 0.8 : 1),
+    react: lerp(2.3, 0.8, t) * (elite ? 0.88 : 1) * (boss ? 1.1 : 1),
     mistake: lerp(0.35, 0.05, t) * (elite ? 0.7 : 1),
-    statMult: 1 + 0.045 * row + (elite ? 0.12 : 0) + (boss ? 0.1 : 0),
-    towerMult: 1 + 0.05 * row + (elite ? 0.1 : 0),
-    kingMult: boss ? 2.2 : 1,
+    statMult: 1 + 0.012 * row + (elite ? 0.05 : 0),
+    towerMult: 1 + 0.012 * row + (elite ? 0.05 : 0),
+    kingMult: boss ? 1.5 : 1,
     deckTier: Math.min(3, Math.floor(row / 3) + (elite ? 1 : 0)),
     boss,
     elite,
@@ -226,8 +226,8 @@ export const ENEMY_DECKS = [
 ];
 
 export const BOSS = {
-  summonEvery: 22,
-  summons: ['skeletons', 'knight', 'bats', 'goblins'],
+  summonEvery: 35,
+  summons: ['knight', 'goblins', 'bats', 'archers'],
 };
 
 export const RARITY_WEIGHT = { common: 5, rare: 3, epic: 1.6 };
@@ -266,11 +266,11 @@ export const TROPHY = { win: 30, loss: 20, crownBonus: 2 };
 
 // 원정 난이도 단계
 export const RUN_TIERS = [
-  { name: '견습', stat: 0, reward: 1 },
-  { name: '기사', stat: 0.12, reward: 1.35 },
-  { name: '영웅', stat: 0.24, reward: 1.7 },
-  { name: '전설', stat: 0.38, reward: 2.1 },
-  { name: '신화', stat: 0.55, reward: 2.6 },
+  { name: '견습', stat: -0.06, reward: 1 },
+  { name: '기사', stat: 0.06, reward: 1.35 },
+  { name: '영웅', stat: 0.16, reward: 1.7 },
+  { name: '전설', stat: 0.28, reward: 2.1 },
+  { name: '신화', stat: 0.42, reward: 2.6 },
 ];
 
 export const CHEST_INTERVAL_MS = 3 * 60 * 60 * 1000;

@@ -535,8 +535,10 @@ img {
 }
 .ccard .lv {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
   font-size: 10px;
   font-weight: 900;
   background: rgba(0, 0, 0, 0.6);
@@ -583,6 +585,9 @@ img {
 }
 .ccard.locked {
   cursor: default;
+}
+.ccard.locked img {
+  box-shadow: none;
 }
 .sil {
   filter: brightness(0) opacity(0.55);
@@ -1268,8 +1273,9 @@ img.mini {
   align-items: center;
   gap: 2px;
 }
-.crowns .side > span {
-  display: inline-block;
+.crow {
+  display: flex;
+  gap: 2px;
 }
 .cr svg {
   width: 34px;

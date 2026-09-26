@@ -115,12 +115,17 @@ async function pushToWin(page, timeoutMs = 90000) {
   const t0 = Date.now();
   let k = 0;
   while (Date.now() - t0 < timeoutMs) {
-    const s = await page.evaluate(() => ({ scene: window.__ps.scene, ended: window.__ps.battle?.ended, hand: window.__ps.battle?.teams[0].hand }));
+    const s = await page.evaluate(() => {
+      const b = window.__ps.battle;
+      const threat = b?.ents.find((e) => e.alive && e.team === 1 && e.kind === 'troop' && e.y > 17);
+      return { scene: window.__ps.scene, ended: b?.ended, hand: b?.teams[0].hand, threat: threat ? { x: threat.x, y: threat.y } : null };
+    });
     if (s.scene !== 'battle') return s.scene;
     if (!s.ended) {
       const lane = k % 2 ? 14.5 : 3.5;
       const spell = ['fireball', 'lightning', 'freeze', 'arrows'].includes(s.hand[0]);
-      if (spell) await dragCard(page, 0, 9, 3.5);
+      if (spell) await dragCard(page, 0, s.threat ? s.threat.x : 9, s.threat ? s.threat.y : 3.5);
+      else if (s.threat && k % 3 === 2) await dragCard(page, 0, s.threat.x, Math.min(31, s.threat.y + 1.5));
       else await dragCard(page, 0, lane, 18.2);
       k++;
     }
@@ -228,7 +233,8 @@ async function main() {
     const r1 = await pushToWin(page);
     assert(r1 === 'result', `대전 종료 후 결과 화면 (${r1})`);
     await page.screenshot({ path: `${SHOTS}/15-quick-result.png` });
-    const quick = await page.evaluate(() => ({ tro: window.__ps.profile.trophies, wins: window.__ps.profile.stats.quickWins, win: window.__ps.game.lastResult.winner }));
+    const quick = await page.evaluate(() => ({ tro: window.__ps.profile.trophies, wins: window.__ps.profile.stats.quickWins, win: window.__ps.game.lastResult.winner, res: window.__ps.game.lastResult, towers: window.__ps.game.battle?.towers.map((t) => t.team + t.towerType + ':' + Math.round(t.hp)) }));
+    log('quick result', JSON.stringify(quick));
     assert(quick.win === 0 && quick.tro > 0, `빠른 대전 승리 + 트로피 획득 (${quick.tro})`);
     await page.tapSel('[data-act="title"]');
 

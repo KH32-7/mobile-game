@@ -82,11 +82,11 @@ export class Battle {
       const t = {
         id: nextId++, team, kind: 'tower', towerType: type, lane, card: null,
         x: pos.x, y: fy(pos.y), z: 0, r: cfg.r * (team === 1 && type === 'king' && p.boss ? 1.18 : 1),
-        maxHp, hp, dmg, hitSpeed: cfg.hitSpeed * (team === 1 && p.boss && type === 'king' ? 0.8 : 1),
+        maxHp, hp, dmg, hitSpeed: cfg.hitSpeed * (team === 1 && p.boss && type === 'king' ? 0.9 : 1),
         range: cfg.range, targets: 'all', proj: cfg.proj, projSpeed: cfg.projSpeed,
-        splash: team === 1 && p.boss && type === 'king' ? 1.4 : 0,
+        splash: team === 1 && p.boss && type === 'king' ? 1.0 : 0,
         cd: 0, target: null, retarget: 0, alive: true, flash: 0, air: false, level: 1,
-        active: type !== 'king' || (team === 1 && p.boss), deployT: 0, slowT: 0, stunT: 0,
+        active: type !== 'king', deployT: 0, slowT: 0, stunT: 0,
         aim: team === 0 ? -Math.PI / 2 : Math.PI / 2, recoil: 0,
       };
       this.towers.push(t);
@@ -578,9 +578,39 @@ export class Battle {
     let sp = e.speed * (e.slowT > 0 ? 0.5 : 1);
     if (e.charging) sp *= 2;
     const step = Math.min(d, sp * dt);
-    e.x += (dx / d) * step;
-    e.y += (dy / d) * step;
-    e.face = Math.atan2(dy, dx);
+    let ux = dx / d;
+    let uy = dy / d;
+    if (!e.air) {
+      // 건물/타워 회피: 장애물 쪽 성분을 제거하고 접선 방향으로 미끄러짐
+      for (const s of this.ents) {
+        if (!s.alive || s.kind === 'troop' || s === e.target) continue;
+        const ox = s.x - e.x;
+        const oy = s.y - e.y;
+        const od = Math.hypot(ox, oy);
+        const lim = s.r + e.r + 0.35;
+        if (od > lim || od < 0.001) continue;
+        const nx = ox / od;
+        const ny = oy / od;
+        const dot = ux * nx + uy * ny;
+        if (dot <= 0) continue;
+        // 접선 방향 (목표 쪽으로 도는 방향 선택)
+        let tx = -ny;
+        let ty = nx;
+        const side = tx * (wx - e.x) + ty * (wy - e.y);
+        if (side < 0 || (Math.abs(side) < 0.05 && e.id % 2)) {
+          tx = -tx;
+          ty = -ty;
+        }
+        ux = ux - nx * dot + tx * dot;
+        uy = uy - ny * dot + ty * dot;
+        const n = Math.hypot(ux, uy) || 1;
+        ux /= n;
+        uy /= n;
+      }
+    }
+    e.x += ux * step;
+    e.y += uy * step;
+    e.face = Math.atan2(uy, ux);
     e.moving = true;
     e.walk += dt * sp * 6;
     if (CARDS[e.card].charge) {
@@ -829,7 +859,7 @@ export class Battle {
         const id = BOSS.summons[Math.floor(this.rng() * BOSS.summons.length)];
         const lane = this.rng() < 0.5 ? 0 : 1;
         const x = lane ? 12 : 6;
-        this.spawnCard(1, id, x, 6.5, this.time > 90 ? 2 : 1);
+        this.spawnCard(1, id, x, 6.5, this.time > 150 ? 2 : 1);
         this.hooks.announce?.('보스의 소환!', '#ff8a7a');
         this.hooks.sfx?.('horn');
       }

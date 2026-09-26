@@ -81,12 +81,13 @@ export class Renderer {
     L.pause = { x: 6, y: safe.top + 2, w: 44, h: 40 };
     // 아레나
     const availH = L.panel.y - L.hudH - 6;
-    const s = Math.min(w / (W + 0.4), availH / (H * TILT));
+    const TOPM = 1.3; // 적 킹 타워 높이만큼 위 여유
+    const s = Math.min(w / (W + 0.4), availH / (H * TILT + TOPM));
     L.s = s;
     L.aw = W * s;
     L.ah = H * TILT * s;
     L.ox = (w - L.aw) / 2;
-    L.oy = L.hudH + 3 + (availH - L.ah) / 2;
+    L.oy = L.hudH + 3 + TOPM * s + (availH - L.ah - TOPM * s) / 2;
     this.L = L;
     this.cardCache.clear();
     this.buildArena();
