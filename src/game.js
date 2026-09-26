@@ -586,6 +586,10 @@ export class Game {
     popText(at.x, 2.2, at.z, 'NEW!', 'pop-new', 1.4);
     this.rebuildNav();
     if (u.t === 'next' || u.t === 'final') {
+      if (u.t === 'final') {
+        this.refreshPads(false);
+        this.rebuildZones();
+      }
       this.hooks.stageClear(u.t === 'final');
       return;
     }
@@ -799,8 +803,18 @@ export class Game {
         const idx = this.findTop(a.stack, (it) => it.k === 'dish');
         if (idx < 0) return false;
         const b = r;
-        const sl = b.slotNear(b.feedS, b.sp * 0.5);
-        if (!sl || sl.item || sl.res) {
+        // 투입구 앞뒤 구간의 빈 슬롯에 바로 올림 (가까운 순)
+        let sl = null;
+        let bd = 1e9;
+        for (const x of b.slots) {
+          if (x.item || x.res) continue;
+          const d = b.dist(b.slotS(x), b.feedS);
+          if (d < 1.35 && d < bd) {
+            bd = d;
+            sl = x;
+          }
+        }
+        if (!sl) {
           if (b.free() === 0 && a.isChef) {
             this.warn('beltfull', '벨트가 꽉 찼어요! 손님이 원하는 메뉴만 올려요', b.feed.x, b.feed.z, 'bad');
           }
