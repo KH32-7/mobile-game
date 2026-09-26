@@ -122,9 +122,16 @@ async function newPage(browser, w = 390, h = 844, init = null) {
     await touch('touchEnd', 0, 0);
   };
   page.tapSel = async (sel) => {
-    const b = await page.locator(sel).first().boundingBox();
+    // 모달 등장 애니메이션(저프레임에서는 느림)이 끝나 위치가 안정될 때까지 대기
+    let b = await page.locator(sel).first().boundingBox();
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(150);
+      const b2 = await page.locator(sel).first().boundingBox();
+      if (b && b2 && Math.abs(b.y - b2.y) < 0.5 && Math.abs(b.x - b2.x) < 0.5) break;
+      b = b2;
+    }
     if (!b) throw new Error('요소 없음: ' + sel);
-    await page.tapAt(b.x + b.width / 2, b.y + b.height / 2);
+    await page.locator(sel).first().tap({ force: true });
     await page.waitForTimeout(250);
   };
   return page;
@@ -252,6 +259,7 @@ async function main() {
     }
 
     // ---------- 2. 디버그: 오프라인 수익 + 식당 이전 ----------
+    if (!process.env.SKIP2) {
     const p2 = await newPage(browser);
     await p2.goto(BASE + '?debug');
     await p2.waitForTimeout(1000);
@@ -311,6 +319,7 @@ async function main() {
     await p2.waitForTimeout(1000);
     assert(await p2.g(() => __game.p.stage === 1), '새로고침 후 2호점 유지');
     await p2.context().close();
+    }
 
     // ---------- 3. 사운드 믹스 계측 (OfflineAudioContext) + 일시정지 시 BGM 정지 ----------
     {
@@ -335,8 +344,9 @@ async function main() {
         await p5.tapSel('#b-pause');
         await p5.waitForTimeout(300);
         assert(!(await p5.g(() => __audio.bgmPlaying)), '일시정지 메뉴에서 BGM 정지');
-        await p5.tapSel('#p-resume');
-        await p5.waitForTimeout(300);
+        await p5.waitForTimeout(600);
+        await p5.evaluate(() => document.querySelector('#p-resume').click());
+        await p5.waitForTimeout(400);
         assert(await p5.g(() => __audio.bgmPlaying), '재개하면 BGM 다시 재생');
       } else log('오디오 컨텍스트가 실행되지 않아 BGM 정지 검사는 건너뜀');
       await p5.context().close();

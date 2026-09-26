@@ -297,23 +297,23 @@ export function animChar(char, t, moving, carrying, speedK = 1) {
 // ---------- 시설 모델 ----------
 export function stationModel(menu, theme) {
   const b = new Build();
-  const w = 1.8;
+  const w = 1.6;
   const pc = MENUS[menu].plate;
   b.add(GEO.rbox(w, 0.86, 1.1, 0.12), '#d8dde6', 0, 0.43, 0);
   b.add(GEO.rbox(w + 0.08, 0.08, 1.18, 0.14), '#f4f6fa', 0, 0.9, 0);
   b.add(GEO.box(w - 0.1, 0.3, 0.02), pc, 0, 0.5, 0.56);
   b.add(GEO.box(w - 0.3, 0.05, 0.03), '#ffffff', 0, 0.62, 0.57);
   // 도마 (재료 쪽)
-  b.add(GEO.rbox(0.72, 0.06, 0.7, 0.05), '#e8c48a', -0.46, 0.97, 0);
+  b.add(GEO.rbox(0.66, 0.06, 0.7, 0.05), '#e8c48a', -0.42, 0.97, 0);
   // 완성 트레이
-  b.add(GEO.rbox(0.72, 0.04, 0.7, 0.05), '#4a4f5f', 0.46, 0.96, 0);
+  b.add(GEO.rbox(0.66, 0.04, 0.7, 0.05), '#4a4f5f', 0.42, 0.96, 0);
   // 뒤쪽 선반 + 간판
   b.add(GEO.box(w, 0.9, 0.12), theme.wall, 0, 1.35, -0.5);
   b.add(GEO.rbox(0.9, 0.36, 0.08, 0.06), '#ffffff', 0, 1.5, -0.42);
   b.add(GEO.cyl(0.16, 0.16, 0.02, 14), pc, 0, 1.5, -0.37, Math.PI / 2);
   // 칼
-  b.add(GEO.box(0.3, 0.02, 0.06), '#c9ccd6', -0.46, 1.01, 0.2, 0, 0.5, 0);
-  b.add(GEO.box(0.12, 0.03, 0.04), '#5a3a2a', -0.63, 1.01, 0.32, 0, 0.5, 0);
+  b.add(GEO.box(0.3, 0.02, 0.06), '#c9ccd6', -0.42, 1.01, 0.2, 0, 0.5, 0);
+  b.add(GEO.box(0.12, 0.03, 0.04), '#5a3a2a', -0.59, 1.01, 0.32, 0, 0.5, 0);
   return b.mesh();
 }
 

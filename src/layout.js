@@ -11,7 +11,7 @@ export function buildLayout(stage) {
   const r = L.r;
   const topZ = L.topZ;
   const nSt = L.menus.length;
-  const stSpacing = 2.5;
+  const stSpacing = 2.6;
   const kitchenZ = topZ - r - 5.2; // 조리대 중심
   const dockZ = kitchenZ - 2.55; // 부두 상자 줄
   const beltCx = L.twoBelts ? [-3.9 * m, 3.9 * m] : [0];
@@ -27,7 +27,8 @@ export function buildLayout(stage) {
       z: kitchenZ,
       padIn: { x: x - 0.52, z: kitchenZ + 1.12 },
       padOut: { x: x + 0.52, z: kitchenZ + 1.12 },
-      crate: { x, z: dockZ, pad: { x, z: dockZ + 1.05 } },
+      // 부두 상자는 조리대 사이 통로 뒤에 두어서 앞뒤로 바로 오갈 수 있게 함
+      crate: { x: x + 1.3 * m, z: dockZ, pad: { x: x + 1.3 * m, z: dockZ + 1.05 } },
     };
   });
   const rackX = (stHalf + 2.15) * m;

@@ -107,6 +107,9 @@ export const audio = {
   get on() {
     return enabled.sfx || enabled.bgm;
   },
+  get debug() {
+    return { timer: !!bgmTimer, en: enabled.bgm, held: bgmHeld, state: ctx && ctx.state, measuring };
+  },
   get bgmPlaying() {
     return !!bgmTimer && enabled.bgm && !bgmHeld && !!ctx && ctx.state === 'running';
   },
@@ -269,8 +272,8 @@ function noise(t, dur, { vol = 0.2, type = 'bandpass', freq = 1200, q = 1, bus =
 const SFX = {
   step(t, alt) {
     // 발걸음: 저역 쿵 + 폰 스피커용 400Hz 대역 톡
-    noise(t, 0.05, { vol: 0.192, type: 'lowpass', freq: alt ? 520 : 440 });
-    tone(t, alt ? 330 : 290, 0.04, { type: 'triangle', vol: 0.06 });
+    noise(t, 0.05, { vol: 0.278, type: 'lowpass', freq: alt ? 520 : 440 });
+    tone(t, alt ? 330 : 290, 0.04, { type: 'triangle', vol: 0.087 });
   },
   pick(t, n) {
     // 적재 틱: 쌓일수록 피치 상승
@@ -328,8 +331,8 @@ const SFX = {
     tone(t, 360, 0.3, { type: 'square', vol: 0.04, slide: 0.7, filter: 900 });
   },
   eat(t) {
-    noise(t, 0.05, { vol: 0.45, freq: 900, q: 2 });
-    noise(t + 0.09, 0.05, { vol: 0.375, freq: 1100, q: 2 });
+    noise(t, 0.05, { vol: 0.585, freq: 900, q: 2 });
+    noise(t + 0.09, 0.05, { vol: 0.488, freq: 1100, q: 2 });
   },
   combo(t, n) {
     const base = 660 * Math.pow(1.059, Math.min(n, 12));

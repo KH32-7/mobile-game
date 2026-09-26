@@ -459,7 +459,7 @@ body {
 .toast {
   position: absolute;
   left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 136px);
   transform: translate(-50%, 20px);
   max-width: 88%;
   background: rgba(20, 18, 40, 0.88);
@@ -486,7 +486,7 @@ body {
 .tut {
   position: absolute;
   left: 50%;
-  top: calc(env(safe-area-inset-top, 0px) + 128px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
   transform: translate(-50%, 0) scale(0.9);
   width: max-content;
   max-width: 72%;
@@ -510,7 +510,7 @@ body {
 .hand {
   position: absolute;
   left: 50%;
-  top: 70%;
+  top: 64%;
   width: 64px;
   height: 64px;
   opacity: 0;

@@ -365,7 +365,7 @@ export class Game {
     for (const b of this.belts) if (b.built) obs.push({ t: 'stad', x: b.cx, z0: b.topZ, z1: b.topZ + b.len, rad: b.r + COUNTER_OUT + 0.04 });
     for (const s of Object.values(this.stations)) {
       if (!s.built) continue;
-      obs.push({ t: 'box', x: s.x, z: s.z, hw: 0.92, hd: 0.58 });
+      obs.push({ t: 'box', x: s.x, z: s.z, hw: 0.82, hd: 0.58 });
       obs.push({ t: 'box', x: s.crate.x, z: s.crate.z, hw: 0.62, hd: 0.5 });
     }
     obs.push({ t: 'box', x: L.rack.x, z: L.rack.z, hw: 0.62, hd: 0.47 });
@@ -769,7 +769,7 @@ export class Game {
         const [it] = a.stack.splice(idx, 1);
         r.incoming++;
         const from = this.stackTopPos(a);
-        this.fly(it, from, { x: r.x - 0.46, y: 1.0 + r.inp * 0.05, z: r.z }, () => {
+        this.fly(it, from, { x: r.x - 0.42, y: 1.0 + r.inp * 0.12, z: r.z }, () => {
           r.incoming--;
           r.inp++;
           audio.play('drop', r.inp);
@@ -781,7 +781,7 @@ export class Game {
         if (r.out < 1 || this.room(a) <= 0) return false;
         r.out--;
         const it = { k: 'dish', m: r.menu };
-        this.fly(it, { x: r.x + 0.46, y: 1.0 + r.out * 0.2, z: r.z }, () => this.stackTopPos(a), () => this.pushStack(a, it), a);
+        this.fly(it, { x: r.x + 0.42, y: 1.0 + r.out * 0.2, z: r.z }, () => this.stackTopPos(a), () => this.pushStack(a, it), a);
         return true;
       }
       case 'sink': {
@@ -998,7 +998,7 @@ export class Game {
           s.out++;
           audio.play('cook');
           this.hooks.discover && this.hooks.discover(s.menu);
-          puff(s.x + 0.46, 1.2, s.z, '#fff6d0', 0.18, 3, 1.4);
+          puff(s.x + 0.42, 1.2, s.z, '#fff6d0', 0.18, 3, 1.4);
         }
       } else if (s.inp > 0 && this.rack.n <= 0) {
         s.t = Math.min(s.t, this.cookTime * 0.95);
@@ -1667,8 +1667,8 @@ export class Game {
     // 조리대
     for (const s of Object.values(this.stations)) {
       if (!s.built) continue;
-      for (let i = 0; i < s.inp; i++) this.drawItem({ k: 'ing', id: s.ing }, s.x - 0.46 + (i % 2) * 0.04, 1.0 + i * 0.12, s.z + (i % 2 ? 0.03 : -0.03), 0.1 * i, 0.9);
-      for (let i = 0; i < s.out; i++) this.drawDish(s.menu, s.x + 0.46, 0.98 + i * 0.2, s.z, 0, 1);
+      for (let i = 0; i < s.inp; i++) this.drawItem({ k: 'ing', id: s.ing }, s.x - 0.42 + (i % 2) * 0.04, 1.0 + i * 0.12, s.z + (i % 2 ? 0.03 : -0.03), 0.1 * i, 0.9);
+      for (let i = 0; i < s.out; i++) this.drawDish(s.menu, s.x + 0.42, 0.98 + i * 0.2, s.z, 0, 1);
       // 부두 상자
       for (let i = 0; i < s.crateN; i++) {
         const col2 = i % 3;
