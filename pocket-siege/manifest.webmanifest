@@ -1,0 +1,14 @@
+{
+  "name": "포켓 시즈",
+  "short_name": "포켓 시즈",
+  "description": "카드 대전 + 유닛 합성 + 로그라이크 원정",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1e2742",
+  "theme_color": "#1e2742",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
