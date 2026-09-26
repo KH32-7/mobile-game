@@ -1,6 +1,7 @@
 // 시드 기반 절차적 홀 생성기 (DOM 없음, node 에서도 동작)
 import { T, COLS, RUN } from './config.js';
 import { mulberry32, mix } from './rng.js';
+import { WORLD_MAP } from './worlds.js';
 
 export const TILE = { VOID: 0, GRASS: 1, SAND: 2, WATER: 3, ICE: 4, SN: 5, SE: 6, SS: 7, SW: 8 };
 export const SLOPE_DIR = { 5: [0, -1], 6: [1, 0], 7: [0, 1], 8: [-1, 0] };
@@ -428,7 +429,11 @@ export function validateHole(h) {
       if (!isPass(tileAt(g, x, cy)) || blocked[gi(g, x, cy)]) return { ok: false, reason: 'cup-track' };
   }
   for (const tp of h.teles)
-    for (const p of [tp.a, tp.b]) if (!isPass(tileAt(g, Math.floor(p.x / T), Math.floor(p.y / T)))) return { ok: false, reason: 'tele' };
+    for (const p of [tp.a, tp.b]) {
+      const px = Math.floor(p.x / T),
+        py = Math.floor(p.y / T);
+      if (!isPass(tileAt(g, px, py)) || dist[gi(g, px, py)] < 0) return { ok: false, reason: 'tele' };
+    }
   if (g.rows > 30 || g.rows < 10) return { ok: false, reason: 'size' };
   return { ok: true, dist };
 }
@@ -438,7 +443,8 @@ function chebNear(ax, ay, bx, by, r) {
   return Math.max(Math.abs(ax - bx), Math.abs(ay - by)) <= r;
 }
 
-function placeElements(h, rng, idx, meta) {
+function placeElements(h, rng, idx, meta, world) {
+  const wt = world.weights || {};
   const g = h.grid;
   const tx = Math.floor(h.tee.x / T),
     ty = Math.floor(h.tee.y / T);
@@ -600,6 +606,7 @@ function placeElements(h, rng, idx, meta) {
     },
   };
 
+  const eff = Math.min(17, idx + (world.diff || 0));
   const pool = [
     ['sand', 0, 3],
     ['bumper', 1, 2],
@@ -609,9 +616,11 @@ function placeElements(h, rng, idx, meta) {
     ['ice', 3, 1.2],
     ['mover', 4, 1.5],
     ['mill', 5, 1.6],
-    ['tele', 6, 0.9],
-  ].filter((p) => p[1] <= idx);
-  const n = Math.min(7, 1 + Math.floor(idx * 0.33) + rng.int(0, 1));
+    ['tele', world.teleFrom ?? 6, 0.9],
+  ]
+    .map(([k, from, w]) => [k, wt[k] > 2 ? Math.min(from, 1) : from, w * (wt[k] ?? 1)])
+    .filter((p) => p[1] <= eff && p[2] > 0);
+  const n = Math.min(7, 1 + Math.floor(eff * 0.33) + rng.int(0, 1));
   const counts = {};
   for (let k = 0; k < n; k++) {
     let tw = 0;
@@ -647,7 +656,7 @@ function placeElements(h, rng, idx, meta) {
     const [x, y] = fl.splice(Math.floor(rng() * fl.length), 1)[0];
     h.coins.push({ x: tcx(x), y: tcx(y), taken: false });
   }
-  if (idx >= 7 && rng.chance(0.35)) {
+  if (idx >= (world.windFrom ?? 7) && rng.chance(world.windChance ?? 0.35)) {
     const a = rng.range(0, Math.PI * 2);
     const m = rng.range(22, 42);
     h.wind = { x: Math.cos(a) * m, y: Math.sin(a) * m };
@@ -655,10 +664,10 @@ function placeElements(h, rng, idx, meta) {
 }
 
 // ---------- 메인 생성 ----------
-function tryGenerate(rng, idx) {
+function tryGenerate(rng, idx, world) {
   const boss = BOSS[idx] ? BOSS[idx].id : null;
   const midTypes = ['straight', 'dogleg', 'wide', 'fork', 'pillars', 'zigzag', 'funnel', 'bowl'];
-  const unlocked = midTypes.slice(0, Math.min(midTypes.length, 3 + Math.floor(idx / 2)));
+  const unlocked = midTypes.slice(0, Math.min(midTypes.length, 3 + Math.floor((idx + (world.diff || 0)) / 2)));
   const plan = [{ type: 'start', h: 3 }];
   let nMid = 2 + (idx >= 4 ? 1 : 0) + (idx >= 10 && rng.chance(0.5) ? 1 : 0) + (rng.chance(0.3) ? 1 : 0) - (idx < 2 ? 1 : 0);
   if (boss) nMid = Math.min(nMid, 2);
@@ -750,7 +759,7 @@ function tryGenerate(rng, idx) {
   }
   // 거대 풍차 방 좌우 끝이 막히지 않게
   if (!validateHole(h).ok) return null;
-  placeElements(h, rng, idx, meta);
+  placeElements(h, rng, idx, meta, world);
   if (!validateHole(h).ok) return null;
   h.segs = computeSegments(h);
   const pr = computePar(h);
@@ -770,17 +779,21 @@ function fallbackHole(idx) {
   return h;
 }
 
-export function generateHole(runSeed, idx) {
+export function generateHole(runSeed, idx, worldId = 'meadow') {
+  const world = WORLD_MAP[worldId] || WORLD_MAP.meadow;
+  const wi = Object.keys(WORLD_MAP).indexOf(world.id);
   for (let attempt = 0; attempt < 60; attempt++) {
-    const rng = mulberry32(mix(runSeed, idx, attempt, 7919));
-    const h = tryGenerate(rng, idx);
+    const rng = mulberry32(mix(runSeed, idx, attempt, 7919 + wi * 131));
+    const h = tryGenerate(rng, idx, world);
     if (h) {
       h.attempt = attempt;
       h.seed = runSeed;
+      h.world = world.id;
       return h;
     }
   }
   const h = fallbackHole(idx);
   h.seed = runSeed;
+  h.world = world.id;
   return h;
 }

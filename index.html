@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+    <meta name="theme-color" content="#175434" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="새총처럼 당겨 치는 로그라이크 미니골프" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>로그 퍼트</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="cv"></canvas>
+      <div id="hud" class="hidden">
+        <div class="hud-row">
+          <button id="btnPause" class="icon-btn" aria-label="일시정지"></button>
+          <div class="hole-info">
+            <div id="hudHole">HOLE 1</div>
+            <div id="hudPar">파 3</div>
+          </div>
+          <div class="hud-stats">
+            <div id="hudHearts"></div>
+            <div id="hudCoins"></div>
+          </div>
+        </div>
+        <div id="hudRelics"></div>
+        <div id="hudTimer" class="hidden"></div>
+      </div>
+      <div id="bottomBar" class="hidden">
+        <button id="btnView" class="pill-btn">전체 보기</button>
+        <button id="btnMulligan" class="pill-btn gold hidden">되돌리기</button>
+        <div id="debugBar" class="hidden"></div>
+      </div>
+      <div id="tutorial" class="hidden">
+        <div class="tut-finger"></div>
+        <div class="tut-text">화면 어디서나 <b>끌어서 당겼다 놓으면</b> 샷!<br />처음 위치로 되돌리면 취소</div>
+      </div>
+      <div id="banner" class="hidden"></div>
+      <div id="toast" class="hidden"></div>
+      <div id="overlay"></div>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

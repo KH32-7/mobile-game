@@ -5,6 +5,7 @@ import { T, RUN, PHYS } from '../src/config.js';
 import { makeState, newBall, stepWorld, relicMods, settleToFloor } from '../src/physics.js';
 import { planShot } from '../src/ai.js';
 import { hashStr, dateSeedStr } from '../src/rng.js';
+import { WORLDS } from '../src/worlds.js';
 
 const NSEEDS = +(process.argv[2] || 240);
 const NPLAY = +(process.argv[3] || 8);
@@ -42,15 +43,17 @@ function reachable(h, from, to) {
   return -1;
 }
 
-const stats = { holes: 0, fallback: 0, attempts: 0, parSum: 0, elemByHole: Array(18).fill(0), rowsMin: 99, rowsMax: 0, parHist: {} };
+const stats = { worldTiles: {}, holes: 0, fallback: 0, attempts: 0, parSum: 0, elemByHole: Array(18).fill(0), rowsMin: 99, rowsMax: 0, parHist: {} };
 const t0 = Date.now();
 const seeds = [];
 for (let i = 0; i < NSEEDS; i++) seeds.push(hashStr('verify-' + i));
 seeds.push(hashStr(dateSeedStr())); // 오늘의 데일리 코스도 포함
 
+for (const W of WORLDS)
 for (const seed of seeds) {
   for (let idx = 0; idx < RUN.holes; idx++) {
-    const h = generateHole(seed, idx);
+    const h = generateHole(seed, idx, W.id);
+    if (h.world !== W.id) fail(seed, idx, 'world mismatch');
     stats.holes++;
     stats.attempts += h.attempt || 0;
     if (h.fallback) {
@@ -81,6 +84,14 @@ for (const seed of seeds) {
     if (idx === 11 && h.cups.length !== 3) fail(seed, idx, 'boss three cups missing');
     if (idx === 17 && !(h.mills.some((m) => m.giant) && h.timeLimit > 0)) fail(seed, idx, 'boss giant mill missing');
     stats.parSum += h.par;
+    const wt = (stats.worldTiles[W.id] ||= { sand: 0, ice: 0, water: 0, tele: 0, bumper: 0 });
+    for (const v of g.t) {
+      if (v === TILE.SAND) wt.sand++;
+      if (v === TILE.ICE) wt.ice++;
+      if (v === TILE.WATER) wt.water++;
+    }
+    wt.tele += h.teles.length;
+    wt.bumper += h.bumpers.length;
     stats.parHist[h.par] = (stats.parHist[h.par] || 0) + 1;
     stats.elemByHole[idx] += h.bumpers.length + h.crates.length + h.mills.length + h.movers.length + h.teles.length + (h.wind ? 1 : 0) + [...g.t].filter((v) => v >= 2).length / 4;
   }
@@ -99,8 +110,9 @@ const M = relicMods(new Set());
 const t1 = Date.now();
 for (let si = 0; si < NPLAY; si++) {
   const seed = seeds[si];
+  const W = WORLDS[si % WORLDS.length];
   for (let idx = 0; idx < RUN.holes; idx++) {
-    const h = generateHole(seed, idx);
+    const h = generateHole(seed, idx, W.id);
     const st = makeState(h);
     const b = newBall(h.tee.x, h.tee.y);
     st.balls = [b];
@@ -154,9 +166,17 @@ for (let si = 0; si < NPLAY; si++) {
 }
 const playMs = Date.now() - t1;
 
-console.log(`생성 검증: 시드 ${seeds.length}개 x 18홀 = ${stats.holes}홀, ${genMs}ms`);
+console.log(`생성 검증: 시드 ${seeds.length}개 x 월드 ${WORLDS.length}개 x 18홀 = ${stats.holes}홀, ${genMs}ms`);
 console.log(`  재시도 평균 ${(stats.attempts / stats.holes).toFixed(2)}, 폴백 ${stats.fallback}, 행 수 ${stats.rowsMin}-${stats.rowsMax}, 평균 파 ${(stats.parSum / stats.holes).toFixed(2)}`, stats.parHist);
-console.log('  홀별 평균 요소량:', stats.elemByHole.map((v) => (v / seeds.length).toFixed(1)).join(' '));
+console.log('  홀별 평균 요소량:', stats.elemByHole.map((v) => (v / seeds.length / WORLDS.length).toFixed(1)).join(' '));
+for (const [w, o] of Object.entries(stats.worldTiles)) console.log(`  ${w}: 홀당 모래 ${(o.sand / seeds.length / 18).toFixed(1)}, 얼음 ${(o.ice / seeds.length / 18).toFixed(1)}, 물 ${(o.water / seeds.length / 18).toFixed(1)}, 워프 ${(o.tele / seeds.length / 18).toFixed(2)}, 범퍼 ${(o.bumper / seeds.length / 18).toFixed(2)}`);
+// 월드별 요소 구성이 실제로 달라야 함
+{
+  const wt = stats.worldTiles;
+  if (!(wt.desert.sand > wt.meadow.sand * 1.5)) errors.push('desert should have more sand');
+  if (!(wt.snow.ice > wt.meadow.ice * 1.5)) errors.push('snow should have more ice');
+  if (!(wt.space.tele > wt.meadow.tele * 1.5)) errors.push('space should have more teleporters');
+}
 if (NPLAY) {
   console.log(`자동 플레이: ${play.cleared}/${play.holes}홀 클리어, 평균 타수 ${(play.strokes / play.cleared).toFixed(2)}, 파 대비 평균 ${(play.over / play.cleared).toFixed(2)}, ${playMs}ms`);
   if (play.worst.length) console.log('  어려웠던 홀:', play.worst.slice(0, 12).join(' | '));
