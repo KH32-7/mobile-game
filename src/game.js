@@ -507,7 +507,8 @@ export class Game {
       case 'station': {
         const s = this.stations[u.menu];
         s.built = true;
-        s.inp = 0;
+        // 새 조리대는 재료 몇 개를 채운 상태로 시작 (바로 굴러가는 손맛)
+        s.inp = 4;
         s.out = 0;
         this.root.add(s.mesh, s.crateMesh);
         pops.push(s.mesh, s.crateMesh);
@@ -872,6 +873,7 @@ export class Game {
 
   pushStack(a, it) {
     a.stack.push(it);
+    a.bump = 1;
     if (a.isChef) {
       audio.play('pick', a.stack.length);
       this.hooks.haptic(8);
@@ -1353,7 +1355,7 @@ export class Game {
       this.hooks.comboBreak && this.hooks.comboBreak();
     } else {
       const avg = c.waits.reduce((a, b) => a + b, 0) / Math.max(1, c.waits.length);
-      score = Math.max(0.3, Math.min(1, 1.1 - Math.max(0, avg - 8) / 35 - dried * 0.08));
+      score = Math.max(0.35, Math.min(1, 1.1 - Math.max(0, avg - 12) / 50 - dried * 0.08));
       if (c.vip) {
         c.bill *= 3;
         popText(seat.x, 2.6, seat.z, 'VIP 보너스 x3!', 'pop-vip', 1.6);
@@ -1726,6 +1728,12 @@ export class Game {
     m.position.set(a.x, 0, a.z);
     m.rotation.y = a.ry;
     animChar(m, a.walkT, a.moving, a.stack.length > 0 || a.incoming > 0, a.isChef ? this.chefSpeed / 3.4 : 0.8);
+    // 받거나 내려놓을 때 살짝 눌렸다 튀는 스쿼시
+    if (a.bump > 0) {
+      a.bump = Math.max(0, a.bump - dt * 6);
+      const k = Math.sin(a.bump * Math.PI) * 0.09;
+      m.scale.set(1 + k, 1 - k, 1 + k);
+    } else m.scale.set(1, 1, 1);
   }
 
   drawStack(a) {

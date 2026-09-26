@@ -183,6 +183,27 @@ body {
   font-weight: 900;
   text-shadow: 0 1px 2px #000;
 }
+.next-goal {
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+.next-goal b {
+  color: #bfffb0;
+}
+.next-goal .ic {
+  width: 13px;
+  height: 13px;
+}
+.next-goal.ready {
+  color: #ffe14d;
+  animation: pulse 1s infinite;
+}
 .rating {
   display: flex;
   align-items: center;
@@ -309,7 +330,7 @@ body {
 }
 .demand {
   position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 84px);
+  top: calc(env(safe-area-inset-top, 0px) + 96px);
   left: 62px;
   right: 56px;
   display: flex;
@@ -593,7 +614,7 @@ body {
 .rushbar {
   position: absolute;
   left: 50%;
-  top: calc(env(safe-area-inset-top, 0px) + 72px);
+  top: calc(env(safe-area-inset-top, 0px) + 88px);
   transform: translateX(-50%);
   width: 120px;
   height: 7px;

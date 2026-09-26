@@ -32,6 +32,7 @@ export class UI {
         <div class="hud-center">
           <div class="stage-name" id="h-stage"></div>
           <div class="prog"><div class="prog-fill" id="h-prog"></div><span id="h-prog-t"></span></div>
+          <div class="next-goal" id="h-next"></div>
           <div class="rating"><span class="ic">${SVG.star}</span><b id="h-stars">3.0</b><div class="heart-bar"><span class="ic sm">${SVG.heart}</span><div class="hb"><div id="h-heart"></div></div></div></div>
         </div>
         <div class="hud-right">
@@ -112,6 +113,17 @@ export class UI {
       $('#h-stage').textContent = `${p.stage + 1}호점 · ${st.name}`;
       $('#h-prog').style.width = `${(done / total) * 100}%`;
       $('#h-prog-t').textContent = `${done}/${total}`;
+    }
+    const pad = g.pads[0];
+    const nk = pad ? pad.u.id + (g.run.money >= pad.u.cost - pad.paid ? 1 : 0) : '';
+    if (this._nk !== nk) {
+      this._nk = nk;
+      const el = $('#h-next');
+      if (pad) {
+        const lb = g.unlockLabel(pad.u).label;
+        el.innerHTML = `다음 <b>${lb}</b> <span class="ic">${SVG.coin}</span>${fmt(pad.u.cost)}`;
+        el.classList.toggle('ready', g.run.money >= pad.u.cost - pad.paid);
+      } else el.textContent = '모든 시설 완성!';
     }
     const stars = g.stars().toFixed(1);
     if (this._st !== stars) {

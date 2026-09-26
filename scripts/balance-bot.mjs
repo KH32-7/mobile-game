@@ -76,7 +76,7 @@ try {
         const want = UP.find((id) => {
           const u = window.__UPG.find((x) => x.id === id);
           const lvl = G.run.upg[id] || 0;
-          return lvl < u.max && (!u.needStaff || G.staff.length) && G.run.money >= app.upgCost(u) * 1.4 && (!pad || G.run.money - app.upgCost(u) > (pad.u.cost - pad.paid) * 0.3);
+          return lvl < u.max && (!u.needStaff || G.staff.length) && G.run.money >= app.upgCost(u) * 1.4 && (!pad || G.run.money - app.upgCost(u) > (pad.u.cost - pad.paid) * 0.6);
         });
         if (want) return go(L.x, L.z, 'upgrade:' + want, () => false);
       }
