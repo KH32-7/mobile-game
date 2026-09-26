@@ -1,0 +1,36 @@
+name: Deploy game to GitHub Pages
+
+on:
+  push:
+    branches: ['game/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Resolve target folder
+        id: target
+        run: echo "dir=${GITHUB_REF_NAME#game/}" >> "$GITHUB_OUTPUT"
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: dist
+          destination_dir: ${{ steps.target.outputs.dir }}
+          keep_files: false
+          commit_message: "${{ steps.target.outputs.dir }}: ${{ github.sha }}"
