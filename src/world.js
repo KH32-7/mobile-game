@@ -399,13 +399,14 @@ export function buildEnvironment(stage, lay, theme) {
   const W = x1 - x0;
   const D = z1 - z0;
   gfx.scene.background = new THREE.Color(theme.bg);
-  gfx.scene.fog = new THREE.Fog(theme.fog, 38, 70);
+  gfx.scene.fog = null;
 
   // 바깥 지면
   const gTex = floorTex(theme.groundTex, theme.ground);
   gTex.repeat.set(12, 12);
   const GD = z1 - z0 + 40;
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, GD), new THREE.MeshLambertMaterial({ map: gTex }));
+  ground.matrixAutoUpdate = true;
   gTex.repeat.set(12, GD / 7.5);
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, -0.02, z0 - 0.9 + GD / 2);
@@ -416,9 +417,13 @@ export function buildEnvironment(stage, lay, theme) {
   const fTex = floorTex(theme.floor, theme.floorColor);
   fTex.repeat.set(W / 4, D / 4);
   const floorMat = new THREE.MeshLambertMaterial({ map: fTex, color: theme.floorTint || '#ffffff' });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
+  // 주방 타일 구역과 겹치지 않게 식당 바닥은 주방 앞부터 (겹쳐 그리기 줄이기)
+  const kEdge = lay.kitchenZ + 1.9;
+  const DF = z1 - kEdge;
+  fTex.repeat.set(W / 4, DF / 4);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, DF), floorMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
+  floor.position.set((x0 + x1) / 2, 0, (kEdge + z1) / 2);
   floor.receiveShadow = true;
   root.add(floor);
 
@@ -479,7 +484,7 @@ export function buildEnvironment(stage, lay, theme) {
   pier.add(GEO.box(W, 0.07, 0.07), '#6a4a2a', (x0 + x1) / 2, 0.68, z0 - 0.9);
   root.add(pier.mesh());
   const waterCol = { alley: '#1d3a5a', mall: '#3fa9d8', beach: '#2ec4d8', ryokan: '#2a5a4a', space: '#000000' }[stage.theme];
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(90, 30), new THREE.MeshLambertMaterial({ color: waterCol, transparent: true, opacity: 0.92 }));
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(90, 30), new THREE.MeshBasicMaterial({ color: waterCol }));
   water.rotation.x = -Math.PI / 2;
   water.position.set(0, -0.25, z0 - 16);
   root.add(water);

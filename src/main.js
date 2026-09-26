@@ -443,7 +443,7 @@ function loop(now) {
       if (app.bot) app.bot(dtRaw / sub);
       g.update(dtRaw / sub);
     }
-    autoQuality(dtRaw);
+    autoQuality();
     perf.upd = (perf.upd || 0) * 0.9 + (performance.now() - t1) * 0.1;
     app.p.stats.playSec += dtRaw;
     app.saveT += dtRaw;
@@ -487,24 +487,39 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
-// 저사양 기기 자동 감지: 초반 프레임이 느리면 그림자 끄기
-const aq = { t: 0, n: 0, sum: 0, done: false };
-function autoQuality(dt) {
-  if (aq.done) return;
-  aq.t += dt;
-  if (aq.t < 1.5) return;
+// 저사양 기기 자동 감지: 실제 경과 시간 기준으로 프레임이 느리면 단계적으로 품질을 낮춤
+// 1단계: 그림자 끄기(원형 그림자로 대체), 2단계: 해상도 배율 1.0
+const aq = { start: 0, n: 0, sum: 0, last: 0, step: 0 };
+function autoQuality() {
+  const now = performance.now();
+  if (!aq.start) {
+    aq.start = now + 1500;
+    aq.last = now;
+    return;
+  }
+  const dt = now - aq.last;
+  aq.last = now;
+  if (now < aq.start || aq.step >= 2) return;
   aq.n++;
   aq.sum += dt;
-  if (aq.t > 5) {
-    aq.done = true;
-    const avg = aq.sum / aq.n;
-    if (avg > 1 / 26 && app.p.settings.shadows && !app.p.settings.qLocked) {
-      app.setSetting('shadows', false);
-      gfx.renderer.setPixelRatio(1);
-      resize();
-      app.ui.toast('기기 성능에 맞춰 그림자를 간단하게 바꿨어요 (설정에서 변경 가능)');
-    }
+  if (now - aq.start < 3000) return;
+  const avg = aq.sum / aq.n;
+  aq.start = now;
+  aq.n = 0;
+  aq.sum = 0;
+  if (avg < 40) {
+    aq.step = 2;
+    return;
   }
+  if (aq.step === 0 && app.p.settings.shadows && !app.p.settings.qLocked) {
+    app.setSetting('shadows', false);
+    app.ui.toast('기기 성능에 맞춰 그림자를 간단하게 바꿨어요 (설정에서 변경 가능)');
+    aq.step = 1;
+  } else if (gfx.renderer.getPixelRatio() > 1) {
+    gfx.renderer.setPixelRatio(1);
+    resize();
+    aq.step = 2;
+  } else aq.step = 2;
 }
 
 // ---------------- 디버그 ----------------
