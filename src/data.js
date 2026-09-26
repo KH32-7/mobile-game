@@ -15,8 +15,11 @@ const defaults = () => ({
   bestScore: 0,
   upgrades: { start: 0, magnet: 0, shield: 0, luck: 0 },
   muted: false,
+  muteMusic: false,
+  muteSfx: false,
   tutorialDone: false,
-  skins: { owned: ['basic'], sel: 'basic' },
+  skins: { owned: ['basic'], sel: 'basic', lv: {}, frags: {} },
+  seen: [],
   themes: { unlocked: [0], sel: 0, seen: 1 },
   mset: { level: 1, done: 0, inSet: 0, list: [] },
   daily: null,
@@ -42,10 +45,19 @@ export function migrate(p) {
   d.bestScore = num(p.bestScore, ver < 2 ? d.bestDist : 0);
   for (const k in d.upgrades) d.upgrades[k] = Math.max(0, Math.min(CFG.upgrades[k].max, Math.floor(num(obj(p.upgrades)[k]))));
   d.muted = !!p.muted;
+  d.muteMusic = typeof p.muteMusic === 'boolean' ? p.muteMusic : d.muted;
+  d.muteSfx = typeof p.muteSfx === 'boolean' ? p.muteSfx : d.muted;
+  if (Array.isArray(p.seen)) d.seen = p.seen.filter((x) => typeof x === 'string');
   d.tutorialDone = !!p.tutorialDone;
   const sk = obj(p.skins);
   if (Array.isArray(sk.owned)) d.skins.owned = [...new Set(['basic', ...sk.owned.filter((id) => SKINS.some((s) => s.id === id))])];
   if (d.skins.owned.includes(sk.sel)) d.skins.sel = sk.sel;
+  for (const s2 of SKINS) {
+    const lv = Math.floor(num(obj(sk.lv)[s2.id], 1));
+    if (d.skins.owned.includes(s2.id)) d.skins.lv[s2.id] = Math.max(1, Math.min(SKIN_MAX_LV, lv));
+    const fr = Math.floor(num(obj(sk.frags)[s2.id], 0));
+    if (fr > 0) d.skins.frags[s2.id] = fr;
+  }
   const th = obj(p.themes);
   if (Array.isArray(th.unlocked)) d.themes.unlocked = [...new Set([0, ...th.unlocked.filter((i) => Number.isInteger(i) && i >= 0 && i < THEMES.length)])];
   if (d.themes.unlocked.includes(th.sel)) d.themes.sel = th.sel;
@@ -106,8 +118,13 @@ export function buyUpgrade(id) {
 }
 
 export const skin = () => SKINS.find((s) => s.id === save.skins.sel) || SKINS[0];
-const perk = (k) => skin().perk[k] || 0;
-export const startCount = () => 5 + save.upgrades.start * 3 + perk('start');
+export const SKIN_MAX_LV = 5;
+export const SKIN_LV_COST = [0, 5, 10, 20, 40];
+export const SKIN_UNLOCK_FRAGS = 10;
+export const skinLv = (id) => save.skins.lv[id] || 1;
+export const perkScale = (id) => 1 + 0.25 * (skinLv(id) - 1);
+const perk = (k) => { const s = skin(); const v = s.perk[k] || 0; return k === 'start' ? Math.round(v * perkScale(s.id)) : v * perkScale(s.id); };
+export const startCount = () => 12 + save.upgrades.start * 3 + perk('start');
 export const magnetTime = () => CFG.magnetBase + save.upgrades.magnet * CFG.magnetPerLvl + perk('magnet');
 export const bootsTime = () => CFG.bootsTime + perk('boots');
 export const recruitTime = () => CFG.recruitTime + perk('recruit');
@@ -121,9 +138,38 @@ export function buySkin(id) {
   if (!s || save.skins.owned.includes(id) || save.gems < s.cost) return false;
   save.gems -= s.cost;
   save.skins.owned.push(id);
+  save.skins.lv[id] = 1;
   save.skins.sel = id;
   persist();
   return true;
+}
+// 조각으로 해금
+export function unlockSkinFrags(id) {
+  const f = save.skins.frags[id] || 0;
+  if (save.skins.owned.includes(id) || f < SKIN_UNLOCK_FRAGS) return false;
+  save.skins.frags[id] = f - SKIN_UNLOCK_FRAGS;
+  save.skins.owned.push(id);
+  save.skins.lv[id] = 1;
+  save.skins.sel = id;
+  persist();
+  return true;
+}
+export function skinUpCost(id) { const lv = skinLv(id); return lv >= SKIN_MAX_LV ? null : SKIN_LV_COST[lv]; }
+export function levelUpSkin(id) {
+  const c = skinUpCost(id);
+  if (c == null || !save.skins.owned.includes(id) || (save.skins.frags[id] || 0) < c) return false;
+  save.skins.frags[id] -= c;
+  save.skins.lv[id] = skinLv(id) + 1;
+  persist();
+  return true;
+}
+// 무작위 스킨 조각 지급 (최대 레벨 제외)
+export function addFrags(n, rnd = Math.random) {
+  const pool = SKINS.filter((s) => s.id !== 'basic' && !(save.skins.owned.includes(s.id) && skinLv(s.id) >= SKIN_MAX_LV));
+  if (!pool.length) return null;
+  const s = pool[Math.floor(rnd() * pool.length)];
+  save.skins.frags[s.id] = (save.skins.frags[s.id] || 0) + n;
+  return { id: s.id, name: s.name, n };
 }
 export function selectSkin(id) { if (save.skins.owned.includes(id)) { save.skins.sel = id; persist(); } }
 export function selectTheme(i) { if (save.themes.unlocked.includes(i)) { save.themes.sel = i; persist(); } }
@@ -152,7 +198,7 @@ function seededRnd(seed) {
 }
 
 // ---------- 출석 ----------
-export const STREAK_REWARDS = [{ c: 100 }, { c: 150 }, { g: 1 }, { c: 250 }, { g: 2 }, { c: 400 }, { g: 5 }];
+export const STREAK_REWARDS = [{ c: 80 }, { c: 120 }, { f: 3 }, { c: 200 }, { g: 1 }, { c: 300 }, { g: 2 }];
 export function streakAvailable() { return save.streak.last !== dayKey(); }
 export function claimStreak() {
   if (!streakAvailable()) return null;
@@ -162,6 +208,7 @@ export function claimStreak() {
   const r = STREAK_REWARDS[(save.streak.count - 1) % 7];
   if (r.c) save.coins += r.c;
   if (r.g) addGems(r.g);
+  if (r.f) r.frag = addFrags(r.f);
   persist();
   return r;
 }
@@ -180,7 +227,7 @@ export function reportWeekly(dist) {
   save.weekly.best = Math.max(save.weekly.best, Math.floor(dist));
   if (!save.weekly.claimed && dist >= w.target) {
     save.weekly.claimed = true;
-    addGems(5); save.coins += 300;
+    addGems(2); save.coins += 300;
     persist();
     return true;
   }
@@ -208,7 +255,7 @@ export const missionText = (m) => (MPOOL.find((x) => x.type === m.type) || { tex
 function makeMission(type, tier) {
   const p = MPOOL.find((x) => x.type === type);
   const target = Math.max(1, Math.round(p.base + p.step * tier));
-  return { type, target, progress: 0, done: false, reward: 80 + tier * 25 };
+  return { type, target, progress: 0, done: false, reward: Math.round(60 + tier * 15) };
 }
 
 // 미션 세트 (배수 미션) 3개 유지
@@ -230,7 +277,7 @@ export function ensureDaily() {
   const idx = MPOOL.map((_, i) => i);
   for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
   const list = idx.slice(0, 3).map((i) => makeMission(MPOOL[i].type, 1 + Math.floor(rnd() * 3)));
-  list.forEach((m) => { m.reward += 50; });
+  list.forEach((m) => { m.reward = Math.round(m.reward + 30); });
   save.daily = { date: key, list };
   persist();
   return list;
@@ -244,7 +291,7 @@ export function track(type, value) {
   const upd = (m) => {
     if (m.type !== type || m.done) return false;
     if (p.scope === 'run') m.progress = Math.max(m.progress, value); else m.progress += value;
-    if (m.progress >= m.target) { m.progress = m.target; m.done = true; save.coins += m.reward; return true; }
+    if (m.progress >= m.target) { m.progress = m.target; m.done = true; m.reward = Math.round(m.reward); save.coins += m.reward; return true; }
     return false;
   };
   for (const m of ensureDaily()) if (upd(m)) out.push({ kind: 'daily', text: `일일 미션 완료! +${m.reward} 코인` });
@@ -252,16 +299,17 @@ export function track(type, value) {
   for (let i = 0; i < ms.list.length; i++) {
     const m = ms.list[i];
     if (upd(m)) {
-      out.push({ kind: 'mission', text: `미션 완료! +${m.reward} 코인` });
+      const fr = addFrags(1);
+      out.push({ kind: 'mission', text: `미션 완료! +${m.reward} 코인${fr ? `, ${fr.name} 조각 +1` : ''}` });
       ms.done++;
       ms.inSet++;
       ms.list.splice(i, 1); i--;
       if (ms.inSet >= 3) {
         ms.inSet = 0;
         if (ms.level < 30) ms.level++;
-        const g = 1 + Math.floor(ms.level / 4);
-        addGems(g);
-        out.push({ kind: 'level', text: `미션 배수 x${ms.level}! 보석 +${g}` });
+        const g = ms.level % 2 === 0 ? 1 : 0;
+        if (g) addGems(g);
+        out.push({ kind: 'level', text: `미션 배수 x${ms.level}!${g ? ' 보석 +1' : ''}` });
       }
     }
   }
@@ -298,20 +346,48 @@ export function checkAchievements() {
   const out = [];
   for (const a of ACHS) {
     if (save.ach[a.id]) continue;
-    if (a.v(save) >= a.goal) { save.ach[a.id] = true; addGems(a.gem); out.push({ kind: 'ach', text: `업적 달성: ${a.name}! 보석 +${a.gem}` }); }
+    if (a.v(save) >= a.goal) { save.ach[a.id] = true; addGems(achGem(a)); out.push({ kind: 'ach', text: `업적 달성: ${a.name}! 보석 +${achGem(a)}` }); }
   }
   if (out.length) persist();
   return out;
 }
+export const achGem = (a) => Math.max(1, Math.round(a.gem / 3));
 export const achCount = () => ACHS.filter((a) => save.ach[a.id]).length;
 
 // 타이틀 알림 뱃지
 export function badges() {
-  return {
-    shop: Object.keys(CFG.upgrades).some((id) => { const c = upgradeCost(id); return c != null && save.coins >= c; }),
-    skins: SKINS.some((s) => !save.skins.owned.includes(s.id) && save.gems >= s.cost),
-    ach: achCount() > save.achSeen,
-    themes: save.themes.unlocked.length > save.themes.seen,
-    missions: streakAvailable(),
+  const all = {
+    missions: streakAvailable() && features().missions,
+    skins: features().skins && SKINS.some((s) => (!save.skins.owned.includes(s.id) && (save.gems >= s.cost || (save.skins.frags[s.id] || 0) >= SKIN_UNLOCK_FRAGS)) || (save.skins.owned.includes(s.id) && skinUpCost(s.id) != null && (save.skins.frags[s.id] || 0) >= skinUpCost(s.id))),
+    shop: features().shop && Object.keys(CFG.upgrades).some((id) => { const c = upgradeCost(id); return c != null && save.coins >= c; }),
+    ach: features().ach && achCount() > save.achSeen,
+    themes: features().themes && save.themes.unlocked.length > save.themes.seen,
   };
+  // 실제 행동 가능한 항목 최대 2개만
+  const out = {};
+  let n = 0;
+  for (const k of ['missions', 'skins', 'shop', 'ach', 'themes']) if (all[k] && n < 2) { out[k] = true; n++; }
+  return out;
+}
+
+// 단계적 기능 노출
+export function features() {
+  const r = save.stats.runs;
+  return {
+    records: r >= 1,
+    missions: r >= 1,
+    shop: r >= 1,
+    skins: r >= 2 || save.gems > 0,
+    ach: r >= 2,
+    weekly: r >= 3,
+    themes: save.themes.unlocked.length >= 2,
+  };
+}
+// 처음 노출되는 기능 목록 (한 번만)
+export function newFeatures() {
+  const f = features();
+  const out = [];
+  for (const k in f) if (f[k] && !save.seen.includes(k)) { save.seen.push(k); out.push(k); }
+  if (out.length) persist();
+  return out;
 }

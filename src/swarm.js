@@ -14,7 +14,8 @@ export class Swarm {
     this.histIdx = -1;
     this.sliding = 0;
     this.form = { R: 0, hw: 0, rz: 0 };
-    this.bounds = { minX: 0, maxX: 0, minRel: 0 };
+    this.bounds = { minX: 0, maxX: 0, minRel: 0, cx: 0 };
+    this.ground = null;
     this.skin = SKINS[0];
     this.hat = null;
   }
@@ -32,7 +33,7 @@ export class Swarm {
   }
 
   newMember(x, rel, born = 0) {
-    return { x, rel, y: 0, vx: 0, vrel: 0, vy: 0, g: CFG.gravity, jumpIn: -1, jumpV: 0, slideIn: -1, slideT: 0, ph: Math.random() * 6.28, born, alt: Math.random() < 0.5 };
+    return { x, rel, y: 0, vx: 0, vrel: 0, vy: 0, g: CFG.gravity, jumpIn: -1, jumpV: 0, slideIn: -1, slideT: 0, ph: Math.random() * 6.28, born, alt: Math.random() < 0.5, stag: 0 };
   }
 
   get leader() { return this.members[0]; }
@@ -54,23 +55,28 @@ export class Swarm {
   }
 
   // 인원 수를 목표치로 맞춤. 추가된 멤버는 (sx, srel) 근처에서 튀어나옴. 제거된 멤버 목록 반환
-  setCount(n, srel = 0, sx = null) {
+  setCount(n, srel = 0, sx = null, spread = 1.6) {
     n = Math.max(0, Math.min(CFG.maxCount, Math.round(n)));
     this.count = n;
-    return this.syncRender(srel, sx);
+    return this.syncRender(srel, sx, spread);
   }
 
-  syncRender(srel = 0, sx = null) {
+  syncRender(srel = 0, sx = null, spread = 1.6) {
     const want = Math.min(this.count, CFG.maxRender);
     const removed = [];
     const L = this.leader;
+    let k = 0;
     while (this.members.length < want) {
       const x = sx ?? (L ? L.x : 0);
-      const m = this.newMember(x + (Math.random() - 0.5) * 1.6, srel - Math.random() * 1.5, 0);
-      m.vy = 3 + Math.random() * 3;
-      m.y = 0.01;
-      m.vx = (Math.random() - 0.5) * 6;
+      // 게이트 뒤에서 톡톡 튀어나와 합류하는 궤적
+      const m = this.newMember(x + (Math.random() - 0.5) * spread, srel - Math.random() * 0.6, 0);
+      m.born = -Math.min(0.5, k * 0.012);
+      m.vy = 4.5 + Math.random() * 2.5;
+      m.y = 0.3 + Math.random() * 0.8;
+      m.vx = (Math.random() - 0.5) * 3;
+      m.vrel = 2 + Math.random() * 2;
       this.members.push(m);
+      k++;
     }
     while (this.members.length > want) {
       // 뒤쪽 멤버부터 제거
@@ -141,7 +147,7 @@ export class Swarm {
   height(m) { return m.slideT > 0 ? CFG.slideH : CFG.standH; }
 
   // mode: 'run' 일반, 'hold' 대형 유지만
-  update(dt, dist, speed, laneX) {
+  update(dt, dist, speed, laneX, attract = null) {
     // 리더 x 기록
     const L = this.leader;
     if (L) {
@@ -157,7 +163,7 @@ export class Swarm {
     const { hw, rz } = this.form;
     const center = rz + 0.5;
     const K = CFG.memberK, C = CFG.memberDamp;
-    let minX = 1e9, maxX = -1e9, minRel = 0;
+    let minX = 1e9, maxX = -1e9, minRel = 0, sumX = 0;
     for (let i = 0; i < n; i++) {
       const m = this.members[i];
       let tx, trel;
@@ -169,6 +175,7 @@ export class Swarm {
         const oz = Math.sin(th) * rr * rz;
         trel = -center + oz;
         tx = this.histX(dist + trel, dist) + ox;
+        if (attract) tx += (attract.x + ox * 0.35 - tx) * attract.k;
       }
       if (tx !== null) {
         m.vx += (K * (tx - m.x) - C * m.vx) * dt;
@@ -194,13 +201,16 @@ export class Swarm {
         m.y += m.vy * dt;
         if (m.y <= 0) { m.y = 0; m.vy = 0; m.g = CFG.gravity; }
       }
-      if (m.born < 1) m.born = Math.min(1, m.born + dt * 4);
+      if (m.born < 1) m.born = Math.min(1, m.born + dt * 3);
+      if (m.stag > 0) m.stag -= dt;
       m.ph += dt * (6 + speed * 0.45);
       if (m.x < minX) minX = m.x;
       if (m.x > maxX) maxX = m.x;
       if (m.rel < minRel) minRel = m.rel;
+      sumX += m.x;
     }
     this.bounds.minX = minX; this.bounds.maxX = maxX; this.bounds.minRel = minRel;
+    this.bounds.cx = n ? sumX / n : 0;
 
     // 날아가는 멤버
     for (let i = this.flyers.length - 1; i >= 0; i--) {
@@ -218,20 +228,24 @@ export class Swarm {
     for (let i = 0; i < n; i++) {
       const m = this.members[i];
       const leader = i === 0;
-      const sc = (leader ? 1.25 : 1) * (m.born < 1 ? easeBack(m.born) : 1);
-      let y = m.y, sx = sc, sy = sc, sz = sc, pitch = 0;
-      if (m.slideT > 0) { sy *= 0.42; sx *= 1.25; sz *= 1.3; pitch = 0; }
+      const sc = (leader ? 1.25 : 1) * (m.born < 1 ? easeBack(Math.max(0, m.born)) : 1);
+      if (sc <= 0.01) continue;
+      const gy = this.ground ? this.ground(dist + m.rel) : 0;
+      let y = m.y + gy, sx = sc, sy = sc, sz = sc, pitch = 0;
+      let limb = m.ph, amp = 0.9;
+      if (m.slideT > 0) { sy *= 0.42; sx *= 1.25; sz *= 1.3; pitch = 0; amp = 0.15; }
       else if (m.y <= 0.001) {
         const b = Math.abs(Math.sin(m.ph));
         y += b * 0.14;
         const sq = 1 + (b - 0.5) * 0.12;
         sy *= sq; sx /= Math.sqrt(sq); sz /= Math.sqrt(sq);
       } else {
-        sy *= 1.1; sx *= 0.93; pitch = -0.2;
+        sy *= 1.1; sx *= 0.93; pitch = -0.2; limb = 1.2; amp = 1;
       }
-      const roll = Math.max(-0.5, Math.min(0.5, -m.vx * 0.05));
+      let roll = Math.max(-0.5, Math.min(0.5, -m.vx * 0.05));
+      if (m.stag > 0) { roll += Math.sin(m.stag * 30) * 0.45 * m.stag; pitch += 0.3 * m.stag; }
       const col = leader ? this.skin.leader : (boots ? (m.alt ? 0x6aff8a : 0x4ae07a) : this.skin.crew[m.alt ? 1 : 0]);
-      chars.push(m.x, y, -(dist + m.rel), 0, sx, sy, sz, col, roll, pitch);
+      chars.push(m.x, y, -(dist + m.rel), 0, sx, sy, sz, col, roll, pitch, true, limb, amp);
       if (leader && this.hat) this.hat.place(m.x, y, -(dist + m.rel), sx, sy, sz, roll, pitch, true);
     }
     if (!n && this.hat) this.hat.place(0, 0, 0, 1, 1, 1, 0, 0, false);

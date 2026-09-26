@@ -45,14 +45,33 @@ export const CFG = {
   battleRateBase: 26,
   battleRateScale: 0.9,
 
-  // 요새
-  fortressHpBase: 45,
-  fortressHpPerLevel: 55,
+  // 요새: 체력 = 기본 + 진입 인원 비율, 상한은 진입 인원 비율
+  fortHpBase: 8,
+  fortHpPerSec: 10,
+  fortHpFrac: 0.3,
+  fortHpFracPerSec: 0.06,
+  fortHpCap: 0.85,
+  fortHpCapPerSec: 0.06,
+  stairMults: [1.2, 1.5, 2, 3, 4, 5],
+  stairStepLen: 2.6,
+  stairStepH: 0.42,
+  stairThr0: 6,
+  stairThrPerSec: 5,
+  stairThrGrow: 1.55,
+  stairCoinBase: 25,
+  stairCoinPerSec: 15,
+  crowdBonusPerSec: 10,
   fortressRate: 22,
   fortressRateScale: 0.12,
-  fortressKeepExtra: 6,
-  fortressCoinPerMember: 1,
-  fortressCoinBase: 30,
+
+  // 장애물 1개가 지울 수 있는 최대 인원
+  obstacleCapFrac: 0.25,
+  obstacleCapMin: 3,
+  trainCapFrac: 0.5,
+  growCapBase: 120,
+  growCapPerSec: 90,
+  jumpBuffer: 0.18,
+  gateSnapTime: 0.2,
 
   // 파워업 (초)
   magnetBase: 7,
@@ -65,7 +84,7 @@ export const CFG = {
 
   // 업그레이드
   upgrades: {
-    start:  { name: '시작 인원',   max: 10, baseCost: 120, mult: 1.55, desc: (l) => `시작 ${5 + l * 3}명` },
+    start:  { name: '시작 인원',   max: 10, baseCost: 120, mult: 1.55, desc: (l) => `시작 ${12 + l * 3}명` },
     magnet: { name: '자석 지속',   max: 8,  baseCost: 100, mult: 1.6,  desc: (l) => `${(7 + l * 1.5).toFixed(1)}초` },
     shield: { name: '방패 확률',   max: 8,  baseCost: 140, mult: 1.6,  desc: (l) => `시작 방패 ${l * 10}%` },
     luck:   { name: '게이트 행운', max: 8,  baseCost: 150, mult: 1.65, desc: (l) => `좋은 게이트 +${l * 5}%` },
@@ -77,8 +96,8 @@ export const THEMES = [
     hemiSky: 0xffffff, hemiGround: 0x6a8fb0, sun: 0xfff2dd, buildings: [0x4d8cf0, 0xf06a8a, 0xffc94d, 0x7ad18c, 0xb58cf0, 0xf0f0f0], prop: 0x3fa34d, propShape: 'tree' },
   { name: '사막', sky: 0xffcf8a, fog: 0xf7c58a, ground: 0xe8b56a, track: '#a0714a', stripe: '#fff3dc', edge: '#ff7b3a',
     hemiSky: 0xfff0d0, hemiGround: 0xc27a3a, sun: 0xffe0b0, buildings: [0xd9894a, 0xc26a3a, 0xf0b070, 0xe8c090, 0xb85a30], prop: 0x4f9a3a, propShape: 'cactus' },
-  { name: '설원', sky: 0xcfe6ff, fog: 0xe4f0ff, ground: 0xf4f8ff, track: '#7d8fa8', stripe: '#ffffff', edge: '#6ad0ff',
-    hemiSky: 0xffffff, hemiGround: 0x9fb8d8, sun: 0xffffff, buildings: [0xbfd8f0, 0x8fb0d8, 0xffffff, 0x9fd0e8, 0x7f9fcf], prop: 0x2f7a5a, propShape: 'pine' },
+  { name: '설원', sky: 0x7fb4e8, fog: 0xb4cde8, ground: 0xf2f6ff, track: '#56688a', stripe: '#ffffff', edge: '#ff5a6a',
+    hemiSky: 0xffffff, hemiGround: 0x7f98c0, sun: 0xfff4e8, buildings: [0xd8404a, 0x2a4a8a, 0x1f8f9a, 0x6a3a9a, 0xe8872a, 0x3a6ad0], prop: 0x1f5a3f, propShape: 'pine', snow: true },
   { name: '네온', sky: 0x2a1a55, fog: 0x3a2270, ground: 0x2a2250, track: '#2c2448', stripe: '#ff5ce1', edge: '#39f0ff',
     hemiSky: 0xb0a0ff, hemiGround: 0x40206a, sun: 0xffc0ff, buildings: [0xff4fd8, 0x4ff0ff, 0x8f5cff, 0xffe04f, 0x4fff9a], prop: 0xff4fd8, propShape: 'pine' },
   { name: '정글', sky: 0x9fe8b0, fog: 0xa8e0a0, ground: 0x3f9a3a, track: '#6b5a44', stripe: '#f5f0c8', edge: '#ffd23a',
@@ -109,4 +128,4 @@ export const SKINS = [
   { id: 'king', name: '왕 젤리', cost: 25, leader: 0xffd84a, crew: [0x8a5aff, 0xa87aff], hat: 'crown', bonus: '요새 보상 +30%', perk: { fort: 0.3 } },
 ];
 
-export const REVIVE_COST = 2;
+export const REVIVE_COSTS = [1, 2, 4, 8];

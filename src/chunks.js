@@ -21,18 +21,22 @@ const shuffle = (rng, a) => { for (let i = a.length - 1; i > 0; i--) { const j =
 function gateValue(rng, D, good, count = 99) {
   const r = rng();
   if (good) {
-    if (r < 0.52) return { op: '+', v: ri(rng, 6, 14) + Math.round(D * 5) };
-    if (r < 0.9) return { op: 'x', v: 2 };
+    // 인원이 많을수록 곱하기 비중을 줄여 폭주 방지
+    const pAdd = 0.5 + Math.min(0.35, count / 800);
+    if (r < pAdd) return { op: '+', v: ri(rng, 6, 14) + Math.round(D * 5) + Math.round(Math.min(count, 400) * 0.08) };
+    if (r < 0.92 || count > 150) return { op: 'x', v: 2 };
     return { op: 'x', v: 3 };
   }
-  // 빼기 게이트는 현재 인원의 60% 까지만 (한 번에 전멸하지 않게)
-  if (r < 0.62) return { op: '-', v: Math.max(2, Math.min(ri(rng, 5, 12) + Math.round(D * 6), Math.floor(count * 0.6))) };
+  // 빼기 게이트 상한은 통과 직전에 현재 인원 기준으로 다시 조정됨 (game.js)
+  // 0~300m 에는 나누기 게이트 없음
+  if (r < 0.62 || D < 0.3) return { op: '-', v: Math.max(2, Math.min(ri(rng, 5, 12) + Math.round(D * 6), Math.floor(count * 0.6))) };
   return { op: '÷', v: D > 2.5 && rng() < 0.4 ? 3 : 2 };
 }
 
 function gateRow(rng, D, ctx, n) {
   const goods = [true];
-  for (let i = 1; i < n; i++) goods.push(rng() < 0.3 + ctx.luck - Math.min(0.12, D * 0.03));
+  for (let i = 1; i < n; i++) goods.push(ctx.allGood || rng() < 0.3 + ctx.luck - Math.min(0.12, D * 0.03));
+  if (ctx.allGood) ctx.usedGood = true;
   shuffle(rng, goods);
   if (n === 3) return goods.map((g, i) => ({ x: LX(i), w: CFG.laneW - 0.12, ...gateValue(rng, D, g, ctx.count), good: g }));
   return goods.map((g, i) => ({ x: (i === 0 ? -1 : 1) * CFG.trackHalfW / 2, w: CFG.trackHalfW - 0.1, ...gateValue(rng, D, g, ctx.count), good: g }));
@@ -96,12 +100,12 @@ export const CHUNKS = [
     for (let i = 0; i < 3; i++) { coinLine(it, l, 2 + i * 9, 4); l = Math.max(0, Math.min(2, l + (rng() < 0.5 ? -1 : 1))); }
     return { len: 32, items: it };
   } },
-  { id: 'barrierJump', cat: 'obs', min: 0, w: 4, gen(rng) {
+  { id: 'barrierJump', cat: 'obs', min: 0.3, w: 4, gen(rng) {
     const it = [obs('barrier', 0, 16), obs('barrier', 1, 16), obs('barrier', 2, 16)];
     coinArc(it, ri(rng, 0, 2), 16, 5);
     return { len: 34, items: it };
   } },
-  { id: 'slideBar', cat: 'obs', min: 0.25, w: 4, gen(rng) {
+  { id: 'slideBar', cat: 'obs', min: 0.3, w: 4, gen(rng) {
     const it = [obs('bar', 0, 16), obs('bar', 1, 16), obs('bar', 2, 16)];
     coinLine(it, ri(rng, 0, 2), 10, 5, 2.2, 0.35);
     return { len: 32, items: it };
@@ -110,16 +114,25 @@ export const CHUNKS = [
     const open = ri(rng, 0, 2);
     const it = [];
     const len = 10 + Math.min(14, D * 4);
-    for (let l = 0; l < 3; l++) if (l !== open) it.push(obs('train', l, 14 + len / 2, { len }));
+    // 중반부터 일부 기차는 마주 달려옴
+    const vd = D > 0.5 && rng() < 0.35 ? -7 : 0;
+    for (let l = 0; l < 3; l++) if (l !== open) it.push(obs('train', l, 14 + len / 2 + (vd ? 18 : 0), { len, vd: vd && l === (open + 1) % 3 ? vd : 0 }));
     coinLine(it, open, 8, Math.round(len / 2.2) + 3);
     return { len: 26 + len, items: it };
   } },
-  { id: 'coneRow', cat: 'obs', min: 0, w: 3, gen(rng) {
+  { id: 'coneRow', cat: 'obs', min: 0.3, w: 3, gen(rng) {
     const gap = ri(rng, 0, 2);
     const it = [];
     for (let l = 0; l < 3; l++) if (l !== gap) for (const dx of [-0.6, 0, 0.6]) it.push({ t: 'obs', kind: 'cone', x: LX(l) + dx, d: 14 });
     coinLine(it, gap, 8, 5);
     return { len: 28, items: it };
+  } },
+  { id: 'laneHop', cat: 'obs', min: 0, w: 3, gen(rng) {
+    const it = [];
+    const a = ri(rng, 0, 2);
+    it.push(obs('train', a, 16, { len: 10 }));
+    coinLine(it, (a + 1) % 3, 8, 6);
+    return { len: 30, items: it };
   } },
   { id: 'narrowPass', cat: 'obs', min: 0.5, w: 3, gen(rng) {
     const open = ri(rng, 0, 2);
@@ -187,6 +200,15 @@ export function pickChunk(rng, D, slot, force) {
   for (const c of pool) { r -= c.w; if (r <= 0) return c; }
   return pool[pool.length - 1];
 }
+
+// ---------- 튜토리얼 전용 청크 ----------
+export const TUT_CHUNKS = [
+  () => ({ len: 50, items: [obs('train', 1, 36, { len: 14, tut: 'lr' }), ...[0, 2].flatMap((l) => Array.from({ length: 5 }, (_, i) => ({ t: 'coin', x: LX(l), d: 26 + i * 2.2, y: 0.6 })))] }),
+  () => ({ len: 40, items: [obs('barrier', 0, 26), obs('barrier', 1, 26, { tut: 'up' }), obs('barrier', 2, 26)] }),
+  () => ({ len: 40, items: [obs('bar', 0, 26), obs('bar', 1, 26, { tut: 'down' }), obs('bar', 2, 26)] }),
+  () => ({ len: 44, items: [{ t: 'gates', d: 26, tut: 'gate', gates: [{ x: LX(0), w: CFG.laneW - 0.12, op: '+', v: 5, good: true }, { x: LX(1), w: CFG.laneW - 0.12, op: 'x', v: 2, good: true }, { x: LX(2), w: CFG.laneW - 0.12, op: '+', v: 8, good: true }] }] }),
+  () => ({ len: 50, items: [{ t: 'enemy', d: 30, x: 0, count: 8, tut: 'enemy', wide: true }] }),
+];
 
 export function applyGate(count, g) {
   switch (g.op) {
