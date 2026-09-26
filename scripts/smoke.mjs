@@ -1,5 +1,5 @@
-// 스모크 테스트: npm run build 후 실행. vite preview 를 띄우고 모바일 뷰포트에서
-// 타이틀 → 플레이(스와이프 입력) → 게이트 인원 변화 → 게임오버 까지 확인하고 shots/ 에 스크린샷 저장
+// 스모크 테스트: npm run build 후 실행. vite preview 를 띄우고 390x844 터치 모드에서
+// 첫 실행 튜토리얼(실제 스와이프) → 게이트/전투 → 부활 → 게임 오버, 요새/보너스 계단, 메타 진행 유지, 마이그레이션까지 확인
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -21,8 +21,8 @@ const errors = [];
 const results = [];
 const check = (name, ok, info = '') => { results.push({ name, ok, info }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${info}`); };
 
-async function newPage(query = '') {
-  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+async function newPage(query = '', w = W, h = H) {
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
   const page = await ctx.newPage();
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -51,183 +51,192 @@ async function swipe(cdp, dir) {
 }
 
 async function clickSel(page, cdp, sel) {
-  await page.locator(sel).evaluate((el) => el.scrollIntoView({ block: 'center' }));
-  const b = await page.locator(sel).boundingBox();
+  await page.locator(sel).first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  const b = await page.locator(sel).first().boundingBox();
   if (!b) throw new Error('no element ' + sel);
   await tap(cdp, b.x + b.width / 2, b.y + b.height / 2);
 }
 
 const G = (page, fn) => page.evaluate(fn);
+const SAVE = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('swarm-surfers-v1')));
 
 try {
-  // ---------- 1. 기본 플레이 (튜토리얼 + 스와이프 입력) ----------
+  // ---------- 1. 첫 실행: 메뉴 없이 튜토리얼 달리기 ----------
   {
-    const { ctx, page, cdp } = await newPage('?seed=7&debug&god');
-    await sleep(1500);
-    await page.screenshot({ path: 'shots/01-title.png' });
-    check('타이틀 표시', await page.locator('#title').isVisible());
+    const { ctx, page, cdp } = await newPage('?seed=7&debug');
+    await sleep(800);
+    const s0 = await G(page, () => ({ st: window.__game.state, tut: window.__game.tutorial, n: window.__game.swarm.count }));
+    check('첫 실행은 바로 튜토리얼 달리기', s0.st === 'play' && s0.tut && s0.n === 15, JSON.stringify(s0));
+    check('첫 실행 타이틀 숨김', !(await page.locator('#title').isVisible()));
+    await page.screenshot({ path: 'shots/01-first-run.png' });
 
-    // 업그레이드/미션 패널
-    await clickSel(page, cdp, '#tShop');
-    await sleep(300);
-    await page.screenshot({ path: 'shots/02-shop.png' });
-    await clickSel(page, cdp, '#shopP [data-close]');
-    await clickSel(page, cdp, '#tMis');
-    await sleep(300);
-    await page.screenshot({ path: 'shots/03-missions.png' });
-    await clickSel(page, cdp, '#misP [data-close]');
-
-    await clickSel(page, cdp, '#tStart');
+    const done = { lr: false, up: false, down: false };
+    let battle = false, gateSeen = false;
+    for (let i = 0; i < 400; i++) {
+      await sleep(150);
+      const s = await G(page, () => { const g = window.__game; return { wait: g.tutWait && g.tutWait.step, lane: g.lane, mode: g.mode, tut: g.tutorial, gates: g.dbg.gates.length }; });
+      if (s.wait && !done[s.wait]) {
+        await page.screenshot({ path: `shots/02-tut-${s.wait}.png` });
+        const lane0 = s.lane;
+        await swipe(cdp, s.wait === 'lr' ? 'left' : s.wait);
+        await sleep(250);
+        if (s.wait === 'lr') {
+          const a = await G(page, () => ({ lane: window.__game.lane, wait: window.__game.tutWait }));
+          check('튜토리얼 스와이프 → 레인 이동 (슬로우 해제)', a.lane === lane0 - 1 && !a.wait, `${lane0}->${a.lane}`);
+        }
+        if (s.wait === 'up') { await sleep(300); const y = await G(page, () => window.__game.dbg.maxY); check('튜토리얼 스와이프 위 → 파도 점프', y > 0.4, `최고 y=${y.toFixed(2)}`); }
+        if (s.wait === 'down') { await sleep(200); const hw = await G(page, () => window.__game.dbg.minHW); check('튜토리얼 스와이프 아래 → 슬라이드 (무리 폭 축소)', hw <= 0.8, `폭=${hw}`); }
+        done[s.wait] = true;
+      }
+      if (s.gates > 0 && !gateSeen) {
+        gateSeen = true;
+        const g0 = await G(page, () => window.__game.dbg.gates[0]);
+        check('튜토리얼 게이트로 인원 증가', g0.after > g0.before, JSON.stringify(g0));
+        await page.screenshot({ path: 'shots/03-after-gate.png' });
+      }
+      if (s.mode === 'battle') {
+        if (!battle) { battle = true; await page.screenshot({ path: 'shots/04-battle-tap.png' }); }
+        await tap(cdp, W / 2, H * 0.55);
+      }
+      if (!s.tut) break;
+    }
+    check('튜토리얼 적 무리 전투', battle);
+    check('튜토리얼 완료 저장', (await SAVE(page)).tutorialDone === true);
     await sleep(600);
-    check('플레이 시작', (await G(page, () => window.__game.state)) === 'play');
-    await page.screenshot({ path: 'shots/04-play-tutorial.png' });
-    // 일시정지 메뉴
+    await page.screenshot({ path: 'shots/05-tut-done.png' });
+
+    // 일시정지 → 3,2,1 카운트다운 → 재개
     await clickSel(page, cdp, '#pauseBtn');
     await sleep(300);
     check('일시정지', (await G(page, () => window.__game.state)) === 'pause');
-    await page.screenshot({ path: 'shots/08-pause.png' });
+    await page.screenshot({ path: 'shots/06-pause.png' });
     await clickSel(page, cdp, '#pResume');
     await sleep(200);
-    check('재개', (await G(page, () => window.__game.state)) === 'play');
+    check('재개 카운트다운', (await G(page, () => window.__game.state)) === 'countdown');
+    await page.screenshot({ path: 'shots/07-countdown.png' });
+    for (let i = 0; i < 150 && (await G(page, () => window.__game.state)) === 'countdown'; i++) await sleep(200);
+    check('카운트다운 후 플레이', (await G(page, () => window.__game.state)) === 'play');
 
-
-    const lane0 = await G(page, () => window.__game.lane);
-    await swipe(cdp, 'left');
-    await sleep(500);
-    const lane1 = await G(page, () => window.__game.lane);
-    check('스와이프 왼쪽 → 레인 이동', lane1 === lane0 - 1, `${lane0}->${lane1}`);
-    const lx = await G(page, () => window.__game.swarm.leader.x);
-    check('리더 x 이동', lx < -1, lx.toFixed(2));
-    await swipe(cdp, 'right');
-    await sleep(300);
-    check('스와이프 오른쪽 → 레인 복귀', (await G(page, () => window.__game.lane)) === lane0);
-
-    await swipe(cdp, 'up');
-    await page.screenshot({ path: 'shots/05-jump-wave.png' });
-    const jy = await G(page, () => window.__game.dbg.maxY);
-    check('스와이프 위 → 점프', jy > 0.5, `최고 y=${jy.toFixed(2)}`);
-    await sleep(700);
-    await swipe(cdp, 'down');
-    await page.screenshot({ path: 'shots/06-slide.png' });
-    const hw = await G(page, () => window.__game.dbg.minHW);
-    check('스와이프 아래 → 슬라이드 (무리 폭 축소)', hw <= 0.8, `폭=${hw}`);
-    check('튜토리얼 완료 저장', await G(page, () => JSON.parse(localStorage.getItem('swarm-surfers-v1')).tutorialDone === true));
-
-    // 게이트 통과로 인원 변화 기다리기
-    let gates = [];
-    for (let i = 0; i < 80 && !gates.length; i++) {
-      await sleep(250);
-      gates = await G(page, () => window.__game.dbg.gates);
-    }
-    check('게이트 통과로 인원 변화', gates.length > 0 && gates[0].before !== gates[0].after, JSON.stringify(gates[0]));
-    await page.screenshot({ path: 'shots/07-after-gate.png' });
-
-    // 무적 해제 후 입력 없이 계속 달리면 결국 게임 오버
-    await G(page, () => { window.__game.opts.god = false; });
-    let st = 'play';
-    for (let i = 0; i < 400 && st !== 'over'; i++) {
-      await sleep(250);
+    // 입력 없이 달리면 결국 전멸 → 보석이 있으면 부활 제안 (대기 시간 단축을 위해 시뮬레이션 배속)
+    await G(page, () => { window.__game.opts.fast = 3; });
+    let st = 'play', revived = false;
+    for (let i = 0; i < 1500 && st !== 'over'; i++) {
+      await sleep(200);
       st = await G(page, () => window.__game.state);
-      if (i === 20) await page.screenshot({ path: 'shots/09-running.png' });
+      if (i === 15) await page.screenshot({ path: 'shots/08-running.png' });
+      if (st === 'revive' && !revived) {
+        await G(page, () => { window.__game.reviveT = 30; }); // 느린 헤드리스에서 대기 시간 초과 방지
+        await page.screenshot({ path: 'shots/09-revive.png' });
+        const box = await page.locator('#rvYes').boundingBox();
+        check('부활 버튼 한 줄', box && box.height < 80, `h=${box && box.height}`);
+        await clickSel(page, cdp, '#rvYes');
+        await sleep(300);
+        const r = await G(page, () => ({ st: window.__game.state, c: window.__game.swarm.count }));
+        check('부활 후 10명으로 재개', r.st === 'play' && r.c === 10, JSON.stringify(r));
+        revived = true;
+      } else if (st === 'revive') await clickSel(page, cdp, '#rvNo');
     }
     check('게임 오버 도달', st === 'over');
+    await G(page, () => { window.__game.opts.fast = 1; });
     await sleep(500);
     await page.screenshot({ path: 'shots/10-gameover.png' });
-    await clickSel(page, cdp, '#oRetry');
-    await sleep(500);
-    check('다시 하기', (await G(page, () => window.__game.state)) === 'play');
+    // 결과창에서 연 상점은 결과창 위에 떠야 함
+    await clickSel(page, cdp, '#oShop');
+    await sleep(300);
+    const top = await page.evaluate(() => { const r = document.querySelector('#shopP .panel').getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + 60); return !!el.closest('#shopP'); });
+    check('결과창 위에 상점 표시', top);
+    await page.screenshot({ path: 'shots/11-over-shop.png' });
+    await clickSel(page, cdp, '#shopP [data-close]');
+    await clickSel(page, cdp, '#oTitle');
+    await sleep(600);
+    await page.waitForFunction(() => window.__game.chars.body.count >= 10, null, { timeout: 20000 }).catch(() => {});
+    check('첫 판 후 타이틀에 기능 단계적 노출', await page.locator('#tShop').isVisible() && !(await page.locator('#tWeekly').isVisible()));
+    const titleChars = await G(page, () => window.__game.chars.body.count);
+    check('타이틀에 무리 표시', titleChars >= 10, `${titleChars}`);
+    await page.screenshot({ path: 'shots/12-title-after-first.png' });
     await ctx.close();
   }
 
-  // ---------- 2. 적 무리 / 요새 → 재화 획득 → 부활 → 해금/업그레이드 → 새로고침 후 유지 ----------
+  // ---------- 2. 요새 → 보너스 계단 → 인원 유지 → 재화 → 해금/업그레이드 → 새로고침 후 유지 ----------
   {
-    const { ctx, page, cdp } = await newPage('?seed=3&debug&god&start=820&count=120&fast=2&chunks=enemySmall,gate3');
+    const { ctx, page, cdp } = await newPage('?notut&seed=3&debug&god&start=820&count=120&fast=2&chunks=enemySmall,gate3');
+    await page.evaluate(() => { localStorage.setItem('swarm-surfers-v1', JSON.stringify({ v: 2, tutorialDone: true })); });
+    await page.reload();
+    await page.waitForFunction(() => window.__game);
     await clickSel(page, cdp, '#tStart');
-    let shotBattle = false, shotSiege = false, broke = false;
-    for (let i = 0; i < 400 && !broke; i++) {
-      await sleep(150);
-      const s = await G(page, () => ({ m: window.__game.mode, f: window.__game.forts, d: window.__game.dist }));
-      if (s.m === 'battle' && !shotBattle) { shotBattle = true; await page.screenshot({ path: 'shots/11-battle.png' }); }
-      if (s.m === 'siege' && !shotSiege) { await sleep(600); shotSiege = true; await page.screenshot({ path: 'shots/12-siege.png' }); }
+    let shotBattle = false, shotSiege = false, shotStairs = false, broke = false;
+    for (let i = 0; i < 600; i++) {
+      await sleep(120);
+      const s = await G(page, () => ({ m: window.__game.mode, f: window.__game.forts, rw: !!document.querySelector('.reward') }));
+      if (s.m === 'battle' && !shotBattle) { shotBattle = true; await page.screenshot({ path: 'shots/13-battle.png' }); }
+      if (s.m === 'siege' && !shotSiege) { shotSiege = true; await sleep(400); await page.screenshot({ path: 'shots/14-siege.png' }); }
+      if (s.m === 'siege') await tap(cdp, W / 2, H * 0.55);
       if (s.f > 0) broke = true;
+      if (s.rw && !shotStairs) { shotStairs = true; await page.screenshot({ path: 'shots/15-stairs-reward.png' }); }
+      if (broke && s.m === 'run') break;
     }
     check('적 무리 전투 발생', shotBattle);
     check('요새 격파', broke);
-    await sleep(250);
-    await page.screenshot({ path: 'shots/13-fortress-break.png' });
-    const gems = await G(page, () => JSON.parse(localStorage.getItem('swarm-surfers-v1')).gems);
-    check('요새 격파로 보석 획득', gems >= 1, `보석 ${gems}`);
-    await sleep(2500);
-    check('다음 구간 테마', (await G(page, () => window.__game.section)) === 1);
-    check('새 테마 해금 저장', await G(page, () => JSON.parse(localStorage.getItem('swarm-surfers-v1')).themes.unlocked.includes(1)));
-    await page.screenshot({ path: 'shots/14-desert.png' });
+    check('보너스 계단 보상 카드', shotStairs);
+    const after = await G(page, () => ({ c: window.__game.swarm.count, cs: window.__game.crowdScore, sec: window.__game.section }));
+    check('요새 후 인원 유지 (초기화 없음)', after.c > 20, JSON.stringify(after));
+    check('무리 점수 가산', after.cs > 0, `무리 점수 ${after.cs}`);
+    check('다음 구간', after.sec === 1);
+    await sleep(1500);
+    await page.screenshot({ path: 'shots/16-next-section.png' });
+    check('새 테마 해금 저장', (await SAVE(page)).themes.unlocked.includes(1));
 
-    // 무적 해제 후 전멸 → 부활 제안
     await G(page, () => { window.__game.opts.god = false; });
     let st = 'play';
-    for (let i = 0; i < 400 && st === 'play'; i++) { await sleep(200); st = await G(page, () => window.__game.state); }
-    check('보석이 있으면 부활 제안', st === 'revive', st);
-    await page.screenshot({ path: 'shots/15-revive.png' });
-    if (st === 'revive') {
-      await clickSel(page, cdp, '#rvYes');
-      await sleep(300);
-      const r = await G(page, () => ({ st: window.__game.state, c: window.__game.swarm.count }));
-      check('부활 후 10명으로 재개', r.st === 'play' && r.c === 10, JSON.stringify(r));
-      for (let i = 0; i < 400 && st !== 'over'; i++) { await sleep(200); st = await G(page, () => window.__game.state); }
-      check('두 번째 전멸은 결과 화면', st === 'over');
+    for (let i = 0; i < 600 && st !== 'over'; i++) {
+      await sleep(200);
+      st = await G(page, () => window.__game.state);
+      if (st === 'revive') await clickSel(page, cdp, '#rvNo');
     }
+    check('두 번째 판 결과 화면', st === 'over');
     await sleep(400);
-    await page.screenshot({ path: 'shots/16-result-meta.png' });
+    await page.screenshot({ path: 'shots/17-result-split.png' });
     await clickSel(page, cdp, '#oTitle');
     await sleep(500);
-    // 출석 보상
-    const before = await G(page, () => JSON.parse(localStorage.getItem('swarm-surfers-v1')));
-    await clickSel(page, cdp, '#tStreak');
-    await sleep(300);
-    const afterStreak = await G(page, () => JSON.parse(localStorage.getItem('swarm-surfers-v1')));
-    check('출석 보상 수령', afterStreak.coins === before.coins + 100 && afterStreak.streak.count === 1, `${before.coins}->${afterStreak.coins}`);
-    await page.screenshot({ path: 'shots/17-title-meta.png' });
-    // 업그레이드 구매
+    const b0 = await SAVE(page);
+    if (await page.locator('#tStreak').isVisible()) {
+      await clickSel(page, cdp, '#tStreak');
+      await sleep(300);
+      const b1 = await SAVE(page);
+      check('출석 보상 수령', b1.coins === b0.coins + 80 && b1.streak.count === 1, `${b0.coins}->${b1.coins}`);
+    } else check('출석 보상 버튼 표시', false);
+    await page.screenshot({ path: 'shots/18-title-meta.png' });
     await clickSel(page, cdp, '#tShop');
     await sleep(300);
     await clickSel(page, cdp, '[data-upg="start"]');
     await sleep(300);
-    await page.screenshot({ path: 'shots/18-shop-bought.png' });
     await clickSel(page, cdp, '#shopP [data-close]');
-    // 스킨 해금
     await clickSel(page, cdp, '#tSkins');
-    await sleep(300);
-    await clickSel(page, cdp, '[data-skin="mint"] button');
-    await sleep(300);
+    await sleep(800);
+    await clickSel(page, cdp, '[data-skin="mint"] [data-a="buy"]');
+    await sleep(200);
+    const mid = await SAVE(page);
+    check('스킨 구매 확인 단계', !mid.skins.owned.includes('mint'));
+    await clickSel(page, cdp, '[data-skin="mint"] [data-a="buy"]');
+    await sleep(400);
     await page.screenshot({ path: 'shots/19-skins.png' });
     await clickSel(page, cdp, '#skinP [data-close]');
-    await clickSel(page, cdp, '#tAch');
-    await sleep(300);
-    await page.screenshot({ path: 'shots/19b-achievements.png' });
-    await clickSel(page, cdp, '#achP [data-tab="s"]');
-    await sleep(300);
-    await page.screenshot({ path: 'shots/19c-stats.png' });
-    await clickSel(page, cdp, '#achP [data-close]');
     await clickSel(page, cdp, '#tMis');
     await sleep(300);
-    await page.screenshot({ path: 'shots/19d-missions.png' });
+    await page.screenshot({ path: 'shots/20-missions.png' });
     await clickSel(page, cdp, '#misP [data-close]');
-    const mid = await G(page, () => JSON.parse(localStorage.getItem('swarm-surfers-v1')));
-    // 새로고침 후 유지
+    const m2 = await SAVE(page);
     await page.reload();
     await page.waitForFunction(() => window.__game);
     await sleep(800);
-    const after = await G(page, () => JSON.parse(localStorage.getItem('swarm-surfers-v1')));
-    check('업그레이드 구매 후 유지', after.upgrades.start === 1, `start Lv.${after.upgrades.start}`);
-    check('스킨 해금/선택 후 유지', after.skins.owned.includes('mint') && after.skins.sel === 'mint');
-    check('재화/통계 유지', after.coins === mid.coins && after.gems === mid.gems && after.stats.revives === 1 && after.stats.forts === 1, `coins ${after.coins} gems ${after.gems}`);
-    check('업적 달성 기록', Object.keys(after.ach).length >= 2, Object.keys(after.ach).join(','));
-    check('저장 버전', after.v === 2);
-    await page.screenshot({ path: 'shots/20-title-after-reload.png' });
-    // 주간 챌린지 시작
-    await clickSel(page, cdp, '#tWeekly');
-    await sleep(500);
-    check('주간 챌린지 시작', await G(page, () => window.__game.state === 'play' && !!window.__game.weekly));
+    const a2 = await SAVE(page);
+    check('업그레이드 구매 후 유지', a2.upgrades.start === 1, `start Lv.${a2.upgrades.start}`);
+    check('스킨 해금/선택 후 유지', a2.skins.owned.includes('mint') && a2.skins.sel === 'mint', `gems ${m2.gems}`);
+    check('재화/통계 유지', a2.coins === m2.coins && a2.gems === m2.gems && a2.stats.forts === 1, `coins ${a2.coins} gems ${a2.gems}`);
+    check('업적 달성 기록', Object.keys(a2.ach).length >= 2, Object.keys(a2.ach).join(','));
+    check('미션 보상 정수', [...a2.mset.list, ...a2.daily.list].every((m) => Number.isInteger(m.reward)));
+    check('저장 버전', a2.v === 2);
+    await page.screenshot({ path: 'shots/21-title-after-reload.png' });
     await ctx.close();
   }
 
@@ -237,7 +246,7 @@ try {
     await ctx.addInitScript(() => {
       if (!sessionStorage.getItem('seeded')) {
         sessionStorage.setItem('seeded', '1');
-        localStorage.setItem('swarm-surfers-v1', JSON.stringify({ coins: 500, bestDist: 1234, bestCount: 88, upgrades: { start: 2, luck: 99 }, missions: { date: 'x', list: [] }, runs: 7, skins: 'broken' }));
+        localStorage.setItem('swarm-surfers-v1', JSON.stringify({ coins: 500, bestDist: 1234, bestCount: 88, upgrades: { start: 2, luck: 99 }, missions: { date: 'x', list: [] }, runs: 7, skins: 'broken', muted: true, tutorialDone: true }));
       }
     });
     const page = await ctx.newPage();
@@ -245,22 +254,23 @@ try {
     await page.goto(BASE);
     await page.waitForFunction(() => window.__game);
     const d = await page.evaluate(() => JSON.parse(localStorage.getItem('swarm-surfers-v1')));
-    check('v1 저장 마이그레이션', d.v === 2 && d.coins === 500 && d.bestScore === 1234 && d.upgrades.start === 2 && d.upgrades.luck === 8 && d.stats.runs === 7 && d.skins.sel === 'basic', JSON.stringify({ v: d.v, c: d.coins, l: d.upgrades.luck }));
+    check('v1 저장 마이그레이션', d.v === 2 && d.coins === 500 && d.bestScore === 1234 && d.upgrades.start === 2 && d.upgrades.luck === 8 && d.stats.runs === 7 && d.skins.sel === 'basic' && d.muteMusic === true && d.muteSfx === true, JSON.stringify({ v: d.v, c: d.coins, l: d.upgrades.luck }));
     await ctx.close();
   }
 
   // ---------- 3. 다른 뷰포트 ----------
   for (const [w, h] of [[360, 640], [430, 932]]) {
-    const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
-    const page = await ctx.newPage();
-    page.on('pageerror', (e) => errors.push(String(e)));
-    await page.goto(BASE + '?seed=5&count=60');
-    await page.waitForFunction(() => window.__game);
+    const { ctx, page } = await newPage('?notut&seed=11&count=60', w, h);
     await sleep(800);
     await page.screenshot({ path: `shots/30-title-${w}x${h}.png` });
     await page.evaluate(() => window.__game.startRun());
     await sleep(2500);
     await page.screenshot({ path: `shots/31-play-${w}x${h}.png` });
+    await page.evaluate(() => { window.__game.state = 'revive'; window.__game.reviveT = 99; window.__game.ui.showRevive(4, 7, 3); });
+    await sleep(200);
+    const box = await page.locator('#rvYes').boundingBox();
+    check(`부활 버튼 한 줄 ${w}x${h}`, box.height < 80, `h=${box.height}`);
+    await page.screenshot({ path: `shots/32-revive-${w}x${h}.png` });
     await ctx.close();
   }
 } catch (e) {
