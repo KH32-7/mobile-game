@@ -29,6 +29,33 @@ const OBS_DIM = {
 const PU_COLORS = { magnet: 0xff4a6a, shield: 0x3ae0ff, boots: 0x5aff6a, recruit: 0xffc83a };
 export const PU_NAMES = { magnet: '자석', shield: '방패', boots: '슈퍼점프', recruit: '확성기' };
 
+function trainTex(color) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = color; g.fillRect(0, 0, 256, 128);
+  // 하단 띠와 상단 광택
+  g.fillStyle = 'rgba(255,255,255,0.22)'; g.fillRect(0, 8, 256, 6);
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(0, 96, 256, 32);
+  g.fillStyle = '#ffffff'; g.fillRect(0, 88, 256, 6);
+  // 창문
+  for (let i = 0; i < 4; i++) {
+    const x = 12 + i * 62;
+    g.fillStyle = '#1d2a44'; g.fillRect(x, 26, 44, 40);
+    g.fillStyle = '#9fe0ff'; g.fillRect(x + 3, 29, 38, 34);
+    g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.moveTo(x + 6, 60); g.lineTo(x + 20, 32); g.lineTo(x + 28, 32); g.lineTo(x + 14, 60); g.fill();
+  }
+  // 문 테두리
+  g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 3; g.strokeRect(118, 22, 20, 70);
+  // 낙서 느낌 포인트
+  g.fillStyle = 'rgba(255,230,80,0.85)'; g.beginPath(); g.arc(200, 108, 8, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.repeat.set(3, 1);
+  return t;
+}
+
 export class Entities {
   constructor(scene) {
     this.scene = scene;
@@ -46,7 +73,7 @@ export class Entities {
       barrier: new THREE.MeshLambertMaterial({ map: this.barrierTex }),
       bar: new THREE.MeshLambertMaterial({ map: this.barTex }),
       pole: new THREE.MeshLambertMaterial({ color: 0xdfe6ef }),
-      trainBody: [0x2f7df0, 0xf05a3a, 0x2fbf8a, 0xf0b52f, 0x8a5af0].map((c) => new THREE.MeshLambertMaterial({ color: c })),
+      trainBody: ['#2f7df0', '#f05a3a', '#2fbf8a', '#f0b52f', '#8a5af0'].map((c) => new THREE.MeshLambertMaterial({ map: trainTex(c) })),
       trainDark: new THREE.MeshLambertMaterial({ color: 0x1d2433 }),
       trainRoof: new THREE.MeshLambertMaterial({ color: 0xd8dee8 }),
       window: new THREE.MeshBasicMaterial({ color: 0xbfeaff }),
@@ -102,7 +129,7 @@ export class Entities {
     } else if (kind === 'train') {
       const body = new THREE.Mesh(G.box, M.trainBody[0]); body.position.y = 1.3; g.add(body); g.userData.body = body;
       const roof = new THREE.Mesh(G.box, M.trainRoof); roof.position.y = 2.5; g.add(roof); g.userData.roof = roof;
-      const win = new THREE.Mesh(G.box, M.window); win.position.y = 1.65; g.add(win); g.userData.win = win;
+      const win = new THREE.Mesh(G.box, M.trainRoof); win.position.y = 2.36; g.add(win); g.userData.win = win;
       const skirt = new THREE.Mesh(G.box, M.trainDark); skirt.position.y = 0.2; g.add(skirt); g.userData.skirt = skirt;
       const face = new THREE.Mesh(G.box, M.trainDark); face.scale.set(1.5, 0.8, 0.05); face.position.y = 1.7; g.add(face); g.userData.face = face;
       for (const s of [-0.6, 0.6]) { const l = new THREE.Mesh(G.box, M.light); l.scale.set(0.3, 0.2, 0.05); l.position.set(s, 0.75, 0); g.add(l); (g.userData.lights ||= []).push(l); }
@@ -113,7 +140,7 @@ export class Entities {
 
   addObstacle(it, baseD) {
     const dim = OBS_DIM[it.kind];
-    const o = { kind: it.kind, x: it.x, d: baseD + it.d, halfW: dim.halfW, halfL: it.len ? it.len / 2 : dim.halfL, y0: dim.y0, y1: dim.y1, dead: false, mesh: null, t: 0 };
+    const o = { kind: it.kind, x: it.x, d: baseD + it.d, halfW: dim.halfW, halfL: it.len ? it.len / 2 : dim.halfL, y0: dim.y0, y1: dim.y1, dead: false, mesh: null, t: 0, vd: it.vd || 0, tut: it.tut || null, kills: 0, cap: 0, spent: false };
     if (it.kind !== 'cone') {
       const pool = this.pools[it.kind];
       o.mesh = pool.pop() || this.makeObstacleMesh(it.kind);
@@ -125,7 +152,7 @@ export class Entities {
         const L = o.halfL * 2, u = o.mesh.userData;
         u.body.scale.set(2.0, 2.2, L); u.body.material = this.mats.trainBody[Math.floor(Math.random() * 5)];
         u.roof.scale.set(1.7, 0.2, L - 0.4);
-        u.win.scale.set(2.04, 0.45, L - 1.2);
+        u.win.scale.set(0.5, 0.14, L * 0.6);
         u.skirt.scale.set(1.8, 0.4, L - 0.2);
         u.face.position.z = L / 2 + 0.01;
         u.lights.forEach((l) => { l.position.z = L / 2 + 0.01; });
@@ -157,25 +184,36 @@ export class Entities {
   drawGate(mesh, gate) {
     const u = mesh.userData;
     const c = u.canvas;
-    c.width = Math.round(96 * gate.w); c.height = 200;
+    if (c.width !== 512) { c.width = 512; c.height = 256; }
     const g = c.getContext('2d');
-    const col = gate.good ? 'rgba(42,140,255,0.62)' : 'rgba(255,59,79,0.62)';
-    g.clearRect(0, 0, c.width, c.height);
-    g.fillStyle = col; g.fillRect(0, 0, c.width, c.height);
-    g.fillStyle = 'rgba(255,255,255,0.18)';
-    g.fillRect(0, 0, c.width, 30);
-    g.font = `900 ${gate.op === 'x' || gate.op === '÷' ? 120 : 104}px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
-    g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineWidth = 12; g.strokeStyle = 'rgba(0,0,0,0.35)';
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, 512, 256);
+    g.fillStyle = gate.good ? 'rgba(42,140,255,0.66)' : 'rgba(255,59,79,0.66)';
+    g.fillRect(0, 0, 512, 256);
+    g.fillStyle = 'rgba(255,255,255,0.2)';
+    g.fillRect(0, 0, 512, 34);
+    // 패널 가로세로 비율 보정 (텍스트가 늘어나지 않게)
+    const kx = (2.1 / 256) / (gate.w / 512);
     const label = gateLabel(gate);
-    g.strokeText(label, c.width / 2, 108);
-    g.fillStyle = '#fff'; g.fillText(label, c.width / 2, 108);
-    if (u.tex) u.tex.dispose();
-    u.tex = new THREE.CanvasTexture(c);
-    u.tex.colorSpace = THREE.SRGBColorSpace;
-    u.panel.material.map = u.tex;
+    let fs = 150;
+    const font = (f) => `900 ${f}px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
+    g.font = font(fs);
+    const maxW = (512 - 40) / kx;
+    while (g.measureText(label).width > maxW && fs > 40) { fs -= 8; g.font = font(fs); }
+    g.setTransform(kx, 0, 0, 1, 256, 0);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 14; g.strokeStyle = 'rgba(0,0,0,0.35)';
+    g.strokeText(label, 0, 140);
+    g.fillStyle = '#fff'; g.fillText(label, 0, 140);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (!u.tex) {
+      u.tex = new THREE.CanvasTexture(c);
+      u.tex.colorSpace = THREE.SRGBColorSpace;
+      u.panel.material.map = u.tex;
+      u.panel.material.needsUpdate = true;
+    }
+    u.tex.needsUpdate = true;
     u.panel.material.opacity = 1;
-    u.panel.material.needsUpdate = true;
     u.panel.scale.set(gate.w, 2.1, 1);
     u.posts[0].position.x = -gate.w / 2; u.posts[1].position.x = gate.w / 2;
     u.top.scale.x = gate.w + 0.16;
@@ -193,6 +231,7 @@ export class Entities {
       this.drawGate(mesh, gt);
       row.gates.push({ ...gt, mesh, chosen: false });
     }
+    row.tut = it.tut || null;
     this.gateRows.push(row);
   }
 
@@ -248,7 +287,7 @@ export class Entities {
 
   // ---------- 적 무리 ----------
   addEnemy(it, baseD) {
-    const e = { d: baseD + it.d, x: it.x, count: it.count, startCount: it.count, wide: !!it.wide, state: 'idle', members: [], adv: 0, dead: false };
+    const e = { tut: it.tut || null, d: baseD + it.d, x: it.x, count: it.count, startCount: it.count, wide: !!it.wide, state: 'idle', members: [], adv: 0, dead: false };
     this.layoutEnemy(e);
     this.enemies.push(e);
   }
@@ -326,6 +365,55 @@ export class Entities {
     f.tex.needsUpdate = true;
   }
 
+  // ---------- 보너스 계단 ----------
+  buildStairs() {
+    const g = new THREE.Group();
+    const cols = [0x4ad0ff, 0x4affb0, 0xb0ff4a, 0xffd84a, 0xff9a3a, 0xff4a8a];
+    this.stairSteps = CFG.stairMults.map((m, i) => {
+      const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+      const x = c.getContext('2d');
+      x.fillStyle = '#' + cols[i].toString(16).padStart(6, '0'); x.fillRect(0, 0, 256, 64);
+      x.fillStyle = 'rgba(0,0,0,0.18)'; x.fillRect(0, 50, 256, 14);
+      x.font = '900 46px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+      x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.fillStyle = '#fff'; x.strokeStyle = 'rgba(0,0,0,0.3)'; x.lineWidth = 6;
+      x.strokeText('x' + m, 128, 28); x.fillText('x' + m, 128, 28);
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      const front = new THREE.MeshBasicMaterial({ map: tex });
+      const side = new THREE.MeshLambertMaterial({ color: cols[i] });
+      const mats = [side, side, side, side, front, side];
+      const h = (i + 1) * CFG.stairStepH;
+      const mesh = new THREE.Mesh(this.geo.box, mats);
+      mesh.scale.set(6.6, h, CFG.stairStepLen);
+      mesh.position.set(0, h / 2, -(i + 0.5) * CFG.stairStepLen);
+      g.add(mesh);
+      return { mesh, h, mats };
+    });
+    g.visible = false;
+    this.scene.add(g);
+    this.stairs = { g, d: 0, sink: 1, active: false, reached: -1, glow: 0 };
+  }
+
+  placeStairs(d) {
+    if (!this.stairs) this.buildStairs();
+    const st = this.stairs;
+    st.d = d; st.sink = 1; st.active = true; st.reached = -1;
+    st.g.visible = true;
+    st.g.position.set(0, 0, -d);
+    st.g.scale.set(1, 1, 1);
+  }
+
+  // 계단 위 높이 (d 는 월드 진행 거리)
+  stairHeight(d) {
+    const st = this.stairs;
+    if (!st || !st.active) return 0;
+    const i = Math.floor((d - st.d) / CFG.stairStepLen);
+    if (i < 0 || i >= CFG.stairMults.length) return 0;
+    return (i + 1) * CFG.stairStepH * st.sink;
+  }
+
+  hideStairs() { if (this.stairs) { this.stairs.active = false; this.stairs.g.visible = false; } }
+
   hideFortress() { if (this.fortress) { this.fortress.g.visible = false; this.fortress.active = false; } }
 
   // ---------- 매 프레임 ----------
@@ -350,9 +438,10 @@ export class Entities {
       if (e.d + 6 < cut || (e.dead && e.members.length === 0)) this.enemies.splice(i, 1);
     }
 
-    // 장애물 애니메이션 (부서진 것은 날아감)
+    // 장애물 애니메이션 (부서진 것은 날아감, 마주 오는 기차는 가까워지면 출발)
     let nc = 0;
     for (const o of this.obstacles) {
+      if (o.vd && !o.dead && o.d - o.halfL - dist < 45) { o.d += o.vd * dt; if (o.mesh) o.mesh.position.z = -o.d; }
       if (o.dead) {
         o.t += dt;
         if (o.mesh) { o.mesh.position.y += dt * 6; o.mesh.rotation.x -= dt * 8; o.mesh.scale.setScalar(Math.max(0.01, 1 - o.t)); }
@@ -414,6 +503,7 @@ export class Entities {
   }
 
   clearAll() {
+    this.hideStairs();
     this.obstacles.forEach((o) => this.releaseObstacle(o)); this.obstacles.length = 0;
     this.gateRows.forEach((r) => this.releaseGateRow(r)); this.gateRows.length = 0;
     this.coins.length = 0;

@@ -19,7 +19,12 @@ export class World {
       hemiSky: new THREE.Color(t.hemiSky), hemiGround: new THREE.Color(t.hemiGround), sun: new THREE.Color(t.sun),
     };
     this.target = null;
-    this.scene.background = this.cur.sky.clone();
+    this.skyCanvas = document.createElement('canvas');
+    this.skyCanvas.width = 4; this.skyCanvas.height = 128;
+    this.skyTex = new THREE.CanvasTexture(this.skyCanvas);
+    this.skyTex.colorSpace = THREE.SRGBColorSpace;
+    this.scene.background = this.skyTex;
+    this._skyKey = '';
     this.scene.fog = new THREE.Fog(this.cur.fog.clone(), 45, 170);
 
     this.hemi = new THREE.HemisphereLight(t.hemiSky, t.hemiGround, 1.6);
@@ -106,7 +111,7 @@ export class World {
     this.buildings.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.scene.add(this.buildings);
 
-    this.pCount = 40;
+    this.pCount = 80;
     const tg = new THREE.ConeGeometry(0.9, 2.6, 6);
     tg.translate(0, 1.9, 0);
     const trunk = new THREE.CylinderGeometry(0.16, 0.2, 0.7, 5);
@@ -118,9 +123,15 @@ export class World {
     for (let i = 0; i < this.pCount; i++) {
       const side = i % 2 ? 1 : -1;
       const d = -30 + Math.floor(i / 2) * (this.span / (this.pCount / 2)) + 3;
-      this.pData.push(this.newProp(side, d));
+      this.pData.push(this.newProp(side, d, i));
     }
     this.scene.add(this.props);
+    const cap = new THREE.ConeGeometry(0.62, 1.1, 6);
+    cap.translate(0, 2.75, 0);
+    this.caps = new THREE.InstancedMesh(cap, new THREE.MeshLambertMaterial({ color: 0xffffff }), this.pCount);
+    this.scene.add(this.caps);
+    this.m4 = new THREE.Matrix4();
+    this.zero = new THREE.Matrix4().makeScale(0, 0, 0);
     this.refreshSceneryAll();
   }
 
@@ -137,10 +148,12 @@ export class World {
     };
   }
 
-  newProp(side, d) {
+  newProp(side, d, i = 0) {
     const th = THEMES[this.themeIdx];
     const s = 0.7 + Math.random() * 0.7;
-    return { side, d, x: side * (4.6 + Math.random() * 1.6), s, color: new THREE.Color(th.prop).offsetHSL(0, 0, (Math.random() - 0.5) * 0.12) };
+    // 설원은 2배 밀도 + 눈 덮인 나무, 나머지 테마는 절반만 표시
+    const show = th.snow || (i % 4 < 2);
+    return { side, d, x: side * (4.6 + Math.random() * (th.snow ? 3.5 : 1.6)), s, show, snow: !!th.snow, color: new THREE.Color(th.prop).offsetHSL(0, 0, (Math.random() - 0.5) * 0.12) };
   }
 
   refreshSceneryAll() {
@@ -151,6 +164,7 @@ export class World {
     this.buildings.instanceColor.needsUpdate = true;
     this.props.instanceMatrix.needsUpdate = true;
     this.props.instanceColor.needsUpdate = true;
+    this.caps.instanceMatrix.needsUpdate = true;
   }
 
   writeBuilding(i, b, m) {
@@ -161,9 +175,11 @@ export class World {
   }
 
   writeProp(i, p, m) {
+    if (!p.show) { this.props.setMatrixAt(i, this.zero); this.caps.setMatrixAt(i, this.zero); this.props.setColorAt(i, p.color); return; }
     m.makeScale(p.s, p.s, p.s);
     m.setPosition(p.x, 0, -p.d);
     this.props.setMatrixAt(i, m);
+    this.caps.setMatrixAt(i, p.snow ? m : this.zero);
     this.props.setColorAt(i, p.color);
   }
 
@@ -200,17 +216,33 @@ export class World {
     this.railMat.color.set(t.edge);
   }
 
-  resetTheme(idx) {
+  resetTheme(idx, dist = null) {
     this.setTheme(idx);
     for (const k in this.target) this.cur[k].copy(this.target[k]);
     this.applyColors();
-    this.bData.forEach((b, i) => { this.bData[i] = this.newBuilding(b.side, b.d); });
-    this.pData.forEach((p, i) => { this.pData[i] = this.newProp(p.side, p.d); });
+    // dist 가 주어지면 배경 오브젝트를 현재 위치 기준으로 다시 깔기
+    const bs = this.span / (this.bCount / 2), ps = this.span / (this.pCount / 2);
+    this.bData.forEach((b, i) => { this.bData[i] = this.newBuilding(b.side, dist == null ? b.d : dist - 30 + Math.floor(i / 2) * bs); });
+    this.pData.forEach((p, i) => { this.pData[i] = this.newProp(p.side, dist == null ? p.d : dist - 27 + Math.floor(i / 2) * ps, i); });
     this.refreshSceneryAll();
   }
 
+  drawSky() {
+    const key = this.cur.sky.getHexString() + this.cur.fog.getHexString();
+    if (key === this._skyKey) return;
+    this._skyKey = key;
+    const g = this.skyCanvas.getContext('2d');
+    const gr = g.createLinearGradient(0, 0, 0, 128);
+    const top = this.cur.sky.clone().multiplyScalar(0.78);
+    gr.addColorStop(0, '#' + top.getHexString());
+    gr.addColorStop(0.55, '#' + this.cur.sky.getHexString());
+    gr.addColorStop(1, '#' + this.cur.fog.getHexString());
+    g.fillStyle = gr; g.fillRect(0, 0, 4, 128);
+    this.skyTex.needsUpdate = true;
+  }
+
   applyColors() {
-    this.scene.background.copy(this.cur.sky);
+    this.drawSky();
     this.scene.fog.color.copy(this.cur.fog);
     this.groundMat.color.copy(this.cur.ground);
     this.hemi.color.copy(this.cur.hemiSky);
@@ -232,7 +264,7 @@ export class World {
     this.trackTex.offset.y = ((dist - 40 + this.trackLen / 2) / this.tileLen) % 1;
 
     // 배경 재활용
-    const m = new THREE.Matrix4();
+    const m = this.m4;
     let dirtyB = false, dirtyP = false;
     for (let i = 0; i < this.bCount; i++) {
       const b = this.bData[i];
@@ -240,10 +272,10 @@ export class World {
     }
     for (let i = 0; i < this.pCount; i++) {
       const p = this.pData[i];
-      if (p.d < dist - 30) { this.pData[i] = this.newProp(p.side, p.d + this.span); this.writeProp(i, this.pData[i], m); dirtyP = true; }
+      if (p.d < dist - 30) { this.pData[i] = this.newProp(p.side, p.d + this.span, i); this.writeProp(i, this.pData[i], m); dirtyP = true; }
     }
     if (dirtyB) { this.buildings.instanceMatrix.needsUpdate = true; this.buildings.instanceColor.needsUpdate = true; }
-    if (dirtyP) { this.props.instanceMatrix.needsUpdate = true; this.props.instanceColor.needsUpdate = true; }
+    if (dirtyP) { this.props.instanceMatrix.needsUpdate = true; this.props.instanceColor.needsUpdate = true; this.caps.instanceMatrix.needsUpdate = true; }
 
     // 카메라
     const sp = focus.spread;
@@ -253,8 +285,8 @@ export class World {
       tx = focus.x + 2.4; ty = 3.6; tz = -(focus.d + 9.5);
       lx = focus.x; ly = -0.9; lz = -(focus.d - 2.5);
     } else {
-      tx = focus.x * 0.55; ty = 7.4 + sp * 0.95; tz = -(focus.d - 8.4 - sp * 1.5);
-      lx = focus.x * 0.75; ly = 0; lz = -(focus.d + 9);
+      tx = focus.x * 0.55; ty = 7.8 + sp * 0.95 + (focus.lift || 0); tz = -(focus.d - 8.0 - sp * 1.5);
+      lx = focus.x * 0.75; ly = (focus.lift || 0) * 0.8; lz = -(focus.d + 6.5);
     }
     const kc = 1 - Math.exp(-dt * (mode === 'title' ? 2 : 6));
     this.camPos.x += (tx - this.camPos.x) * kc;
