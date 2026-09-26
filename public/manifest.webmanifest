@@ -1,0 +1,14 @@
+{
+  "name": "블록 조커",
+  "short_name": "블록 조커",
+  "description": "블록 퍼즐 + 조커 빌드 로그라이크",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1c0b33",
+  "theme_color": "#1c0b33",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

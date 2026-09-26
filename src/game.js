@@ -310,6 +310,7 @@ export class Game {
     for (const j of this.jokers) { const d = JOKER_BY_ID[j.id]; if (d.onRoundEnd && !j.disabled) jokerCoins += d.onRoundEnd(this, j); }
     const total = base + hands + interest + jokerCoins;
     this.coins += total;
+    this.jokers.forEach((j) => { j.disabled = false; });
     this.rewards = { base, hands, handsLeft: this.handsLeft, interest, jokerCoins, total };
     this.wasFinal = !this.endless && this.blind === 2 && this.ante === CONFIG.FINAL_ANTE;
     this.phase = this.wasFinal ? 'victory' : 'shop';
