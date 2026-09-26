@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#12101c">
+<title>모바일 게임 5종</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23ffcf4a'/%3E%3Ccircle cx='22' cy='32' r='7' fill='%2312101c'/%3E%3Crect x='36' y='25' width='14' height='14' rx='3' fill='%2312101c'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #12101c;
+    --panel: #1d1a2c;
+    --line: #2e2a44;
+    --text: #f3f0ff;
+    --muted: #a7a1c2;
+    --accent: #ffcf4a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    min-height: 100vh;
+  }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: calc(28px + env(safe-area-inset-top)) 16px calc(40px + env(safe-area-inset-bottom));
+  }
+  header h1 { font-size: clamp(26px, 6vw, 40px); margin: 0 0 6px; letter-spacing: -0.02em; }
+  header p { margin: 0 0 24px; color: var(--muted); line-height: 1.5; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  a.card {
+    display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    overflow: hidden; color: inherit; text-decoration: none;
+    transition: transform .15s ease, border-color .15s ease;
+  }
+  a.card:hover, a.card:focus-visible { transform: translateY(-3px); border-color: var(--accent); outline: none; }
+  .art { height: 140px; position: relative; overflow: hidden; }
+  .art span { position: absolute; }
+  .body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .tag { font-size: 12px; color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+  .body h2 { margin: 0; font-size: 20px; }
+  .mix { font-size: 13px; color: var(--muted); }
+  .body p { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: #d9d4ee; }
+  .play { margin-top: 10px; align-self: flex-start; background: var(--accent); color: #1a1400; font-weight: 800; padding: 8px 14px; border-radius: 999px; font-size: 14px; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+  /* 카드 아트: CSS만으로 그린 썸네일 */
+  .a1 { background: radial-gradient(circle at 70% 30%, #6d2bd9, #240b4d 70%); }
+  .a1 .b { width: 26px; height: 26px; border-radius: 6px; box-shadow: inset 0 -4px 0 rgba(0,0,0,.25), inset 0 3px 0 rgba(255,255,255,.35); }
+  .a2 { background: linear-gradient(160deg, #bfe8d6, #9fd0f0); }
+  .a2 .hole { width: 110px; height: 70px; left: 50%; top: 55%; transform: translate(-50%,-50%); border-radius: 50%; background: radial-gradient(#000 55%, #2a0d4f 75%, #a45bff 90%, transparent 92%); }
+  .a3 { background: linear-gradient(180deg, #7fd1ff, #e9f7ff 60%, #9aa7b8 60%); }
+  .a3 .p { width: 14px; height: 20px; border-radius: 7px; background: #2f7bff; box-shadow: inset 0 -3px 0 rgba(0,0,0,.2); }
+  .a4 { background: linear-gradient(180deg, #e9c9a0 0 44%, #4aa3df 44% 56%, #9ccf6a 56%); }
+  .a4 .t { width: 30px; height: 36px; border-radius: 6px 6px 3px 3px; }
+  .a5 { background: repeating-linear-gradient(45deg, #58c46b 0 16px, #4fb862 16px 32px); }
+  .a5 .ball { width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 4px 0 rgba(0,0,0,.2); }
+  .a5 .cup { width: 26px; height: 26px; border-radius: 50%; background: #16301b; }
+  .a5 .flag { width: 3px; height: 44px; background: #fff; }
+  .a5 .flag::after { content: ""; position: absolute; left: 3px; top: 0; border-left: 22px solid #ff4d5e; border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>모바일 게임 5종</h1>
+    <p>인기 무료 모바일 게임들을 조금씩 비틀고 섞어서 만든 웹 게임 모음. 폰 세로 화면 기준이고 설치 없이 바로 플레이 가능.</p>
+  </header>
+
+  <section class="grid">
+    <a class="card" href="./block-joker/">
+      <div class="art a1" aria-hidden="true">
+        <span class="b" style="left:40px;top:40px;background:#ff4d7a"></span>
+        <span class="b" style="left:68px;top:40px;background:#ff4d7a"></span>
+        <span class="b" style="left:68px;top:68px;background:#ffcf4a"></span>
+        <span class="b" style="left:150px;top:30px;background:#3fd0ff"></span>
+        <span class="b" style="left:178px;top:30px;background:#3fd0ff"></span>
+        <span class="b" style="left:206px;top:30px;background:#3fd0ff"></span>
+        <span class="b" style="left:120px;top:84px;background:#7dff8a"></span>
+        <span class="b" style="left:148px;top:84px;background:#7dff8a"></span>
+      </div>
+      <div class="body">
+        <span class="tag">퍼즐 로그라이크 · 2D</span>
+        <h2>블록 조커</h2>
+        <span class="mix">Block Blast + Balatro</span>
+        <p>8x8 블록 퍼즐로 줄을 지우고, 칩 x 배수 점수와 조커 빌드로 점점 높아지는 목표 점수를 넘기는 게임.</p>
+        <span class="play">플레이</span>
+      </div>
+    </a>
+
+    <a class="card" href="./void-maw/">
+      <div class="art a2" aria-hidden="true"><span class="hole"></span></div>
+      <div class="body">
+        <span class="tag">액션 로그라이트 · 3D</span>
+        <h2>보이드 모</h2>
+        <span class="mix">Hole.io + Survivor.io</span>
+        <p>도시 바닥의 블랙홀이 되어 모든 걸 삼키며 커지고, 몰려오는 청소 로봇 부대를 스킬 빌드로 버티는 서바이벌.</p>
+        <span class="play">플레이</span>
+      </div>
+    </a>
+
+    <a class="card" href="./swarm-surfers/">
+      <div class="art a3" aria-hidden="true">
+        <span class="p" style="left:120px;top:92px"></span>
+        <span class="p" style="left:138px;top:98px"></span>
+        <span class="p" style="left:104px;top:100px"></span>
+        <span class="p" style="left:156px;top:90px"></span>
+        <span class="p" style="left:128px;top:108px"></span>
+        <span class="p" style="left:146px;top:112px"></span>
+      </div>
+      <div class="body">
+        <span class="tag">엔드리스 러너 · 3D</span>
+        <h2>스웜 서퍼</h2>
+        <span class="mix">Subway Surfers + Mob Control</span>
+        <p>3레인을 스와이프로 달리며 숫자 게이트로 무리를 불리고, 장애물과 적 무리를 피해 요새를 부수는 러너.</p>
+        <span class="play">플레이</span>
+      </div>
+    </a>
+
+    <a class="card" href="./pocket-siege/">
+      <div class="art a4" aria-hidden="true">
+        <span class="t" style="left:40px;top:14px;background:#e0485a"></span>
+        <span class="t" style="right:40px;top:14px;background:#e0485a"></span>
+        <span class="t" style="left:40px;bottom:14px;background:#3b7bff"></span>
+        <span class="t" style="right:40px;bottom:14px;background:#3b7bff"></span>
+      </div>
+      <div class="body">
+        <span class="tag">실시간 전략 · 2D</span>
+        <h2>포켓 시즈</h2>
+        <span class="mix">Clash Royale + Merge Tactics + 로그라이크</span>
+        <p>엘릭서로 카드를 소환해 타워를 부수는 2레인 대전. 같은 카드를 겹치면 유닛이 합성되어 강해짐.</p>
+        <span class="play">플레이</span>
+      </div>
+    </a>
+
+    <a class="card" href="./rogue-putt/">
+      <div class="art a5" aria-hidden="true">
+        <span class="ball" style="left:60px;top:90px"></span>
+        <span class="cup" style="right:70px;top:40px"></span>
+        <span class="flag" style="right:81px;top:4px"></span>
+      </div>
+      <div class="body">
+        <span class="tag">스포츠 아케이드 · 2D</span>
+        <h2>로그 퍼트</h2>
+        <span class="mix">미니골프 + 새총 조준 + 로그라이크</span>
+        <p>절차 생성되는 18홀 미니골프. 타수가 곧 체력이고, 홀마다 유물을 골라 나만의 이상한 골프공을 만드는 게임.</p>
+        <span class="play">플레이</span>
+      </div>
+    </a>
+  </section>
+
+  <footer>
+    소스는 게임별 브랜치(<code>game/&lt;이름&gt;</code>)에 있음. 브랜치에 푸시하면 GitHub Actions가 빌드해서 이 페이지 하위 폴더로 배포함.
+  </footer>
+</main>
+</body>
+</html>
