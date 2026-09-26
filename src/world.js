@@ -109,6 +109,7 @@ export class World {
       this.bData.push(this.newBuilding(side, d));
     }
     this.buildings.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.buildings.frustumCulled = false; // 재활용되며 멀리 이동하므로 캐시된 바운딩 구로 컬링되지 않게
     this.scene.add(this.buildings);
 
     this.pCount = 80;
@@ -125,10 +126,12 @@ export class World {
       const d = -30 + Math.floor(i / 2) * (this.span / (this.pCount / 2)) + 3;
       this.pData.push(this.newProp(side, d, i));
     }
+    this.props.frustumCulled = false;
     this.scene.add(this.props);
     const cap = new THREE.ConeGeometry(0.62, 1.1, 6);
     cap.translate(0, 2.75, 0);
     this.caps = new THREE.InstancedMesh(cap, new THREE.MeshLambertMaterial({ color: 0xffffff }), this.pCount);
+    this.caps.frustumCulled = false;
     this.scene.add(this.caps);
     this.m4 = new THREE.Matrix4();
     this.zero = new THREE.Matrix4().makeScale(0, 0, 0);
