@@ -9,7 +9,7 @@ export const CFG = {
     accel: 10,
     decel: 4.2,
     hp: 100,
-    iframe: 0.9,
+    iframe: 1.0,
     growthK: 0.2, // r^2 += growthK * size^2 * growthFalloff(r)
     enemyGrowthK: 0.16,
     fit: 0.94, // size < r * fit 이면 삼킬 수 있음
@@ -38,7 +38,7 @@ export const CFG = {
     rateGrow: 3.4, // 5분 동안 추가
     maxAlive: 150,
     sizeGrow: 3.2, // 5분 동안 크기 배율 추가
-    hpGrow: 3.2,
+    hpGrow: 2.6,
     swarmEvery: 32,
   },
 
@@ -49,7 +49,7 @@ export const CFG = {
 export const ENEMY_DEFS = {
   sweeper: { name: '청소봇', size: 0.75, hp: 8, speed: 3.3, dmg: 8, xp: 3, cap: 160 },
   dasher: { name: '돌진봇', size: 1.05, hp: 16, speed: 2.6, dmg: 12, xp: 6, cap: 60, dashSpeed: 15 },
-  thrower: { name: '투척봇', size: 1.15, hp: 14, speed: 2.4, dmg: 10, xp: 7, cap: 50, range: 13 },
+  thrower: { name: '투척봇', size: 1.15, hp: 14, speed: 2.4, dmg: 8, xp: 7, cap: 50, range: 13 },
   giant: { name: '거대 청소기', size: 2.5, hp: 80, speed: 1.5, dmg: 18, xp: 26, cap: 24 },
   mini: { name: '청소 트럭 대장', size: 5.0, hp: 1100, speed: 2.1, dmg: 22, xp: 160, cap: 2, dashSpeed: 12 },
   boss: { name: '거대 청소 메카', size: 11, hp: 5200, speed: 1.7, dmg: 28, xp: 600, cap: 1 },
