@@ -1494,3 +1494,19 @@ button {
     gap: 7px;
   }
 }
+
+.map-card {
+  position: relative;
+}
+.map-card .arrow {
+  position: absolute;
+  top: 20px;
+  z-index: 2;
+  background: rgba(30, 18, 58, 0.75);
+}
+#mapPrev {
+  left: 4px;
+}
+#mapNext {
+  right: 4px;
+}

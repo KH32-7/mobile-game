@@ -10,11 +10,11 @@ export const CFG = {
     decel: 4.2,
     hp: 100,
     iframe: 0.9,
-    growthK: 0.2, // r^2 += growthK * size^2
+    growthK: 0.2, // r^2 += growthK * size^2 * growthFalloff(r)
     enemyGrowthK: 0.16,
     fit: 0.94, // size < r * fit 이면 삼킬 수 있음
     visualLerp: 3.2,
-    maxR: 16,
+    maxR: 12,
   },
 
   cam: { fov: 42, tilt: 55, dist: 13, distPerR: 4.4, lerp: 2.6 },
@@ -22,7 +22,10 @@ export const CFG = {
   run: { length: 300, miniAt: 150, bossAt: 300 },
 
   // 레벨 L -> L+1 필요 XP
-  xpNeed: (lvl) => Math.floor(8 + lvl * 6 + Math.pow(lvl, 1.85)),
+  xpNeed: (lvl) => Math.floor(10 + lvl * 8 + Math.pow(lvl, 2.1)),
+  // 홀이 클수록 같은 물체의 성장/XP 효율 감소 (후반 폭주 방지)
+  growthFalloff: (r) => 1 / (1 + 0.4 * r * r),
+  xpFalloff: (r) => 1 / (1 + 0.06 * r * r),
   // 오브젝트 XP
   propXp: (size) => 1 + size * size * 1.6,
 
@@ -34,7 +37,7 @@ export const CFG = {
     baseRate: 0.9, // 초당
     rateGrow: 3.4, // 5분 동안 추가
     maxAlive: 150,
-    sizeGrow: 2.3, // 5분 동안 크기 배율 추가
+    sizeGrow: 3.2, // 5분 동안 크기 배율 추가
     hpGrow: 3.2,
     swarmEvery: 32,
   },

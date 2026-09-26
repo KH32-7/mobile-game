@@ -321,7 +321,7 @@ export class Game {
 
   grow(size, k) {
     const h = this.hole;
-    const add = k * size * size * this.skills.growthMul() * (this.mods.growth || 1);
+    const add = k * size * size * CFG.growthFalloff(h.targetR) * this.skills.growthMul() * (this.mods.growth || 1);
     h.targetR = Math.min(CFG.hole.maxR, Math.sqrt(h.targetR * h.targetR + add));
     this.stats.maxR = Math.max(this.stats.maxR, h.targetR);
     const tiers = CFG.sizeTiers;
@@ -348,7 +348,7 @@ export class Game {
   onSwallowProp(it) {
     this.stats.swallowed++;
     this.countCombo(it.size);
-    this.gainXp(CFG.propXp(it.size));
+    this.gainXp(CFG.propXp(it.size) * CFG.xpFalloff(this.hole.targetR));
     this.grow(it.size, CFG.hole.growthK);
     const h = this.hole;
     this.fx.burst(it.x, 0.4, it.z, 3 + it.size * 3, it.size * 0.6, ['#c79bff', '#ffffff', '#8a6bff']);

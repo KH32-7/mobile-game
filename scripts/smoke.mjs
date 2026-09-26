@@ -200,8 +200,8 @@ try {
     const g = window.__game;
     const b = g.enemies.boss;
     // 보스를 화면 안으로 데려옴
-    b.x = g.hole.x + 14;
-    b.z = g.hole.z - 10;
+    b.x = g.hole.x + 2;
+    b.z = g.hole.z - 17;
   });
   await sleep(1800);
   await clearLevelups();

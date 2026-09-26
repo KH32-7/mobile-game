@@ -373,7 +373,7 @@ export class Enemies {
         }
       } else if (e.type === 'thrower') {
         const range = def.range + e.size * 3;
-        if (small) {
+        if (small && d < range * 0.7) {
           mx = -nx;
           mz = -nz;
           spd *= 0.8;
@@ -387,7 +387,7 @@ export class Enemies {
           mx = -nz * 0.4;
           mz = nx * 0.4;
         }
-        if (d < range * 1.15 && e.atk <= 0 && !small) {
+        if (d < range * 1.15 && e.atk <= 0) {
           e.atk = 2.4 + Math.random() * 1.2;
           this.throwTrash(e, hole);
           e.flash = 0.6;
@@ -446,14 +446,14 @@ export class Enemies {
         }
       } else {
         // 큰 적: 홀 안으로 못 들어옴 + 접촉 피해
-        const minD = hole.r + e.size * 0.35;
+        const minD = hole.r + e.size * 0.55;
         if (dd < minD) {
           const px = (e.x - hole.x) / (dd || 1);
           const pz = (e.z - hole.z) / (dd || 1);
           e.x = hole.x + px * minD;
           e.z = hole.z + pz * minD;
         }
-        if (dd < hole.r + e.size * 0.75) {
+        if (dd < hole.r + e.size * 0.85) {
           if (g.hurt(def.dmg * e.dmgMul, e)) {
             const px = (e.x - hole.x) / (dd || 1);
             const pz = (e.z - hole.z) / (dd || 1);
@@ -538,7 +538,9 @@ export class Enemies {
       const s = e.size * (0.6 + 0.4 * pop);
       const bob = e.type === 'sweeper' ? Math.abs(Math.sin(t * 10 + e.bob)) * 0.05 * e.size : 0;
       _q.setFromAxisAngle(_up, e.rot);
-      _m.compose(_v.set(e.x, bob, e.z), _q, _s.set(s, s * (1 + (e.state === 'wind' ? 0.1 * Math.sin(e.timer * 50) : 0)), s));
+      // 큰 적은 키를 눌러서 카메라를 가리지 않게
+      const sy = (s / (1 + Math.max(0, s - 2) * 0.09)) * (1 + (e.state === 'wind' ? 0.1 * Math.sin(e.timer * 50) : 0));
+      _m.compose(_v.set(e.x, bob, e.z), _q, _s.set(s, sy, s));
       mesh.setMatrixAt(e.slot, _m);
       this.flash[e.type].array[e.slot] = e.flash;
       this.shadows.set(e.shadowI, e.x, e.z, e.size * 0.9);

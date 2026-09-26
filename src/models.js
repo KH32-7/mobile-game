@@ -229,7 +229,13 @@ export const PROP_TYPES = {
 Object.assign(PROP_TYPES, {
   ball: {
     size: 0.3,
-    geo: () => build([part(ico(0.3, 1), '#ffffff', 0, 0.3), part(box(0.62, 0.62, 0.1), '#ff6b8a', 0, 0.3), part(box(0.1, 0.62, 0.62), '#4db8ff', 0, 0.3)]),
+    geo: () =>
+      build([
+        part(ico(0.3, 1), '#ffffff', 0, 0.3),
+        part(cyl(0.305, 0.305, 0.12, 12), '#ff6b8a', 0, 0.3),
+        part(cyl(0.305, 0.305, 0.12, 12), '#4db8ff', 0, 0.3, Math.PI / 2),
+        part(cyl(0.305, 0.305, 0.12, 12), '#ffd84d', 0, 0.3, 0, 0, Math.PI / 2),
+      ]),
   },
   buoy: {
     size: 0.3,

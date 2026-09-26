@@ -84,7 +84,7 @@ const THEMES = {
     inner: { sand: '#f5dca8', resort: '#bfeccd', huts: '#f2d49b', dune: '#efd29a', sea: '#7fd3ff' },
     lamp: 'palm',
     side: ['umbrella', 'chair', 'ball', 'surf', 'castle', 'trash', 'ball', 'buoy'],
-    start: ['ball', 'ball', 'buoy', 'castle', 'surf'],
+    start: ['ball', 'ball', 'buoy', 'ball', 'buoy'],
   },
   factory: {
     bg: '#d9d4cc',

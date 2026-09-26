@@ -5,7 +5,7 @@ export const ICONS = {
   orbit: S('<circle cx="12" cy="12" r="3.5" fill="currentColor"/><ellipse cx="12" cy="12" rx="9" ry="5" transform="rotate(-25 12 12)"/><circle cx="20" cy="8.5" r="1.8" fill="currentColor"/><circle cx="4" cy="15.5" r="1.8" fill="currentColor"/>'),
   cannon: S('<circle cx="7" cy="17" r="4" fill="currentColor"/><path d="M10 14 L19 5"/><path d="M13 5 H19 V11"/>'),
   pulse: S('<circle cx="12" cy="12" r="2.5" fill="currentColor"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="9.5" opacity=".6"/>'),
-  horizon: S('<path d="M12 12 m0 0 a1.5 1.5 0 1 1 1.5 1.5 a3.5 3.5 0 1 1 -3.5 -3.5 a6 6 0 1 1 6 6 a8.5 8.5 0 1 1 -8.5 -8.5"/>'),
+  horizon: S('<path d="M12 3 A9 9 0 0 1 21 12"/><path d="M12 21 A9 9 0 0 1 3 12"/><path d="M12 7 A5 5 0 0 1 17 12"/><path d="M12 17 A5 5 0 0 1 7 12"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/>'),
   glutton: S('<path d="M20 7 A9 9 0 1 0 20 17 L12 12 Z" fill="currentColor"/><circle cx="11" cy="7.5" r="1.2" fill="#1a1030" stroke="none"/>'),
   haste: S('<path d="M5 6 L11 12 L5 18"/><path d="M12 6 L18 12 L12 18"/>'),
   regen: S('<path d="M12 5 V19 M5 12 H19" stroke-width="3.2"/>'),
