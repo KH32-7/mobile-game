@@ -46,7 +46,7 @@ export function relicMods(R, lv = {}, ctx = {}) {
     coinR: L('coinmag') === 2 ? 4 : L('coinmag') ? 3 : 1,
     cushion: has('cushion'),
     bouncy: has('bouncy'),
-    cupMul: (L('bigcup') === 2 ? 1.6 : L('bigcup') ? 1.35 : 1) * (has('comeback') && ctx.hearts != null && ctx.hearts <= 2 ? 1.5 : 1) * [1, 1.1, 1.25][syn.컵 || 0],
+    cupMul: (L('bigcup') === 2 ? 1.6 : L('bigcup') ? 1.35 : 1) * (has('comeback') && ctx.hearts != null && ctx.hearts <= 2 ? 1.5 : 1) * [1, 1.1, 1.25][syn.컵 || 0] * (ctx.mercy ? 1.3 : 1),
     captureMul: (has('bigcup') ? 1.3 : 1) * (L('radar') === 2 ? 1.7 : L('radar') ? 1.4 : 1),
     fricMul: L('feather') === 2 ? 0.65 : L('feather') ? 0.75 : 1,
     sandMul: (has('bouncy') ? 1.5 : 1) * terr,
@@ -149,7 +149,7 @@ export function stepBall(h, st, b, dt, M, ev) {
         dy = c.y - b.y;
       const d = Math.hypot(dx, dy);
       const pr = PHYS.cupR * M.cupMul * PHYS.cupPullR * M.pull;
-      if (d < pr && d > 0.01 && sp < 520) {
+      if (d < pr && d > 0.01 && sp < 280) {
         const a = PHYS.cupPull * (1 - d / pr) * (M.pull > 1 ? 1.3 : 1);
         b.vx += (dx / d) * a * sdt;
         b.vy += (dy / d) * a * sdt;
@@ -351,7 +351,7 @@ export function stepBall(h, st, b, dt, M, ev) {
       const cr = PHYS.cupR * M.cupMul;
       if (d < cr) {
         const rel = Math.hypot(b.vx - c.vx, b.vy - c.vy);
-        if (rel < PHYS.captureSpeed * M.captureMul) {
+        if (rel < PHYS.captureSpeed * M.captureMul * (M.teeShot ? 0.75 : 1)) {
           b.sunk = true;
           b.moving = false;
           b.sinkCup = i;

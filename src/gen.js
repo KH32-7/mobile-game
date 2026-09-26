@@ -452,9 +452,11 @@ export function computePar(h) {
   const feat = { legs, pathLen: path.length - 1, totalLen, mills: h.mills.length, movers: h.movers.length, water, sand, ice, slope, bumpers: h.bumpers.length, crates: h.crates.length, wind: h.wind ? 1 : 0, teles: h.teles.length, boss: h.boss || '' };
   h.parFeat = feat;
   const est = parEstimate(feat);
-  // 사람은 AI 보다 부정확하므로 살짝 넉넉하게 (+0.35)
-  let par = clamp(Math.round(est + 0.35), 2, 5);
-  if (h.boss) par = clamp(Math.round(est + 0.35), 3, 6);
+  // 사람 근사 AI 분포(파 이하 55~70%, +2 이상 10% 이하)에 맞춘 보정: 물/가짜 컵/긴 경로는 변동이 커서 여유를 더 줌
+  const risk = (water > 0 ? 2 : 0) + (h.cups.length > 1 ? 2 : 0) + (legs >= 3 ? 0.5 : 0);
+  const base = est - 1.2 + risk;
+  let par = clamp(Math.round(base), 2, 6);
+  if (h.boss) par = clamp(Math.round(base), 3, 7);
   return { par, legs, pathLen: path.length - 1, est };
 }
 

@@ -445,6 +445,35 @@ try {
     await c3.close();
   }
 
+  // ===== 8. 사운드 믹스 계측 (OfflineAudioContext) =====
+  console.log('[8] 사운드 믹스');
+  {
+    const { page, ctx } = await newPage();
+    await page.goto(BASE + '?debug');
+    await page.waitForSelector('#tStart');
+    const res = await page.evaluate(async () => {
+      const A = window.__audio;
+      const main = [['shot', [0.8]], ['wall', [600, 'wood']], ['wall', [500, 'ice']], ['wall', [500, 'neon']], ['cup', []], ['splash', []], ['coin', []], ['bumper', []], ['crate', []], ['relic', []], ['tele', []], ['heart', []], ['sting', []], ['fanfare', [2]]];
+      const quiet = [['click', []], ['aimTick', [0.5]], ['tick', []], ['lip', []], ['ghost', []]];
+      const out = { main: [], quiet: [], bgm: [], mix: null };
+      for (const [n, a] of main) out.main.push(await A.measure(n, a, 1.5));
+      for (const [n, a] of quiet) out.quiet.push(await A.measure(n, a, 1.0));
+      for (const w of ['meadow', 'desert', 'snow', 'space']) out.bgm.push(await A.measure('bgm', [w], 3.2));
+      out.bgm.push(await A.measure('bgm', ['meadow', true], 3.2));
+      out.mix = await A.measure('mix', [], 3.2);
+      return out;
+    });
+    const fmt = (r) => `${r.name} ${r.rmsDb}dB/${r.peakDb}`;
+    const badMain = res.main.filter((r) => r.rmsDb < -26 || r.rmsDb > -18 || r.peakDb > -1);
+    check(!badMain.length, `주요 효과음 RMS -26~-18dB (${res.main.map(fmt).join(', ')})`);
+    const badQ = res.quiet.filter((r) => r.rmsDb < -35);
+    check(!badQ.length, `작은 효과음도 RMS -35dB 이상 (${res.quiet.map(fmt).join(', ')})`);
+    const badLow = res.bgm.filter((r) => r.lowRatio > 0.6);
+    check(!badLow.length, `BGM 150Hz 이하 에너지 60% 이하 (${res.bgm.map((r) => r.lowRatio).join(', ')})`);
+    check(res.mix.peakDb <= -0.5 && res.mix.peakDb >= -6, `겹친 믹스 마스터 피크 약 -3dBFS (${res.mix.peakDb})`);
+    await ctx.close();
+  }
+
   // ===== 5. 여러 화면 크기 =====
   console.log('[5] 화면 크기');
   for (const [w, h] of [

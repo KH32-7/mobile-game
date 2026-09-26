@@ -17,7 +17,7 @@ export const PHYS = {
   cupR: 11,
   cupPullR: 1.9, // cupR 배수
   cupPull: 460,
-  captureSpeed: 265,
+  captureSpeed: 250,
   lipSlow: 0.72,
   slopeAccel: 260,
   stopSpeed: 9,
@@ -25,6 +25,7 @@ export const PHYS = {
   maxRollTime: 16,
   teleR: 11,
   coinR: 12,
+  gimmeR: 52, // 이 거리 안에 멈추면 컨시드 (+1타로 홀아웃)
   maxSubMove: 3, // 서브스텝당 최대 이동 거리 (터널링 방지)
 };
 

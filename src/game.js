@@ -234,7 +234,9 @@ export class Game {
   }
   updateMods() {
     this.syn = synergyLevels(this.run ? this.run.relics : []);
-    this.M = relicMods(this.relicSet, this.run ? this.run.relicLv : {}, { hearts: this.run ? this.run.hearts : 5, syn: this.syn });
+    // 위기 보정: 파에 도달하면 컵이 커지고 컨시드 거리도 늘어남
+    this.mercy = !!this.run && this.state !== 'title' && this.strokes >= this.par;
+    this.M = relicMods(this.relicSet, this.run ? this.run.relicLv : {}, { hearts: this.run ? this.run.hearts : 5, syn: this.syn, mercy: this.mercy });
   }
   synLv(tag) {
     return (this.syn && this.syn[tag]) || 0;
@@ -341,6 +343,7 @@ export class Game {
       if (hs.timeLeft) this.timeLeft = hs.timeLeft;
     } else r.holeState = null;
     this.state = 'intro';
+    this.updateMods();
     this.introT = 1.6;
     this.camTarget(true);
     this.cam.scale *= 0.82;
@@ -505,6 +508,8 @@ export class Game {
     } else fire(b, 0);
     this.strokes++;
     meta.track('shots');
+    // 티샷은 컵이 조금 더 엄격 (홀인원은 드물게)
+    this.M.teeShot = this.firstShot;
     this.firstShot = false;
     this.state = 'rolling';
     this.shotPath = [[b.x, b.y]];
@@ -851,9 +856,33 @@ export class Game {
     }
     if (this.has('pinball') && this.bumpCount >= 3) this.gainCoins(5, st.balls[0].x, st.balls[0].y - 30);
     this.state = 'ready';
+    const wasMercy = this.mercy;
+    this.updateMods();
+    if (this.mercy && !wasMercy) {
+      const bb = st.balls[0];
+      this.fx.pop('위기 보정: 컵 확대', bb.x, bb.y - 30, { color: '#ffe57f', size: 14 });
+      this.ui.coach('mercy', '파에 도달하면 위기 보정! 컵과 컨시드 거리가 커짐', null, 'bottom');
+    }
+    if (this.gimmeCheck()) return;
     this.saveProgress();
     this.ui.hud(this);
     this.forfeitCheck();
+  }
+
+  // 컨시드: 컵 바로 옆에 멈추면 한 타를 더해 홀아웃 (짧은 퍼트 스트레스 제거)
+  gimmeCheck() {
+    const b = this.st.balls[0];
+    const i = this.hole.cups.findIndex((c) => c.real);
+    const c = cupPos(this.hole, this.st, i);
+    if (Math.hypot(c.x - b.x, c.y - b.y) > PHYS.gimmeR * (this.mercy ? 1.3 : 1)) return false;
+    this.strokes++;
+    this.fx.pop('컨시드 +1', b.x, b.y - 22, { color: '#b9f6ca', size: 16 });
+    this.state = 'rolling';
+    Object.assign(b, { sunk: true, moving: false, sinkCup: i, sinkX: c.x, sinkY: c.y, sinkT: 0 });
+    sfx.cup();
+    this.settleT = 0;
+    this.ui.coach('gimme', '컵 바로 옆(컨시드 거리)에 멈추면 1타를 더해서 자동으로 홀아웃', null, 'bottom');
+    return true;
   }
 
   // 가짜 컵은 다른 자리로 이동 (진짜 컵 단서는 깃발 방향)

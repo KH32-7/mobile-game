@@ -13,6 +13,55 @@ let musicFilter = null;
 let reverbSend = null;
 let vol = { music: 1, sfx: 1 };
 
+
+// 오디오 그래프 (실시간/오프라인 계측 공용)
+const MASTER = 1.2;
+function buildGraph(c, gain) {
+  master = c.createGain();
+  master.gain.value = gain;
+  // 마스터 컴프레서
+  const comp = c.createDynamicsCompressor();
+  comp.threshold.value = -16;
+  comp.knee.value = 8;
+  comp.ratio.value = 4;
+  comp.attack.value = 0.004;
+  comp.release.value = 0.2;
+  master.connect(comp).connect(c.destination);
+  noiseBuf = c.createBuffer(1, c.sampleRate * 1, c.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  // 절차적 리버브: 감쇠하는 스테레오 노이즈 임펄스
+  const len = Math.floor(c.sampleRate * 1.6);
+  const ir = c.createBuffer(2, len, c.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const cd = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) cd[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
+  }
+  const conv = c.createConvolver();
+  conv.buffer = ir;
+  const wet = c.createGain();
+  wet.gain.value = 0.22;
+  conv.connect(wet).connect(master);
+  reverbSend = conv;
+  sfxBus = c.createGain();
+  sfxBus.gain.value = 0.8 * vol.sfx;
+  sfxBus.connect(master);
+  const sfxSend = c.createGain();
+  sfxSend.gain.value = 0.35;
+  sfxBus.connect(sfxSend).connect(conv);
+  // 음악: 상황별 로우패스 (조준 중 닫힘)
+  musicFilter = c.createBiquadFilter();
+  musicFilter.type = 'lowpass';
+  musicFilter.frequency.value = 16000;
+  musicFilter.Q.value = 0.6;
+  musicBus = c.createGain();
+  musicBus.gain.value = 0.4 * vol.music;
+  musicBus.connect(musicFilter).connect(master);
+  const musSend = c.createGain();
+  musSend.gain.value = 0.5;
+  musicFilter.connect(musSend).connect(conv);
+}
+
 export function initAudio() {
   if (ctx) {
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -26,62 +75,20 @@ export function initAudio() {
     ctx = null;
     return;
   }
-  master = ctx.createGain();
-  master.gain.value = muted ? 0 : 0.9;
-  // 마스터 컴프레서
-  const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -16;
-  comp.knee.value = 8;
-  comp.ratio.value = 4;
-  comp.attack.value = 0.004;
-  comp.release.value = 0.2;
-  master.connect(comp).connect(ctx.destination);
-  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 1, ctx.sampleRate);
-  const d = noiseBuf.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-  // 절차적 리버브: 감쇠하는 스테레오 노이즈 임펄스
-  const len = Math.floor(ctx.sampleRate * 1.6);
-  const ir = ctx.createBuffer(2, len, ctx.sampleRate);
-  for (let ch = 0; ch < 2; ch++) {
-    const cd = ir.getChannelData(ch);
-    for (let i = 0; i < len; i++) cd[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
-  }
-  const conv = ctx.createConvolver();
-  conv.buffer = ir;
-  const wet = ctx.createGain();
-  wet.gain.value = 0.22;
-  conv.connect(wet).connect(master);
-  reverbSend = conv;
-  sfxBus = ctx.createGain();
-  sfxBus.gain.value = 0.8 * vol.sfx;
-  sfxBus.connect(master);
-  const sfxSend = ctx.createGain();
-  sfxSend.gain.value = 0.35;
-  sfxBus.connect(sfxSend).connect(conv);
-  // 음악: 상황별 로우패스 (조준 중 닫힘)
-  musicFilter = ctx.createBiquadFilter();
-  musicFilter.type = 'lowpass';
-  musicFilter.frequency.value = 16000;
-  musicFilter.Q.value = 0.6;
-  musicBus = ctx.createGain();
-  musicBus.gain.value = 0.32 * vol.music;
-  musicBus.connect(musicFilter).connect(master);
-  const musSend = ctx.createGain();
-  musSend.gain.value = 0.5;
-  musicFilter.connect(musSend).connect(conv);
+  buildGraph(ctx, muted ? 0 : MASTER);
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   if (bgmOn) startBgm();
 }
 
 export function setMuted(m) {
   muted = m;
-  if (master && ctx) master.gain.setTargetAtTime(m ? 0 : 0.9, ctx.currentTime, 0.05);
+  if (master && ctx) master.gain.setTargetAtTime(m ? 0 : MASTER, ctx.currentTime, 0.05);
 }
 export const isMuted = () => muted;
 export function setVolumes(music, sfx) {
   vol = { music, sfx };
   if (!ctx) return;
-  musicBus.gain.setTargetAtTime(0.32 * music, ctx.currentTime, 0.05);
+  musicBus.gain.setTargetAtTime(0.4 * music, ctx.currentTime, 0.05);
   sfxBus.gain.setTargetAtTime(0.8 * sfx, ctx.currentTime, 0.05);
 }
 // 음악 상황: 'aim' (필터 닫힘), 'tense' (컵 근처), 'normal'
@@ -91,7 +98,7 @@ export function setMood(m) {
   mood = m;
   const f = m === 'aim' ? 900 : m === 'tense' ? 2200 : 16000;
   musicFilter.frequency.setTargetAtTime(f, ctx.currentTime, m === 'normal' ? 0.25 : 0.08);
-  musicBus.gain.setTargetAtTime(0.32 * vol.music * (m === 'tense' ? 0.6 : 1), ctx.currentTime, 0.1);
+  musicBus.gain.setTargetAtTime(0.4 * vol.music * (m === 'tense' ? 0.6 : 1), ctx.currentTime, 0.1);
 }
 const rnd = (k = 0.08) => 1 + (Math.random() * 2 - 1) * k;
 // 금속 모달 합성 (비정수배 부분음)
@@ -106,12 +113,15 @@ export function resume() {
   if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
 }
 
+let offline = false;
 function ok() {
-  return ctx && ctx.state === 'running';
+  return ctx && (offline || ctx.state === 'running');
 }
 
+let gainK = 1;
 function tone({ f = 440, f2 = null, type = 'sine', t = 0, dur = 0.2, vol = 0.3, attack = 0.005, bus = sfxBus, q = null, lp = null }) {
   const now = ctx.currentTime + t;
+  vol = Math.min(1, vol * gainK);
   const o = ctx.createOscillator();
   o.type = type;
   o.frequency.setValueAtTime(f, now);
@@ -136,6 +146,7 @@ function tone({ f = 440, f2 = null, type = 'sine', t = 0, dur = 0.2, vol = 0.3, 
 
 function noise({ t = 0, dur = 0.2, vol = 0.3, type = 'bandpass', f = 1000, f2 = null, q = 1, bus = sfxBus, attack = 0.003 }) {
   const now = ctx.currentTime + t;
+  vol = Math.min(1, vol * gainK);
   const s = ctx.createBufferSource();
   s.buffer = noiseBuf;
   const fl = ctx.createBiquadFilter();
@@ -160,7 +171,8 @@ export const sfx = {
     noise({ dur: 0.05, vol: 0.45 + p * 0.35, type: 'bandpass', f: 2600 * k, q: 7 });
     noise({ dur: 0.025, vol: 0.3, type: 'highpass', f: 5000, q: 0.7 });
     tone({ f: 1100 * k + p * 400, f2: 240, type: 'triangle', dur: 0.07, vol: 0.32 });
-    tone({ f: 160 * k, f2: 70, type: 'sine', dur: 0.14, vol: 0.12 + p * 0.22 });
+    tone({ f: 160 * k, f2: 70, type: 'sine', dur: 0.14, vol: 0.08 + p * 0.14 });
+    tone({ f: 420 * k, f2: 260, type: 'triangle', dur: 0.1, vol: 0.12 + p * 0.1 }); // 폰 스피커용 배음
   },
   wall(speed, mat = 'wood') {
     if (!ok()) return;
@@ -172,6 +184,7 @@ export const sfx = {
       tone({ f: 210 * k, f2: 140, type: 'triangle', dur: 0.09, vol: g * 1.2, lp: 1400 });
       noise({ dur: 0.05, vol: g, type: 'bandpass', f: 900 * k, q: 3 });
     } else if (mat === 'ice') {
+      tone({ f: 520 * k, type: 'triangle', dur: 0.08, vol: g * 0.9 });
       tone({ f: 1850 * k, type: 'sine', dur: 0.18, vol: g * 0.7 });
       tone({ f: 1850 * 2.7 * k, type: 'sine', dur: 0.08, vol: g * 0.3 });
       noise({ dur: 0.03, vol: g * 0.8, type: 'highpass', f: 5000, q: 1 });
@@ -179,7 +192,7 @@ export const sfx = {
       noise({ dur: 0.07, vol: g * 1.1, type: 'lowpass', f: 900 * k, q: 1 });
       tone({ f: 120 * k, f2: 80, type: 'sine', dur: 0.1, vol: g });
     } else if (mat === 'neon') {
-      tone({ f: 620 * k, f2: 280, type: 'square', dur: 0.09, vol: g * 0.45, lp: 2600 });
+      tone({ f: 620 * k, f2: 280, type: 'square', dur: 0.09, vol: g * 0.8, lp: 2600 });
       noise({ dur: 0.05, vol: g * 0.6, type: 'bandpass', f: 3200 * k, q: 6 });
     } else {
       tone({ f: 520 * k, f2: 300, type: 'square', dur: 0.07, vol: g, lp: 2200 });
@@ -192,6 +205,7 @@ export const sfx = {
   },
   crate() {
     if (!ok()) return;
+    tone({ f: 380, f2: 240, type: 'triangle', dur: 0.12, vol: 0.2 });
     noise({ dur: 0.25, vol: 0.45, type: 'lowpass', f: 1400, f2: 200, q: 1 });
     tone({ f: 140, f2: 60, type: 'triangle', dur: 0.2, vol: 0.3 });
   },
@@ -201,7 +215,7 @@ export const sfx = {
     const k = rnd(0.05);
     [0, 0.07, 0.12, 0.155].forEach((t, i) => metal(1320 * k * (1 - i * 0.04), t, 0.18, 0.12 - i * 0.02));
     noise({ t: 0, dur: 0.2, vol: 0.12, type: 'bandpass', f: 3000, q: 4 });
-    tone({ f: 90, f2: 60, t: 0.17, dur: 0.15, vol: 0.2 });
+    tone({ f: 300, f2: 190, t: 0.17, dur: 0.15, vol: 0.12 });
     metal(1760 * k, 0.28, 1.2, 0.14, [1, 2.4, 3.9, 6.1]);
   },
   fanfare(level) {
@@ -290,6 +304,20 @@ export const sfx = {
     tone({ f: 600, f2: 200, type: 'sine', dur: 0.3, vol: 0.12 });
   },
 };
+
+// 믹스 기준(주요 효과음 RMS -24~-20dB, 작은 소리도 -35dB 이상)에 맞춘 효과음별 게인
+const SFX_GAIN = { shot: 2.4, wall: 4.3, cup: 0.6, splash: 1.3, coin: 1.6, bumper: 2.2, crate: 1.7, relic: 0.7, lip: 3.4, tele: 1.05, heart: 0.75, heal: 0.8, click: 4.2, aimTick: 11, tick: 4.2, sting: 1.6, ghost: 2.6, fanfare: 0.72, stinger: 0.66, gameOver: 0.8 };
+for (const [k, g] of Object.entries(SFX_GAIN)) {
+  const orig = sfx[k];
+  sfx[k] = (...a) => {
+    gainK = g;
+    try {
+      orig(...a);
+    } finally {
+      gainK = 1;
+    }
+  };
+}
 
 // ---------- 구르는 소리 (속도 비례, 지면별) ----------
 let roll = null;
@@ -434,7 +462,13 @@ function scheduleBar(t0) {
   });
   // 베이스
   const bassT = S.arp ? [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5] : [0, 2.5];
-  bassT.forEach((b, i) => note(mtof(ch[0] - 12 + (!S.arp && i ? 7 : 0)), t0 + b * BEAT, BEAT * (S.arp ? 0.45 : 1.4), S.arp ? 0.12 : 0.2, S.arp ? 'sawtooth' : 'sine', S.arp ? 500 : 0));
+  bassT.forEach((b, i) => {
+    const bm = ch[0] - 12 + (!S.arp && i ? 7 : 0);
+    note(mtof(bm), t0 + b * BEAT, BEAT * (S.arp ? 0.45 : 1.4), S.arp ? 0.08 : 0.12, S.arp ? 'sawtooth' : 'sine', S.arp ? 500 : 0);
+    // 폰 스피커에서도 들리는 배음 (한 옥타브 + 5도 위)
+    note(mtof(bm + 12), t0 + b * BEAT, BEAT * (S.arp ? 0.4 : 1.2), S.arp ? 0.05 : 0.08, 'triangle', 900);
+    if (!S.arp) note(mtof(bm + 19), t0 + b * BEAT, BEAT * 0.8, 0.03, 'triangle', 1200);
+  });
   // 드럼
   const kicks = bossMode ? [0, 1, 2, 3] : S.kick;
   kicks.forEach((b) => {
@@ -444,11 +478,12 @@ function scheduleBar(t0) {
     o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(bossMode ? 0.32 : 0.26, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(bossMode ? 0.24 : 0.18, t + 0.005);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
     o.connect(g).connect(musicBus);
     o.start(t);
     o.stop(t + 0.22);
+    note(320, t, 0.05, 0.05, 'triangle', 1500); // 킥 어택 배음
   });
   for (let k = 0; k < 8; k++) hat(t0 + k * BEAT * 0.5 + (k % 2 ? BEAT * 0.08 : 0), (k % 2 ? 1 : 0.5) * S.hat);
   if (S.shaker) for (let k = 0; k < 16; k++) hat(t0 + k * BEAT * 0.25, k % 4 === 2 ? 0.05 : 0.02, 5000, 0.04);
@@ -487,4 +522,59 @@ export function stopBgm() {
   bgmOn = false;
   if (bgmTimer) clearInterval(bgmTimer);
   bgmTimer = null;
+}
+
+// ---------- 믹스 계측 (OfflineAudioContext): 피크, 최대 100ms RMS, 150Hz 이하 에너지 비중 ----------
+export async function measure(name, args = [], dur = 1.2) {
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OAC) return null;
+  const sr = 44100;
+  const off = new OAC(2, Math.floor(sr * dur), sr);
+  const saved = { ctx, master, sfxBus, musicBus, noiseBuf, musicFilter, reverbSend, barIdx, style, bossMode };
+  ctx = off;
+  offline = true;
+  buildGraph(off, MASTER);
+  try {
+    if (name === 'bgm') {
+      if (args[0]) setBgmStyle(args[0], !!args[1]);
+      barIdx = 0;
+      scheduleBar(0.02);
+    } else if (name === 'mix') {
+      // 실제 플레이처럼 겹칠 때 마스터 피크
+      barIdx = 0;
+      scheduleBar(0.02);
+      sfx.shot(1);
+      sfx.wall(700, 'wood');
+      sfx.cup();
+      sfx.fanfare(2);
+    } else sfx[name](...args);
+  } finally {
+    ({ ctx, master, sfxBus, musicBus, noiseBuf, musicFilter, reverbSend, barIdx, style, bossMode } = saved);
+    offline = false;
+  }
+  const buf = await off.startRendering();
+  const L = buf.getChannelData(0),
+    R = buf.getChannelData(1);
+  let peak = 0,
+    tot = 0,
+    low = 0,
+    y = 0;
+  const a = 1 - Math.exp((-2 * Math.PI * 150) / sr);
+  const win = Math.floor(sr * 0.1);
+  let acc = 0,
+    best = 0;
+  const sq = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) {
+    const x = (L[i] + R[i]) / 2;
+    peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
+    y += a * (x - y);
+    tot += x * x;
+    low += y * y;
+    sq[i] = x * x;
+    acc += sq[i];
+    if (i >= win) acc -= sq[i - win];
+    if (acc > best) best = acc;
+  }
+  const db = (v) => (v > 0 ? 20 * Math.log10(v) : -120);
+  return { name, peakDb: +db(peak).toFixed(1), rmsDb: +db(Math.sqrt(best / win)).toFixed(1), lowRatio: +(tot ? low / tot : 0).toFixed(3) };
 }

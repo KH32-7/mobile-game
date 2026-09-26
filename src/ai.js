@@ -83,7 +83,7 @@ export function planShot(h, st, bx, by, M, maxSpeed, opts = {}) {
 
 
 // 사람 근사: 조준 오차가 샷 세기에 비례 (짧은 퍼트는 정확, 긴 샷은 부정확)
-export function humanize(shot, rng, aBase = 0.018, aK = 0.045, pBase = 0.03, pK = 0.1) {
+export function humanize(shot, rng, aBase = 0.015, aK = 0.03, pBase = 0.03, pK = 0.08) {
   const g = () => {
     let u = 0;
     for (let i = 0; i < 6; i++) u += rng();

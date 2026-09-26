@@ -931,6 +931,16 @@ export class Renderer {
         c.stroke();
         return;
       }
+      // 컨시드 거리 표시 (진짜 컵만)
+      if (cu.real && G.run && h.cups.length === 1) {
+        c.strokeStyle = 'rgba(255,255,255,0.22)';
+        c.lineWidth = 1.2;
+        c.setLineDash([2, 5]);
+        c.beginPath();
+        c.arc(p.x, p.y, PHYS.gimmeR * (G.mercy ? 1.3 : 1), 0, 7);
+        c.stroke();
+        c.setLineDash([]);
+      }
       // 흡입 범위 힌트 (자석)
       if (G.M.pull > 1) {
         c.strokeStyle = 'rgba(255,82,82,0.25)';

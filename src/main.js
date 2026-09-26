@@ -4,6 +4,7 @@ import { Renderer } from './render.js';
 import { Game } from './game.js';
 import { UI } from './ui.js';
 import { initAudio, setMuted, suspend, resume, isMuted, setVolumes } from './audio.js';
+import * as audioMod from './audio.js';
 import * as meta from './meta.js';
 
 const params = new URLSearchParams(location.search);
@@ -114,4 +115,5 @@ if (opts.debug) {
   window.__game = game;
   window.__ui = ui;
   window.__meta = meta;
+  window.__audio = audioMod;
 }
