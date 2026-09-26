@@ -466,6 +466,54 @@ img {
   padding: 1px 6px;
   border-radius: 6px;
 }
+.lobby-missions {
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+.lm-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.lm-head span {
+  color: #b8c4e0;
+  font-size: 12px;
+}
+.lm {
+  display: grid;
+  grid-template-columns: 1fr 70px 42px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.lm span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lm .bar {
+  height: 7px;
+}
+.lm em {
+  font-style: normal;
+  font-weight: 900;
+  text-align: right;
+  color: #b8c4e0;
+}
+.lm.full em {
+  color: #ffe36b;
+}
+@media (max-height: 720px) {
+  .lobby-missions {
+    display: none;
+  }
+}
 .records {
   text-align: center;
   font-size: 12px;

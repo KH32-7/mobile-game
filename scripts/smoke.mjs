@@ -122,10 +122,14 @@ async function pushToWin(page, timeoutMs = 90000) {
     });
     if (s.scene !== 'battle') return s.scene;
     if (!s.ended) {
-      const lane = k % 2 ? 14.5 : 3.5;
+      // 한 레인을 집중 공략 (왼쪽 프린세스가 부서지면 오른쪽)
+      const leftAlive = await page.evaluate(() => window.__ps.battle.towers.find((t) => t.team === 1 && t.towerType === 'princess' && t.lane === 0).alive);
+      const lane = leftAlive ? 3.5 : 14.5;
+      const si = s.hand.findIndex((id) => ['fireball', 'lightning', 'arrows'].includes(id));
       const spell = ['fireball', 'lightning', 'freeze', 'arrows'].includes(s.hand[0]);
-      if (spell) await dragCard(page, 0, s.threat ? s.threat.x : 9, s.threat ? s.threat.y : 3.5);
-      else if (s.threat && k % 3 === 2) await dragCard(page, 0, s.threat.x, Math.min(31, s.threat.y + 1.5));
+      if (si >= 0) await dragCard(page, si, 9, 2.8); // 주문으로 킹 타워 직접 공략
+      else if (spell) await dragCard(page, 0, s.threat ? s.threat.x : 9, s.threat ? s.threat.y : 3.5);
+      else if (s.threat && k % 2 === 1) await dragCard(page, 0, s.threat.x, Math.min(31, s.threat.y + 1.5));
       else await dragCard(page, 0, lane, 18.2);
       k++;
     }
@@ -281,6 +285,28 @@ async function main() {
     const s2 = await page.evaluate(() => ({ scene: window.__ps.scene, label: window.__ps.game.info?.label, cur: window.__ps.game.run.cur }));
     assert(s2.cur && s2.cur.row === 1 && ['battle', 'shop', 'rest'].includes(s2.scene), `다음 스테이지 진입 (${s2.scene} ${s2.label || ''})`);
     await page.screenshot({ path: `${SHOTS}/21-stage2.png` });
+
+    // ---------- 3-b. 보스 스테이지 (?stage=10) 격파 -> 원정 성공 -> 난이도 해금 ----------
+    await page.goto(BASE + '?debug&elixir&notut&stage=10&seed=5');
+    await page.waitForTimeout(500);
+    await page.tapSel('[data-act="abandon"]');
+    await page.tapSel('[data-act="abandonYes"]');
+    await page.tapSel('[data-act="runEndOk"]');
+    await page.tapSel('[data-act="newrun"]');
+    await page.tapSel('.mnode.avail');
+    await page.waitForTimeout(1200);
+    const boss = await page.evaluate(() => ({ scene: window.__ps.scene, boss: window.__ps.battle?.params.boss }));
+    assert(boss.scene === 'battle' && boss.boss, '보스전 시작');
+    await page.screenshot({ path: `${SHOTS}/22-boss.png` });
+    const r3 = await pushToWin(page, 120000);
+    const bres = await page.evaluate(() => ({ res: window.__ps.game.lastResult, towers: window.__ps.battle?.towers.map((t) => t.team + t.towerType + ':' + Math.round(t.hp)), t: window.__ps.battle?.time }));
+    log('boss result', JSON.stringify(bres));
+    assert(r3 === 'result' && bres.res.winner === 0, '보스전 승리');
+    await page.tapSel('[data-testid="to-reward"]');
+    await page.waitForTimeout(400);
+    const end = await page.evaluate(() => ({ scene: window.__ps.scene, tier: window.__ps.profile.tierUnlocked, runWins: window.__ps.profile.stats.runWins, run: !!window.__ps.game.run }));
+    assert(end.scene === 'runEnd' && end.tier === 2 && end.runWins === 1 && !end.run, '보스 격파 -> 원정 성공, 난이도 2 해금');
+    await page.screenshot({ path: `${SHOTS}/23-run-clear.png` });
     await page.context().close();
 
     // ---------- 4. 다른 화면 크기 레이아웃 ----------

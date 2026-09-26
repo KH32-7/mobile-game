@@ -346,6 +346,10 @@ class Game {
           <button data-act="achievements">업적${badge(ach)}</button>
           <button data-act="stats">통계</button>
         </div>
+        <div class="lobby-missions" data-act="missions">
+          <div class="lm-head"><b>오늘의 미션</b><span>${p.daily.missions.filter((m) => m.claimed).length}/3 완료</span></div>
+          ${p.daily.missions.map((m) => `<div class="lm ${m.progress >= m.n ? 'full' : ''}"><span>${M.missionText(m)}</span><div class="bar"><i style="width:${(m.progress / m.n) * 100}%"></i></div><em>${m.claimed ? '완료' : m.progress >= m.n ? '받기!' : `${m.progress}/${m.n}`}</em></div>`).join('')}
+        </div>
         <div class="records">최고 스테이지 <b>${p.stats.bestStage}</b> · 원정 클리어 <b>${p.stats.runWins}</b> · 총 승리 <b>${p.stats.wins}</b></div>
       </div>`;
     this.ui.show(html, 'title-screen');
@@ -906,7 +910,7 @@ class Game {
     });
   }
 
-  completeNode() {
+  completeNode(show = true) {
     const run = this.run;
     if (run.cur) {
       run.row = run.cur.row;
@@ -919,7 +923,7 @@ class Game {
     run.screen = 'map';
     run.reward = null;
     this.saveRun();
-    this.showMap();
+    if (show) this.showMap();
   }
 
   // ---------- 전투 ----------
@@ -949,7 +953,7 @@ class Game {
       playerDeck: cfg.playerDeck, enemyDeck: cfg.enemyDeck, relics: cfg.relics, params: cfg.params,
       kingHpFrac: cfg.kingHpFrac, debug: DEBUG, rng, hooks, infElixir: INF_ELIXIR, cardLevels: M.cardLevels(this.p),
     });
-    this.ai = new AI(this.battle, DEBUG ? { ...cfg.params, react: cfg.params.react * 2 } : cfg.params, rng);
+    this.ai = new AI(this.battle, DEBUG ? { ...cfg.params, react: cfg.params.react * 3 } : cfg.params, rng);
     R.syncCrowns(this.battle);
     this.info = { label: cfg.label, sub: cfg.sub };
     this.scene = 'battle';
@@ -1032,7 +1036,16 @@ class Game {
       } else if (res.winner === -1 && type !== 'boss') {
         run.kingHpFrac = Math.max(0.01, res.kingHpFrac);
       }
-      this.saveRun();
+      gain.hp = res.winner === 1 ? 0 : run.kingHpFrac;
+      gain.type = type;
+      // 결과 화면에서 앱을 닫아도 같은 노드를 다시 하지 않도록 즉시 진행 확정
+      this.runEndInfo = null;
+      if (res.winner === 1 || (res.winner === -1 && type === 'boss')) this.runEndInfo = this.finishRun(false);
+      else if (res.winner === 0 && type === 'boss') {
+        run.row = run.cur.row;
+        this.runEndInfo = this.finishRun(true);
+      } else if (res.winner === 0) this.prepareReward(false);
+      else this.completeNode(false);
     }
     this.lastGain = gain;
     this.save();
@@ -1057,15 +1070,14 @@ class Game {
       if (na) lines += `<div class="rline hl">새 아레나 도달! 로비에서 보상을 받아요</div>`;
       btns = `<button class="btn gold" data-act="again">다시 하기</button><button class="btn ghost" data-act="title">로비</button>`;
     } else {
-      const run = this.run;
-      const hp = Math.round((res.winner === 1 ? 0 : run.kingHpFrac) * 100);
+      const hp = Math.round(g.hp * 100);
       lines += `<div class="rline">킹 타워 HP <b>${hp}%</b></div>`;
       if (g.gold) lines += `<div class="rline">골드 <b class="plus">+${g.gold}</b></div>`;
       if (g.coins) lines += `<div class="rline">${COIN} 코인 <b class="plus">+${g.coins}</b></div>`;
-      if (res.winner === 1 || (res.winner === -1 && run.cur?.type === 'boss')) {
+      if (res.winner === 1 || (res.winner === -1 && g.type === 'boss')) {
         btns = `<button class="btn gold" data-act="afterResult">원정 결과 보기</button>`;
       } else if (res.winner === 0) {
-        btns = `<button class="btn gold" data-act="afterResult" data-testid="to-reward">${run.cur?.type === 'boss' ? '원정 완료!' : '보상 받기'}</button>`;
+        btns = `<button class="btn gold" data-act="afterResult" data-testid="to-reward">${g.type === 'boss' ? '원정 완료!' : '보상 받기'}</button>`;
       } else {
         lines += `<div class="rline">무승부: 보상 없이 진행</div>`;
         btns = `<button class="btn gold" data-act="afterResult">계속</button>`;
@@ -1081,24 +1093,18 @@ class Game {
   }
 
   afterResult() {
-    const res = this.lastResult;
-    const run = this.run;
-    if (!run) return this.showTitle();
-    const type = run.cur?.type;
-    if (res.winner === 1 || (res.winner === -1 && type === 'boss')) {
-      this.endRun(false);
-    } else if (res.winner === 0) {
-      if (type === 'boss') {
-        run.row = run.cur.row;
-        this.endRun(true);
-      } else this.prepareReward();
-    } else {
-      this.completeNode();
+    if (this.runEndInfo) {
+      const info = this.runEndInfo;
+      this.runEndInfo = null;
+      return this.showRunEnd(info);
     }
+    if (!this.run) return this.showTitle();
+    if (this.run.screen === 'reward' && this.run.reward) this.showReward();
+    else this.showMap();
   }
 
   // ---------- 보상 ----------
-  prepareReward() {
+  prepareReward(show = true) {
     const run = this.run;
     const rng = runRng(run);
     const elite = run.cur?.type === 'elite';
@@ -1112,7 +1118,7 @@ class Game {
     }
     run.screen = 'reward';
     this.saveRun();
-    this.showReward();
+    if (show) this.showReward();
   }
 
   showReward() {
@@ -1271,6 +1277,11 @@ class Game {
 
   // ---------- 원정 종료 ----------
   endRun(victory, abandoned) {
+    this.showRunEnd(this.finishRun(victory, abandoned));
+  }
+
+  // 원정 종료 데이터 처리 (보상 지급, 해금, 저장) 후 표시용 정보 반환
+  finishRun(victory, abandoned) {
     const run = this.run;
     const p = this.p;
     const T = this.tierDef();
@@ -1302,6 +1313,11 @@ class Game {
     this.save();
     this.run = null;
     writeRun(null);
+    return { victory, abandoned, T, reached, res, unlocked };
+  }
+
+  showRunEnd({ victory, abandoned, T, reached, res, unlocked }) {
+    const p = this.p;
     this.scene = 'runEnd';
     playBgm('menu');
     if (victory) sfx('win');
