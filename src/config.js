@@ -26,7 +26,7 @@ export const CONFIG = {
   GEM_STEEL_XMULT: 1.2,
 
   // 목표 점수 (Balatro 곡선 참고)
-  ANTE_BASE: [280, 1050, 2600, 4800, 7800, 11600, 17000, 24000],
+  ANTE_BASE: [370, 1200, 2650, 4500, 7200, 10700, 15500, 22000],
   ENDLESS_GROWTH: 1.9,
   BLIND_MULT: [1, 1.5, 2],
   BLIND_NAMES: ['스몰 블라인드', '빅 블라인드'],
@@ -47,7 +47,11 @@ export const CONFIG = {
   // 조각 생성 보정: 놓을 수 있는 조각이 하나도 없을 때 교체할 확률
   PLACEABLE_ASSIST: 0.85,
   SWAPS: 2, // 라운드당 트레이 교체
-  RESCUE_COST: 10,
+  RESCUE_PER_ANTE: 5, // 막힘 구제 비용: 앤티 x $5 또는 보유 코인 40% 중 큰 값
+  PLANET_BASE: 3, // 줄 강화 카드 가격 = 3 + 현재 레벨
+  LATE_SHOP_ANTE: 4, // 희귀 확정 슬롯, 에디션 부여 상시
+  AXIS_WEIGHT: 1.6, // 빌드 축 조커 상점 가중치
+  SYNERGY_WEIGHT: 3.5, // 보유 조커와 같은 축이면
 
   DEBUG_TARGET_SCALE: 0.06,
   DEBUG_BONUS_COINS: 10,

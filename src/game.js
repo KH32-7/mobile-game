@@ -2,7 +2,7 @@
 import { CONFIG, DEBUG, targetFor, COLORS } from './config.js';
 import { RNG } from './rng.js';
 import { SHAPES, SHAPE_BY_ID } from './pieces.js';
-import { JOKERS, JOKER_BY_ID, EDITIONS, editionEffect } from './jokers.js';
+import { JOKERS, JOKER_BY_ID, EDITIONS, editionEffect, AXIS_COND, synergyMult } from './jokers.js';
 import { BOSSES, SHOWDOWNS, BOSS_BY_ID } from './bosses.js';
 import { HANDS, HAND_KEYS, handType, PLANETS, GEM_CARDS, PACKS, VOUCHERS, PLANET_BY_ID, GEM_CARD_BY_ID, PACK_BY_ID } from './items.js';
 
@@ -506,6 +506,15 @@ export class Game {
       if (ee) { apply(ee); steps.push({ kind: 'joker', idx: i, e: ee, chips, mult, ed: j.ed }); }
     });
 
+    // 빌드 축 시너지
+    const axN = {};
+    for (const j of this.jokers) { const ax = !j.disabled && JOKER_BY_ID[j.id].axis; if (ax) axN[ax] = (axN[ax] || 0) + 1; }
+    for (const [ax, n] of Object.entries(axN)) {
+      if (n < 2 || !AXIS_COND[ax](ctx, this)) continue;
+      const e = { t: 'xmult', v: synergyMult(n) };
+      apply(e); steps.push({ kind: 'synergy', axis: ax, n, e, chips, mult });
+    }
+
     // 저주 최종 보정
     if (curse === 'lonely' && lines === 1) { const e = { t: 'xmult', v: 0.5 }; apply(e); steps.push({ kind: 'curse', e, chips, mult }); }
     if (curse === 'crimson') { const e = { t: 'xmult', v: 0.5 }; apply(e); steps.push({ kind: 'curse', e, chips, mult }); }
@@ -536,12 +545,21 @@ export class Game {
   get maxSwaps() { return CONFIG.SWAPS + (this.hasVoucher('v_swap') ? 1 : 0) + this.jokers.filter((j) => !j.disabled && j.id === 'recycler').length; }
 
   // 트레이 교체: 현재 조각을 버리고 새 3조각 (트레이 수는 소모하지 않음)
-  swapTray() {
+  // sel: 교체할 슬롯 번호 배열 (비우면 남은 조각 전부)
+  swapTray(sel = null) {
     if (this.phase !== 'play' || this.swapsLeft <= 0) return false;
+    const slots = (sel && sel.length ? sel : [0, 1, 2]).filter((i) => this.tray[i]);
+    if (!slots.length) return false;
     this.swapsLeft--;
-    this.handsLeft++;
-    this.drawTray();
-    this.jokers.forEach((j) => { if (!j.disabled && JOKER_BY_ID[j.id].onSwap) JOKER_BY_ID[j.id].onSwap(this, j); });
+    for (const i of slots) this.tray[i] = this.makePiece();
+    // 보정: 교체 후에도 놓을 곳이 없으면 교체한 슬롯 하나를 놓을 수 있는 조각으로
+    if (!this.tray.some((p) => p && this.fitsAnywhere(p.shape))) {
+      const fit = this.rng.shuffle(SHAPES.slice()).find((sh) => this.fitsAnywhere(sh));
+      if (fit) this.tray[slots[this.rng.int(slots.length)]] = this.makePiece(fit);
+    }
+    this.lastSwapCount = slots.length;
+    this.runStats.swaps = (this.runStats.swaps || 0) + 1;
+    this.jokers.forEach((j) => { if (!j.disabled && JOKER_BY_ID[j.id].onSwap) JOKER_BY_ID[j.id].onSwap(this, j, slots.length); });
     this.revealIfStuck();
     return true;
   }
@@ -549,7 +567,7 @@ export class Game {
   // 막힘 구제 (런당 1회): 조커 1장 희생 또는 코인 지불, 가장 꽉 찬 가로줄 3개 제거
   rescue(how, ji) {
     if (this.rescueUsed || this.phase !== 'play') return false;
-    if (how === 'coins') { if (this.coins < CONFIG.RESCUE_COST) return false; this.coins -= CONFIG.RESCUE_COST; }
+    if (how === 'coins') { const cost = this.rescueCost; if (this.coins < cost) return false; this.coins -= cost; }
     else if (how === 'joker') { if (!this.jokers[ji]) return false; this.jokers.splice(ji, 1); }
     else return false;
     this.rescueUsed = true;
@@ -561,6 +579,9 @@ export class Game {
     this.revealIfStuck();
     return true;
   }
+
+  // 구제 비용: 앤티 x $5 와 보유 코인 40% 중 큰 값
+  get rescueCost() { return Math.max(CONFIG.RESCUE_PER_ANTE * this.ante, Math.ceil(this.coins * 0.4)); }
 
   declineRescue() { this.rescueUsed = true; return this.tryPhoenix('stuck'); }
 
@@ -609,7 +630,7 @@ export class Game {
 
   finishRound() {
     const base = this.opts.stake >= 2 && this.blind === 0 ? 0 : CONFIG.BLIND_REWARD[this.blind];
-    const hands = this.handsLeft * CONFIG.COIN_PER_HAND + (this.swapsLeft || 0);
+    const hands = this.handsLeft * CONFIG.COIN_PER_HAND;
     const interest = this.opts.stake >= 5 ? 0 : Math.min(this.interestCap, Math.floor(this.coins / CONFIG.INTEREST_STEP));
     let jokerCoins = 0;
     for (const j of this.jokers) { const d = JOKER_BY_ID[j.id]; if (d.onRoundEnd && !j.disabled) jokerCoins += d.onRoundEnd(this, j) || 0; }
@@ -644,6 +665,7 @@ export class Game {
   openShop() {
     this.rerollCost = CONFIG.REROLL_BASE - (this.hasVoucher('v_coupon') ? 2 : 0);
     this.freeRerolls = this.hasPassive('freeReroll') ? 1 : 0;
+    this.forceNew = this.voucherAnte !== this.ante;
     if (this.voucherAnte !== this.ante) {
       const left = VOUCHERS.filter((v) => !this.vouchers.includes(v.id));
       this.voucherOffer = left.length ? { id: this.rng.pick(left).id, price: 10, sold: false } : null;
@@ -655,6 +677,38 @@ export class Game {
       packs: this.rollPacks(2),
       special: this.rollSpecial(),
     };
+    this.forceNew = false;
+    this.addLateOffers();
+  }
+
+  // 앤티 4부터: 희귀 확정 슬롯($12~15) + 에디션 부여 상시
+  addLateOffers() {
+    const sh = this.shop;
+    sh.rare = null; sh.enhance = null;
+    if (this.ante < CONFIG.LATE_SHOP_ANTE) return;
+    const owned = new Set([...this.jokers.map((j) => j.id), ...sh.jokers.map((o) => o.id)]);
+    const avail = this.poolIds().map((id) => JOKER_BY_ID[id]).filter((d) => d.rarity !== 'legendary' && !owned.has(d.id));
+    // 희귀가 아직 해금되지 않았으면 고급으로 대체
+    let pool = avail.filter((d) => d.rarity === 'rare');
+    if (!pool.length) pool = avail.filter((d) => d.rarity === 'uncommon');
+    if (pool.length) {
+      const d = this.rng.weighted(pool.map((x) => [x, this.synergyWith(x.id) ? 3 : 1]));
+      sh.rare = { id: d.id, ed: null, price: this.price(12 + this.rng.int(4)), sold: false, guar: true };
+    }
+    if (!sh.special || sh.special.id !== 's_edition') sh.enhance = { id: 's_edition', price: this.price(12), sold: false };
+  }
+
+  // 같은 빌드 축의 조커를 이미 가지고 있는지
+  synergyWith(id) {
+    const ax = JOKER_BY_ID[id] && JOKER_BY_ID[id].axis;
+    return !!ax && this.jokers.some((j) => j.id !== id && JOKER_BY_ID[j.id].axis === ax);
+  }
+
+  planetPrice(hand) { return this.price(CONFIG.PLANET_BASE + this.lineLv[hand]); }
+
+  refreshCardPrices() {
+    if (!this.shop) return;
+    for (const o of this.shop.cards) if (o.kind === 'planet' && !o.sold) o.price = this.planetPrice(PLANET_BY_ID[o.id].hand);
   }
 
   // 고가 특수 서비스 (코인 싱크)
@@ -665,8 +719,8 @@ export class Game {
   }
 
   // arg: s_level -> 줄 종류 키, s_clone/s_edition -> 조커 인덱스
-  buySpecial(arg) {
-    const o = this.shop && this.shop.special;
+  buySpecial(arg, slot = 'special') {
+    const o = this.shop && this.shop[slot];
     if (!o || o.sold || this.coins < o.price) return false;
     if (o.id === 's_level') {
       if (!HAND_KEYS.includes(arg)) return false;
@@ -682,6 +736,7 @@ export class Game {
     }
     this.coins -= o.price;
     o.sold = true;
+    this.refreshCardPrices();
     return true;
   }
 
@@ -707,9 +762,15 @@ export class Game {
       const taken = new Set([...owned, ...offers.map((o) => o.id)]);
       const pool = this.poolIds().map((id) => JOKER_BY_ID[id]).filter((j) => !taken.has(j.id));
       if (!pool.length) break;
-      const d = this.rng.weighted(pool.map((j) => {
+      let src = pool;
+      if (i === 0 && this.forceNew && this.isUndiscovered) {
+        const fresh = pool.filter((j) => this.isUndiscovered(j.id));
+        if (fresh.length) src = fresh;
+      }
+      const d = this.rng.weighted(src.map((j) => {
         let w = j.rarity === 'legendary' ? 0.6 * legendBoost : CONFIG.RARITY_WEIGHT[j.rarity];
         if (recent.has(j.id)) w *= 0.25;
+        if (j.axis) w *= this.synergyWith(j.id) ? CONFIG.SYNERGY_WEIGHT : CONFIG.AXIS_WEIGHT;
         return [j, w];
       }));
       offers.push(this.jokerOffer(d, this.rollEdition()));
@@ -721,7 +782,7 @@ export class Game {
   rollCards(n) {
     const out = [];
     for (let i = 0; i < n; i++) {
-      if (this.rng.chance(0.6)) out.push({ kind: 'planet', id: this.rng.pick(PLANETS).id, price: this.price(3), sold: false });
+      if (this.rng.chance(0.6)) { const pl = this.rng.pick(PLANETS); out.push({ kind: 'planet', id: pl.id, price: this.planetPrice(pl.hand), sold: false }); }
       else out.push({ kind: 'gem', id: this.rng.pick(GEM_CARDS).id, price: this.price(3), sold: false });
     }
     return out;
@@ -737,7 +798,7 @@ export class Game {
   }
 
   buyJoker(i) {
-    const o = this.shop && this.shop.jokers[i];
+    const o = this.shop && (i === 'rare' ? this.shop.rare : this.shop.jokers[i]);
     if (!o || o.sold || this.coins < o.price) return false;
     if (this.jokers.length >= this.jokerSlots && o.ed !== 'neg') return false;
     this.coins -= o.price;
@@ -763,6 +824,7 @@ export class Game {
     this.coins -= o.price;
     o.sold = true;
     this.useCard(o.kind, o.id);
+    this.refreshCardPrices();
     return true;
   }
 
@@ -791,6 +853,7 @@ export class Game {
       this.jokers.push({ id: c.id, v: 0, price: d.rarity === 'legendary' ? 20 : CONFIG.PRICE[d.rarity], ed: c.ed || null });
     } else this.useCard(c.kind, c.id);
     this.packOpen = null;
+    this.refreshCardPrices();
     return true;
   }
 
@@ -827,6 +890,7 @@ export class Game {
     this.shop.cards = this.rollCards(2);
     this.shop.packs = this.rollPacks(2);
     this.shop.special = this.rollSpecial();
+    this.addLateOffers();
     return true;
   }
 

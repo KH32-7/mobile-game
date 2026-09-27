@@ -11,6 +11,19 @@ const N = CONFIG.BOARD;
 export const GEM_COLOR = { gold: '#ffd23f', ruby: '#ff2e63', glass: '#9ff0ff', steel: '#b8c2d6' };
 export const GEM_NAME = { gold: '금', ruby: '루비', glass: '유리', steel: '강철' };
 
+const ANTE_TINT = [null, 'rgba(40,200,220,0.10)', 'rgba(60,110,255,0.12)', 'rgba(150,80,255,0.13)', 'rgba(230,70,200,0.12)', 'rgba(255,160,40,0.12)', 'rgba(255,60,60,0.13)', 'rgba(200,0,40,0.18)'];
+
+// 어두운/회색 보스 색은 밝게 섞어 대비 확보
+export function readable(hex) {
+  if (!hex || hex[0] !== '#' || hex.length < 7) return hex;
+  const n = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const lum = (0.2126 * n[0] + 0.7152 * n[1] + 0.0722 * n[2]) / 255;
+  const sat = (Math.max(...n) - Math.min(...n)) / 255;
+  const k = lum < 0.55 || sat < 0.25 ? 0.45 : 0;
+  if (!k) return hex;
+  return '#' + n.map((v) => Math.round(v + (255 - v) * k).toString(16).padStart(2, '0')).join('');
+}
+
 function rr(ctx, x, y, w, h, r) {
   r = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -66,6 +79,9 @@ export function computeLayout(vw, vh, safe) {
   L.swapBtn = { x: L.bar.x, y: L.bar.y, w: Math.min(190, L.bar.w * 0.55), h: 44 };
   L.traySlot = (i) => ({ x: L.tray.x + (L.tray.w / 3) * i, y: L.tray.y, w: L.tray.w / 3, h: L.tray.h });
   L.trayScale = Math.min(cell * 0.6, (L.tray.w / 3 - 14) / 5, (trayH - 10) / 3.2);
+  // 3칸 이하 조각은 더 크게 보여 줌
+  L.trayBig = Math.max(L.trayScale, Math.min(cell * 0.74, (L.tray.w / 3 - 12) / 3.3, (trayH - 8) / 3.15));
+  L.pieceScale = (p) => (p.shape.w <= 3 && p.shape.h <= 3 ? L.trayBig : L.trayScale);
   L.jokerRect = (i, n = 5) => {
     const cw = Math.min(cardW, Math.floor((L.jokers.w - jgap * (n - 1)) / n));
     const tot = cw * n + jgap * (n - 1);
@@ -85,6 +101,12 @@ export class Renderer {
     this.cardCache = new Map();
   }
 
+  setAnte(ante) {
+    if (this.ante === ante) return;
+    this.ante = ante;
+    if (this.L) { this.buildBg(this.L.vw, this.L.vh); this.bgShown = null; }
+  }
+
   setTheme(skin) {
     this.theme = skin || SKINS[0];
     if (this.L) { this.buildBg(this.L.vw, this.L.vh); this.bgShown = null; }
@@ -94,9 +116,9 @@ export class Renderer {
   prewarm() {
     const L = this.L;
     if (!L || typeof document === 'undefined') return;
-    for (let c = -1; c < COLORS.length; c++) { this.block(c, L.cell); this.block(c, L.trayScale); }
+    for (let c = -1; c < COLORS.length; c++) { this.block(c, L.cell); this.block(c, L.trayScale); this.block(c, L.trayBig); }
     const saved = this.ctx;
-    for (const gm of ['gold', 'ruby', 'glass', 'steel']) { this.drawGem(gm, -100, -100, L.cell, 0); this.drawGem(gm, -100, -100, L.trayScale, 0); }
+    for (const gm of ['gold', 'ruby', 'glass', 'steel']) { this.drawGem(gm, -100, -100, L.cell, 0); this.drawGem(gm, -100, -100, L.trayScale, 0); this.drawGem(gm, -100, -100, L.trayBig, 0); }
     this.ctx = saved;
   }
 
@@ -165,6 +187,9 @@ export class Renderer {
     fg.addColorStop(0, T.felt[0]); fg.addColorStop(1, T.felt[1]);
     g.fillStyle = fg; g.fill();
     g.clip();
+    // 앤티마다 펠트에 은은한 색 변화
+    const tint = ANTE_TINT[((this.ante || 1) - 1) % ANTE_TINT.length];
+    if (tint) { g.fillStyle = tint; g.fillRect(fx, fy, fw, fh); }
     // 펠트 노이즈
     for (let i = 0; i < (fw * fh) / 30; i++) {
       g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.06)';
@@ -261,7 +286,7 @@ export class Renderer {
   drawBlock(colorIdx, x, y, size, alpha = 1) {
     // 스프라이트는 보드 칸 / 트레이 칸 두 크기만 캐시하고 나머지는 스케일해서 그림 (애니메이션 중 캐시 폭증 방지)
     let base = size;
-    if (this.L) { base = size <= this.L.trayScale * 1.15 ? this.L.trayScale : this.L.cell; if (size > base * 1.3) base = size; }
+    if (this.L) { base = size <= this.L.trayScale * 1.1 ? this.L.trayScale : size <= this.L.trayBig * 1.1 ? this.L.trayBig : this.L.cell; if (size > base * 1.3) base = size; }
     const img = this.block(colorIdx, base);
     const ctx = this.ctx;
     if (alpha !== 1) ctx.globalAlpha = alpha;
@@ -515,9 +540,9 @@ export class Renderer {
     const hd = app.hud || { ante: g.ante, blind: g.blind, name: g.blindName, color: g.blind === 2 ? g.bossDef.color : null, endless: g.endless };
     this.text(`앤티 ${hd.ante}${hd.endless ? '' : ' / ' + CONFIG.FINAL_ANTE}`, bx, h.y + 15, { size: 13, color: '#c9b8ff', weight: 700 });
     const boss = hd.blind === 2;
-    const bcol = boss ? hd.color : hd.blind === 1 ? '#ffb627' : '#36c9ff';
+    const bcol = boss ? readable(hd.color) : hd.blind === 1 ? '#ffb627' : '#36c9ff';
     if (boss) drawBossIcon(ctx, hd.boss, bx + 9, h.y + 34, 9);
-    this.text((boss ? '보스 · ' : '') + hd.name, bx + (boss ? 22 : 0), h.y + 34, { size: 16, color: bcol, weight: 900, glow: boss ? bcol : null, maxW: h.w - 190 });
+    this.text((boss ? '보스 · ' : '') + hd.name, bx + (boss ? 22 : 0), h.y + 34, { size: 16, color: bcol, weight: 900, stroke: 'rgba(0,0,0,0.55)', sw: 3, maxW: h.w - 190 });
     app.hit.blind = { x: bx, y: h.y, w: h.w - 180, h: h.h };
     // 코인
     const cx = h.x + h.w;
@@ -578,7 +603,7 @@ export class Renderer {
       const on = i < g.handsLeft;
       const px = tx - 28 + (i % 4) * 7, py = s.y + 8 + Math.floor(i / 4) * 10;
       rr(ctx, px, py, 5, 8, 1.5);
-      ctx.fillStyle = on ? '#3ddc97' : 'rgba(255,255,255,0.15)'; ctx.fill();
+      ctx.fillStyle = on ? '#3ddc97' : i === g.handsLeft && g.tray.some(Boolean) ? '#ffd23f' : 'rgba(255,255,255,0.15)'; ctx.fill();
     }
     if (g.handsLeft === 0) this.text('마지막!', tx, s.y + 17, { size: 11, color: '#ff4d6d', weight: 900, align: 'right' });
   }
@@ -779,7 +804,7 @@ export class Renderer {
       ctx.fillStyle = gg; ctx.fill();
       ctx.strokeStyle = 'rgba(255,182,39,0.3)'; ctx.lineWidth = 7; ctx.stroke(); ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.stroke();
       const parts = [
-        [fmt(k.chips), '#7fd0ff', 17], [' X ', '#fff', 15], [fmt(k.mult), '#ff8fa3', 17], [' = ', '#fff', 15], [fmt(k.totalShown), '#ffe68a', 26],
+        [fmt(k.chips), '#7fd0ff', 17], [' X ', '#fff', 15], [fmt(k.mult), '#ff8fa3', 17], [' = ', '#fff', 15], [k.totalReady === false || !k.totalShown ? '?' : fmt(k.totalShown), '#ffe68a', 26],
       ];
       let tw = 0;
       for (const [t, , fs] of parts) { ctx.font = `900 ${fs}px ${FONT}`; tw += ctx.measureText(t).width; }
@@ -886,17 +911,18 @@ export class Renderer {
     if (g.phase === 'play') {
       const grace = g.comboGrace;
       const left = Math.max(0, grace - g.missStreak);
-      const label = g.combo > 0 ? `콤보 ${g.combo} · 다음 +${g.combo * CONFIG.COMBO_MULT} 배수` : '콤보 0 · 연속 제거로 배수 UP';
+      const label = g.combo > 0 ? `콤보 ${g.combo} · 다음 +${g.combo * CONFIG.COMBO_MULT} 배수` : '콤보 0 · 연속 제거 = 배수 UP';
+      const dots = g.combo > 0 ? grace : 0;
       ctx.font = `900 13px ${FONT}`;
-      const tw = ctx.measureText(label).width;
-      const pw = tw + 16 + grace * 9;
+      const tw = ctx.measureText(label).width + 6;
+      const pw = tw + 16 + dots * 9;
       const px = b.x + b.w - pw + 4, py = b.y - 16;
       rr(ctx, px, py, pw, 20, 10);
       const hot = g.combo >= 5 ? '#ff4d6d' : g.combo >= 3 ? '#ffb627' : g.combo > 0 ? '#36c9ff' : '#8f80b8';
       ctx.fillStyle = 'rgba(10,4,24,0.9)'; ctx.fill();
       ctx.strokeStyle = hot; ctx.lineWidth = 1.5; ctx.stroke();
       this.text(label, px + 8, py + 10.5, { size: 13, color: hot, weight: 900 });
-      for (let i = 0; i < grace; i++) {
+      for (let i = 0; i < dots; i++) {
         ctx.beginPath(); ctx.arc(px + 12 + tw + i * 9, py + 10, 3.2, 0, Math.PI * 2);
         ctx.fillStyle = i < left ? hot : 'rgba(255,255,255,0.18)'; ctx.fill();
       }
@@ -922,11 +948,13 @@ export class Renderer {
     rr(ctx, sb.x, sb.y + 4, sb.w, sb.h - 8, 18);
     ctx.fillStyle = left ? (stuck ? `rgba(255,190,40,${0.35 + pulse * 0.3})` : 'rgba(0,0,0,0.35)') : 'rgba(0,0,0,0.2)'; ctx.fill();
     ctx.strokeStyle = left ? (stuck ? '#ffd23f' : 'rgba(255,215,120,0.55)') : 'rgba(255,255,255,0.12)'; ctx.lineWidth = stuck ? 2.5 : 1.5; ctx.stroke();
-    this.text('↻ 트레이 교체', sb.x + 14, sb.y + sb.h / 2 + 1, { size: 14, color: left ? '#ffe68a' : 'rgba(255,255,255,0.35)', weight: 900 });
+    const nsel = app.swapSel ? app.swapSel.size : 0;
+    this.text(nsel ? `↻ ${nsel}개 교체` : '↻ 트레이 교체', sb.x + 14, sb.y + sb.h / 2 + 1, { size: 14, color: left ? '#ffe68a' : 'rgba(255,255,255,0.35)', weight: 900 });
     for (let i = 0; i < max; i++) {
       ctx.beginPath(); ctx.arc(sb.x + sb.w - 18 - (max - 1 - i) * 14, sb.y + sb.h / 2, 5, 0, Math.PI * 2);
       ctx.fillStyle = i < left ? '#3ddc97' : 'rgba(255,255,255,0.15)'; ctx.fill();
     }
+    if (!stuck && left && !nsel && g.phase === 'play') this.text('조각 탭 = 골라서 교체', sb.x + sb.w + 8, sb.y + sb.h / 2 + 1, { size: 11, color: 'rgba(255,230,160,0.55)', weight: 700, maxW: L.pause.x - sb.x - sb.w - 12 });
     if (stuck && left) this.text('놓을 곳 없음! 교체하기', sb.x + sb.w + 8, sb.y + sb.h / 2 + 1, { size: 12, color: '#ffd23f', weight: 900, maxW: L.pause.x - sb.x - sb.w - 12 });
     // 일시정지
     const p = L.pause;
@@ -957,7 +985,7 @@ export class Renderer {
       if (!p) continue;
       if (app.drag && app.drag.idx === i) continue;
       const slot = L.traySlot(i);
-      const ts = L.trayScale;
+      const ts = L.pieceScale(p);
       const at = app.trayAnim[i] ?? 1;
       const e = at >= 1 ? 1 : 1 - Math.pow(1 - at, 3);
       const w = p.shape.w * ts, h = p.shape.h * ts;
@@ -977,6 +1005,12 @@ export class Renderer {
       ctx.globalAlpha = e * (fits ? 1 : 0.35);
       this.drawPiece(p, x, y, ts, 1, time);
       ctx.globalAlpha = 1;
+      if (app.swapSel && app.swapSel.has(i)) {
+        rr(ctx, slot.x + 6, slot.y + 4, slot.w - 12, slot.h - 8, 12);
+        ctx.setLineDash([6, 5]); ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2.5; ctx.stroke(); ctx.setLineDash([]);
+        rr(ctx, slot.x + slot.w / 2 - 22, slot.y + 2, 44, 18, 9); ctx.fillStyle = '#ffd23f'; ctx.fill();
+        this.text('교체', slot.x + slot.w / 2, slot.y + 11.5, { size: 11, color: '#3a2200', weight: 900, align: 'center' });
+      }
     }
   }
 
@@ -1040,11 +1074,12 @@ export class Renderer {
       const w = Math.max(r.w, ctx.measureText(b.text).width + 14);
       let x = r.x + r.w / 2 - w / 2;
       x = Math.max(L.gx + 16, Math.min(L.gx + L.gw - w - 16, x));
-      const y = r.y + r.h + 6 + Math.min(t * 30, 4) + order * 27;
+      // 조커 카드 위쪽으로 쌓아 공식 바를 가리지 않음
+      const y = Math.max(2, r.y - 30 - Math.min(t * 30, 4) - order * 27);
       ctx.globalAlpha = a;
       rr(ctx, x, y, w, 24, 8);
       ctx.fillStyle = b.color; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - 6, y + 1); ctx.lineTo(r.x + r.w / 2, y - 6); ctx.lineTo(r.x + r.w / 2 + 6, y + 1); ctx.fill();
+      if (order === 0) { ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - 6, y + 23); ctx.lineTo(r.x + r.w / 2, y + 30); ctx.lineTo(r.x + r.w / 2 + 6, y + 23); ctx.fill(); }
       this.text(b.text, x + w / 2, y + 12.5, { size: 13, color: '#fff', weight: 900, align: 'center', stroke: 'rgba(0,0,0,0.35)', sw: 3 });
       ctx.globalAlpha = 1;
     });
@@ -1068,7 +1103,7 @@ export class Renderer {
     ctx.fillStyle = bn.color;
     ctx.fillRect(L.gx, cy - h / 2, L.gw, 3); ctx.fillRect(L.gx, cy + h / 2 - 3, L.gw, 3);
     if (bn.boss) drawBossIcon(ctx, bn.boss, x + 34, cy, 24);
-    this.text(bn.title, x + L.gw / 2 + (bn.boss ? 18 : 0), cy - (bn.sub ? 14 : 0), { size: bn.boss ? 26 : 30, color: bn.color, weight: 900, align: 'center', glow: bn.color, maxW: L.gw - 20 });
+    this.text(bn.title, x + L.gw / 2 + (bn.boss ? 18 : 0), cy - (bn.sub ? 14 : 0), { size: bn.boss ? 26 : 30, color: readable(bn.color), weight: 900, align: 'center', stroke: 'rgba(0,0,0,0.6)', sw: 5, maxW: L.gw - 20 });
     if (bn.sub) this.text(bn.sub, x + L.gw / 2, cy + 22, { size: 14, color: '#fff', weight: 700, align: 'center', maxW: L.gw - 24 });
     ctx.restore();
   }

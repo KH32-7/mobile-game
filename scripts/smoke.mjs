@@ -153,6 +153,15 @@ async function main() {
         await page.touchscreen.tap(sb.x + sb.w / 2, sb.y + sb.h / 2); await page.waitForTimeout(250);
         const after = await page.evaluate(() => ({ s: window.__bj.game.swapsLeft, h: window.__bj.game.handsLeft }));
         check(after.s === before.s - 1 && after.h === before.h, '트레이 교체 (교체 1회 소모, 트레이 수 유지)');
+        // 부분 교체: 조각 하나를 탭해 선택한 뒤 교체
+        const c0 = await page.evaluate(() => window.__bj.slotCenter(0));
+        const keep = await page.evaluate(() => JSON.stringify(window.__bj.game.tray.slice(1)));
+        await page.touchscreen.tap(c0.x, c0.y); await page.waitForTimeout(200);
+        check(await page.evaluate(() => window.__bj.app.swapSel.has(0)), '조각 탭 = 교체 대상 선택');
+        await page.screenshot({ path: 'shots/05-swap-select.png' });
+        await page.touchscreen.tap(sb.x + sb.w / 2, sb.y + sb.h / 2); await page.waitForTimeout(250);
+        const r2 = await page.evaluate(() => ({ s: window.__bj.game.swapsLeft, rest: JSON.stringify(window.__bj.game.tray.slice(1)), sel: window.__bj.app.swapSel.size }));
+        check(r2.s === after.s - 1 && r2.rest === keep && r2.sel === 0, '부분 교체: 선택한 조각만 바뀜');
       }
       await page.screenshot({ path: 'shots/05-play-tutorial.png' });
       await page.waitForTimeout(1200);
@@ -228,8 +237,23 @@ async function main() {
       await page.locator('#tile-special').tap(); await page.waitForTimeout(150);
       await page.screenshot({ path: 'shots/09-shop-special.png' });
       await page.locator('#sp-double').tap(); await page.waitForTimeout(150);
-      check((await page.evaluate(() => window.__bj.game.lineLv.double)) === dblBefore + 1, '특수 서비스: 줄 레벨 선택 구매');
+      check((await page.evaluate(() => window.__bj.game.lineLv.double)) === dblBefore + (await page.evaluate(() => (window.__bj.game.hasVoucher('v_telescope') ? 2 : 1))), '특수 서비스: 줄 레벨 선택 구매');
       await page.screenshot({ path: 'shots/09-shop-after.png' });
+      // 앤티 4 이후 상점: 희귀 확정 슬롯 + 에디션 부여 상시 + 시너지 태그
+      await page.evaluate(() => {
+        const g = window.__bj.game;
+        g.jokers[0] = { id: 'horizon', v: 0, price: 6, ed: null };
+        g.ante = 4; g.addLateOffers();
+        g.shop.jokers[0] = { id: 'rower', ed: null, price: 4, sold: false };
+        window.__bj.ui.showShop(g);
+      });
+      await page.waitForTimeout(150);
+      check(await vis(page, '#tile-rare') && await vis(page, '#tile-enhance'), '앤티 4+ 상점: 희귀 확정 슬롯, 에디션 부여 상시');
+      check((await page.locator('.tile.jt.syn').count()) >= 1, '보유 조커와 같은 축 조커에 시너지 표시');
+      await page.screenshot({ path: 'shots/09-shop-late.png' });
+      await page.evaluate(() => { const g = window.__bj.game; g.ante = 1; g.shop.rare = null; g.shop.enhance = null; window.__bj.ui.showShop(g); });
+      const pp = await page.evaluate(() => { const g = window.__bj.game; const lv = g.lineLv.row; return [g.planetPrice('row'), lv]; });
+      check(pp[0] === 3 + pp[1] - (await page.evaluate(() => (window.__bj.game.hasVoucher('v_coupon') ? 1 : 0))), '줄 강화 카드 가격 = $3 + 현재 레벨');
       await page.locator('.ownj').first().tap(); await page.waitForTimeout(150);
       await page.screenshot({ path: 'shots/12-shop-owned-popover.png' });
       check(await vis(page, '#pop-sell'), '보유 조커 판매 버튼 표시');
@@ -294,9 +318,15 @@ async function main() {
         await page.waitForTimeout(150);
       }
       await page.evaluate(() => window.__bj.jumpTo(8, 2));
-      await page.waitForTimeout(900);
+      await page.waitForTimeout(700);
       await page.screenshot({ path: 'shots/16-showdown-intro.png' });
-      await page.waitForTimeout(2200);
+      {
+        const c1 = await page.evaluate(() => window.__bj.slotCenter(1));
+        check((await state(page)).intro, '쇼다운 인트로 재생 중');
+        await page.touchscreen.tap(c1.x, c1.y); await page.waitForTimeout(150);
+        check(!(await state(page)).intro, '인트로 중 트레이 터치 = 인트로 즉시 스킵');
+      }
+      await page.waitForTimeout(2000);
       await page.screenshot({ path: 'shots/16-showdown-card.png' });
       await clearOverlays(page);
       await page.screenshot({ path: 'shots/17-showdown-play.png' });
@@ -472,13 +502,17 @@ async function main() {
         return out;
       });
       console.log('  사운드 표 (이름: RMS dB / 피크 dB / 150Hz 이하 %)');
-      for (const [k, v] of Object.entries(audio)) console.log(`    ${k.padEnd(10)} ${v.rmsDb.toFixed(1).padStart(6)} ${v.peakDb.toFixed(1).padStart(6)} ${String(Math.round(v.lowRatio * 100)).padStart(4)}%`);
+      for (const [k, v] of Object.entries(audio)) console.log(`    ${k.padEnd(10)} ${v.rmsDb.toFixed(1).padStart(6)} ${v.peakDb.toFixed(1).padStart(6)} ${String(Math.round(v.lowRatio * 100)).padStart(4)}%  대역 ${v.bands.map((x) => Math.round(x * 100)).join('/')}  L/R ${v.corr.toFixed(2)}`);
       const small = ['pickup', 'tick', 'chips', 'mult', 'click', 'coins', 'invalid', 'newTray', 'card'];
       check(Object.values(audio).every((v) => v.peakDb <= -2.9), '모든 효과음/BGM 피크 -3dBFS 이하');
       check(Object.entries(audio).filter(([k]) => k !== 'bgm' && !small.includes(k)).every(([, v]) => v.rmsDb >= -25 && v.rmsDb <= -19.5), '주요 효과음 RMS -25~-20dB');
       check(small.every((k) => audio[k].rmsDb >= -28.5 && audio[k].rmsDb <= -23), '작은 효과음 RMS -28~-24dB');
       check(audio.place.lowRatio <= 0.4 && Object.values(audio).every((v) => v.lowRatio <= 0.45), '착지음 150Hz 이하 40% 이하, 전 효과음 45% 이하');
       check(audio.bgm.rmsDb >= -23 && audio.bgm.rmsDb <= -18 && audio.bgm.lowRatio <= 0.6, 'BGM 버스 RMS -20dB 전후, 150Hz 이하 60% 이하');
+      console.log(`  BGM 대역(FFT, <150/150~500/500~2k/2k~6k/>6k %): ${audio.bgm.bands.map((x) => Math.round(x * 100)).join('/')}, 좌우 상관 ${audio.bgm.corr.toFixed(3)}`);
+      check(audio.bgm.bands[2] + audio.bgm.bands[3] + audio.bgm.bands[4] >= 0.35, 'BGM 500Hz 이상 에너지 35% 이상');
+      check(audio.bgm.corr < 0.9, 'BGM 좌우 상관 0.9 미만 (스테레오 레이어)');
+      check(['chips', 'mult', 'joker', 'total'].every((k) => audio[k].bands[3] + audio[k].bands[4] >= 0.1), '칩/배수/조커/총점 효과음 2kHz 이상 질감 10% 이상');
       await page.evaluate(() => { localStorage.removeItem('blockJoker.meta'); localStorage.setItem('blockJoker.v1', JSON.stringify({ bestAnte: 4, bestHit: 1234, wins: 1, tutorialDone: true })); });
       await page.reload(); await page.waitForTimeout(500);
       const mig = await page.evaluate(() => ({ v: window.__bj.meta.d.version, a: window.__bj.meta.d.stats.bestAnte, h: window.__bj.meta.d.stats.bestHit }));
@@ -514,7 +548,7 @@ async function main() {
       console.log(`  드롭 ${drops}회, 드롭 처리 JS ms: ${place.join(',')} / 느린 프레임 JS 최대 ${Math.max(0, ...frames)}ms / 브라우저 롱태스크(래스터 포함, 기기 부하 영향) ${pf.lt.length}건 최대 ${Math.max(0, ...pf.lt)}ms`);
       console.log('  느린 프레임 상위:', JSON.stringify(pf.perf.filter((e) => typeof e[0] === 'number').sort((x, y) => (y[0] + y[1]) - (x[0] + x[1])).slice(0, 6)));
       // 공유 머신에서는 다른 프로세스 선점으로 임의 프레임이 튈 수 있어 p90 으로 판정하고 최대값과 부하는 로그로 남김
-      const pct = (arr, q) => { const v = [...arr].sort((x, y) => x - y); return v.length ? v[Math.min(v.length - 1, Math.floor(v.length * q))] : 0; };
+      const pct = (arr, q) => { const v = [...arr].sort((x, y) => x - y); return v.length ? v[Math.floor((v.length - 1) * q)] : 0; };
       const over = frames.filter((x) => x >= 50).length;
       console.log(`  호스트 부하 loadavg ${os.loadavg().map((x) => x.toFixed(1)).join(' ')} / 드롭 JS p90 ${pct(place, 0.9)}ms / 전체 ${pf.n}프레임 중 JS 50ms 이상 ${over}개`);
       check(drops >= 5 && place.length >= 5 && pct(place, 0.9) < 50, '4배 스로틀: 드롭 처리 JS p90 50ms 미만');

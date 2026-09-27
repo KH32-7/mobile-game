@@ -460,6 +460,7 @@ export class Meta {
         if (game.opts.stake >= this.d.stakeUnlocked && this.d.stakeUnlocked < STAKES.length) {
           this.d.stakeUnlocked = game.opts.stake + 1;
           stakeUnlocked = STAKES[this.d.stakeUnlocked - 1];
+          this.d.sel.stake = this.d.stakeUnlocked; // 다음 런은 새 스테이크로 미리 선택
           this.toast(`새 난이도 해금: ${stakeUnlocked.name} 스테이크`, 'ach');
         }
       }

@@ -244,8 +244,10 @@ html, body {
 .coach .hole { position: absolute; border-radius: 14px; box-shadow: 0 0 0 9999px rgba(5,0,15,0.6), 0 0 0 3px #ffd23f, 0 0 24px #ffd23f; animation: holePulse 1.2s ease-in-out infinite; }
 @keyframes holePulse { 50% { box-shadow: 0 0 0 9999px rgba(5,0,15,0.6), 0 0 0 5px #ffe066, 0 0 34px #ffd23f; } }
 .coach-box { position: absolute; left: 50%; transform: translateX(-50%); width: min(92vw, 360px); padding: 14px; border-radius: 16px;
-  background: #1c0b33; border: 2px solid #ffd23f; text-align: left; box-shadow: 0 10px 30px rgba(0,0,0,0.6); animation: toastIn .3s ease-out; }
-.coach-box.center { top: 50%; transform: translate(-50%, -50%); }
+  background: #1c0b33; border: 2px solid #ffd23f; text-align: left; box-shadow: 0 10px 30px rgba(0,0,0,0.6); animation: coachIn .3s ease-out both; }
+.coach-box.center { top: 50%; transform: translate(-50%, -50%); animation-name: coachInC; }
+@keyframes coachIn { from { opacity: 0; transform: translateX(-50%) translateY(-16px) scale(0.9); } to { opacity: 1; transform: translateX(-50%); } }
+@keyframes coachInC { from { opacity: 0; transform: translate(-50%, -50%) translateY(-16px) scale(0.9); } to { opacity: 1; transform: translate(-50%, -50%); } }
 .coach-box h3 { font-size: 18px; margin-bottom: 6px; }
 .coach-box p { font-size: 14px; color: #e6ddff; line-height: 1.5; margin-bottom: 6px; word-break: keep-all; }
 .coach-box .c { color: #36c9ff; } .coach-box .m { color: #ff4d6d; }
@@ -342,7 +344,27 @@ html, body {
 .btn.claimall { margin: 6px 0 4px; }
 .trayrow { display: flex; gap: 8px; justify-content: center; margin: 8px 0; }
 .trayrow i { width: 26px; height: 40px; border-radius: 6px; background: #3ddc97; box-shadow: 0 0 10px rgba(61,220,151,0.5); }
-.trayrow i:not(.on) { background: rgba(255,255,255,0.15); box-shadow: none; }
+.trayrow i.cur { background: #ffd23f; box-shadow: 0 0 10px rgba(255,210,63,0.6); }
 .rescue .btn { margin-top: 8px; }
 .stats div span { white-space: nowrap; }
 .badge { background: rgba(10,4,24,0.92); }
+
+/* 4라운드: 보상 pill, 가로 스크롤 단서, 시너지/희귀 확정 */
+.reward { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 6px; }
+.rpill { white-space: nowrap; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 2px 8px; font-size: 12px; }
+.rtotal { white-space: nowrap; }
+.hwrap { position: relative; }
+.hwrap::after { content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 44px; pointer-events: none; background: linear-gradient(90deg, rgba(30,14,58,0), rgba(30,14,58,0.95)); transition: opacity .2s; }
+.harrow { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); z-index: 2; width: 30px; height: 30px; border-radius: 15px; border: 1px solid rgba(255,230,138,0.6); background: rgba(40,20,70,0.9); color: #ffe68a; font-size: 20px; font-weight: 900; line-height: 26px; padding: 0; }
+.hwrap.atend::after, .hwrap.atend .harrow { opacity: 0; pointer-events: none; }
+.tile.syn { box-shadow: 0 0 0 2px #3ddc97, 0 0 14px rgba(61,220,151,0.7); }
+.tile.syn .ttag { background: #3ddc97; color: #06301f; }
+.tile.guar { box-shadow: 0 0 0 2px #ff4d6d, 0 0 12px rgba(255,77,109,0.6); }
+.tile.guar .ttag { background: #ff4d6d; }
+.est.syn { color: #3ddc97; font-weight: 900; }
+.stakeup { display: flex; gap: 12px; align-items: flex-start; text-align: left; margin: 10px 0; padding: 12px; border-radius: 14px; border: 2px solid var(--sc); background: rgba(0,0,0,0.3); box-shadow: 0 0 18px color-mix(in srgb, var(--sc) 50%, transparent); animation: stakePop .6s cubic-bezier(.2,1.6,.4,1) both; }
+.stakeup .chip { flex: none; width: 46px; height: 46px; border-radius: 23px; background: var(--sc); color: #1a0830; font-size: 24px; font-weight: 900; display: grid; place-items: center; border: 4px dashed rgba(255,255,255,0.7); }
+.stakeup h3 { color: var(--sc); font-size: 18px; margin: 0 0 4px; }
+.stakeup p { font-size: 12px; color: #d6c9ff; margin: 2px 0; }
+.stakeup ul { margin: 4px 0 4px 16px; padding: 0; font-size: 13px; }
+@keyframes stakePop { from { opacity: 0; transform: scale(0.6) rotate(-4deg); } to { opacity: 1; transform: none; } }

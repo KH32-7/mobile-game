@@ -1,6 +1,7 @@
 // WebAudio 합성 효과음(레이어드) + 절차적 BGM 4곡(일반/보스/상점/쇼다운), 앤티에 따라 악기 적층
-let ctx = null, master = null, sfxBus = null, bgmBus = null, bgmFilter = null, revIn = null, shaper = null;
+let ctx = null, master = null, sfxBus = null, bgmBus = null, bgmFilter = null, revIn = null, shaper = null, bgmL = null, bgmR = null, bgmDly = null;
 let ducked = false;
+const BGM_GAIN = 0.72;
 let muted = false;
 let vol = { bgm: 0.7, sfx: 0.9 };
 let bgmOn = false, bgmTimer = null, nextNoteTime = 0, step = 0;
@@ -50,8 +51,18 @@ function buildGraph(c) {
   sfxBus = c.createGain(); sfxBus.gain.value = 1.0 * vol.sfx; sfxBus.connect(master);
   const sfxSend = c.createGain(); sfxSend.gain.value = 0.35; sfxBus.connect(sfxSend).connect(revIn);
   bgmFilter = c.createBiquadFilter(); bgmFilter.type = 'lowpass'; bgmFilter.frequency.value = 9000;
-  bgmBus = c.createGain(); bgmBus.gain.value = 0.26 * vol.bgm; bgmBus.connect(bgmFilter).connect(master);
+  bgmBus = c.createGain(); bgmBus.gain.value = BGM_GAIN * vol.bgm; bgmBus.connect(bgmFilter).connect(master);
   const bgmSend = c.createGain(); bgmSend.gain.value = 0.25; bgmFilter.connect(bgmSend).connect(revIn);
+  // BGM 스테레오 레이어: 왼쪽/오른쪽 패닝 버스 + 플럭용 핑퐁 딜레이
+  const mkPan = (v) => { const p = c.createStereoPanner(); p.pan.value = v; p.connect(bgmBus); return p; };
+  bgmL = mkPan(-0.85); bgmR = mkPan(0.85);
+  bgmDly = c.createGain();
+  const d1 = c.createDelay(1); d1.delayTime.value = 0.21;
+  const fb = c.createGain(); fb.gain.value = 0.32;
+  const dlp = c.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 4500;
+  bgmDly.connect(d1).connect(dlp).connect(fb).connect(d1);
+  const dOut = c.createGain(); dOut.gain.value = 0.55;
+  dlp.connect(dOut).connect(bgmL);
   // 디스토션 (xmult 슬램용)
   shaper = c.createWaveShaper();
   const n = 1024, curve = new Float32Array(n);
@@ -66,7 +77,7 @@ function buildGraph(c) {
 function applyVolumes() {
   if (!ctx) return;
   sfxBus.gain.setTargetAtTime(1.0 * vol.sfx, ctx.currentTime, 0.02);
-  bgmBus.gain.setTargetAtTime(0.26 * vol.bgm * (ducked ? 0.45 : 1), ctx.currentTime, 0.08);
+  bgmBus.gain.setTargetAtTime(BGM_GAIN * vol.bgm * (ducked ? 0.45 : 1), ctx.currentTime, 0.08);
 }
 
 // 점수 연출 중 BGM 덕킹
@@ -94,7 +105,7 @@ function tone({ freq, type = 'sine', t = 0, dur = 0.15, vol: v = 0.3, attack = 0
   const now = ctx.currentTime + Math.max(0, t);
   if (bus !== bgmBus && !exact) {
     // 효과음 피치/볼륨 랜덤화 (반복 피로 감소)
-    const k = Math.pow(2, (Math.random() - 0.5) * 0.04);
+    const k = 1 + (Math.random() - 0.5) * 0.1; // 피치 랜덤 ±5%
     freq *= k; if (slideTo) slideTo *= k;
     v *= 0.9 + Math.random() * 0.2;
   }
@@ -168,19 +179,37 @@ const RAW = {
   },
   // 칩 틱: 피치가 상승하는 짧은 클릭
   tick(i = 0) {
+    setPan(-0.15 + ((i % 5) / 4) * 0.3);
     tone({ freq: mtof(79 + Math.min(i, 30)), type: 'square', dur: 0.03, vol: 0.3, filter: { freq: 4000 }, exact: true });
     noise({ dur: 0.01, vol: 0.4, freq: 4000 + i * 200, type: 'bandpass', q: 2 });
   },
-  chips(i = 0) { tone({ freq: mtof(79 + (i % 12)), type: 'triangle', dur: 0.1, vol: 0.4 }); noise({ dur: 0.02, vol: 0.25, freq: 6000 }); },
-  mult(i = 0) { tone({ freq: mtof(84 + (i % 12)), type: 'triangle', dur: 0.12, vol: 0.45 }); tone({ freq: mtof(91 + (i % 12)), type: 'sine', dur: 0.08, vol: 0.15 }); },
-  joker(i = 0) {
+  // 칩: 왼쪽, 칩 부딪히는 2~5kHz 클릭 노이즈 두 겹 + 짧은 음
+  chips(i = 0) {
+    setPan(-0.3);
+    noise({ dur: 0.012, vol: 0.7, freq: 3200, type: 'bandpass', q: 1.5 });
+    noise({ t: 0.028, dur: 0.01, vol: 0.45, freq: 4600, type: 'bandpass', q: 2 });
+    tone({ freq: mtof(79 + (i % 12)), type: 'triangle', dur: 0.08, vol: 0.25 });
+  },
+  // 배수: 오른쪽, 상승 스윕 노이즈 + 톱니 계열 음
+  mult(i = 0) {
+    setPan(0.3);
+    noise({ dur: 0.12, vol: 0.45, freq: 900, type: 'bandpass', q: 3, to: 4200 });
+    tone({ freq: mtof(84 + (i % 12)), type: 'sawtooth', dur: 0.12, vol: 0.18, filter: { freq: 3500 } });
+    tone({ freq: mtof(91 + (i % 12)), type: 'sine', dur: 0.08, vol: 0.12 });
+  },
+  // 조커 발동: 슬롯 위치로 패닝, 벨 + 셰이커 트랜지언트
+  joker(i = 0, pan = 0) {
+    setPan(pan);
+    noise({ dur: 0.03, vol: 0.35, freq: 2800, type: 'bandpass', q: 1 });
     const f = mtof(81 + (i % 5) * 2);
-    tone({ freq: f, type: 'sine', dur: 0.3, vol: 0.4 });
-    tone({ freq: f * 2.76, type: 'sine', dur: 0.12, vol: 0.12 });
-    noise({ dur: 0.04, vol: 0.2, freq: 6000 });
+    tone({ freq: f, type: 'sine', dur: 0.2, vol: 0.34 });
+    tone({ freq: f * 2.76, type: 'sine', dur: 0.16, vol: 0.22 });
+    tone({ freq: f * 4.1, type: 'sine', dur: 0.08, vol: 0.12 });
+    noise({ dur: 0.1, vol: 0.6, freq: 5000 });
   },
   // x배수: 금속 모달 합성 + 디스토션
-  xmult() {
+  xmult(pan = 0) {
+    setPan(pan);
     metal(0, 360, 0.35, 0.6);
     metal(0, 363, 0.15, 0.5);
     tone({ freq: 220, type: 'sawtooth', dur: 0.25, vol: 0.2, slideTo: 120, dist: true, filter: { freq: 2500 } });
@@ -189,7 +218,9 @@ const RAW = {
   },
   glass() { noise({ dur: 0.3, vol: 0.4, freq: 6000 }); [2400, 3100, 4200].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.2, vol: 0.12, t: i * 0.03 })); },
   total(big = false) {
-    [72, 79, 84].forEach((n, i) => tone({ freq: mtof(n), type: 'triangle', dur: 0.35, vol: 0.25, t: i * 0.06 }));
+    noise({ dur: 0.25, vol: 0.3, freq: 1500, type: 'bandpass', q: 1.5, to: 6000 });
+    [72, 79, 84].forEach((n, i) => { tone({ freq: mtof(n), type: 'triangle', dur: 0.35, vol: 0.25, t: i * 0.06 }); tone({ freq: mtof(n + 24), type: 'sine', dur: 0.2, vol: 0.12, t: i * 0.06 + 0.01 }); });
+    noise({ t: 0.12, dur: 0.3, vol: 0.2, freq: 7000 });
     if (big) { metal(0.05, 440, 0.25, 0.8); tone({ freq: 110, type: 'sine', dur: 0.4, vol: 0.25, slideTo: 55 }); }
   },
   combo(level = 1) {
@@ -234,18 +265,22 @@ const RAW = {
 };
 
 // 계측 기반 정규화 게인 (scripts/smoke.mjs 사운드 표 참고, 주요 -22dB / 작은 효과음 -26dB 목표)
-const NORM = {"pickup": 7.872, "place": 9.551, "invalid": 0.496, "clear": 0.302, "tick": 12, "chips": 3.515, "mult": 2.736, "joker": 0.98, "xmult": 0.428, "glass": 0.944, "total": 0.378, "combo": 0.258, "allClear": 0.128, "buy": 0.598, "sell": 0.695, "card": 1.462, "levelUp": 0.238, "packOpen": 0.214, "click": 9.507, "roundClear": 0.169, "boss": 0.228, "showdown": 0.242, "coins": 0.498, "gameOver": 0.346, "newTray": 1.005, "phoenix": 0.361};
+const NORM = {"pickup": 11.1, "place": 13.467, "invalid": 0.699, "clear": 0.426, "tick": 16.92, "chips": 7.0, "mult": 13.688, "joker": 2.19, "xmult": 0.603, "glass": 1.331, "total": 0.533, "combo": 0.364, "allClear": 0.18, "buy": 0.843, "sell": 0.98, "card": 2.061, "levelUp": 0.336, "packOpen": 0.302, "click": 13.405, "roundClear": 0.238, "boss": 0.321, "showdown": 0.341, "coins": 0.702, "gameOver": 0.488, "newTray": 1.417, "phoenix": 0.509};
 
-let curBus = null;
+let curBus = null, curPanner = null;
+// 효과음 스테레오 위치 (-1 왼쪽 ~ 1 오른쪽)
+function setPan(v) { if (curPanner) curPanner.pan.value = Math.max(-1, Math.min(1, v)); }
 export const sfx = {};
 for (const [k, fn] of Object.entries(RAW)) {
   sfx[k] = (...args) => {
     if (!ctx) return;
     const g = ctx.createGain();
     g.gain.value = NORM[k] ?? 1;
-    g.connect(sfxBus);
-    curBus = g;
-    try { fn(...args); } finally { curBus = null; }
+    const p = ctx.createStereoPanner();
+    p.pan.value = 0;
+    g.connect(p).connect(sfxBus);
+    curBus = g; curPanner = p;
+    try { fn(...args); } finally { curBus = null; curPanner = null; }
   };
 }
 
@@ -295,16 +330,19 @@ function scheduleStep(s, time) {
     const q = song.bossa ? [0, 0, 0, 7, 12, 0, 0, 7][e] : [0, 7, 10, 13][e / 2];
     const next = song.chords[(bar + 1) % song.chords.length].root;
     const note = song.bossa ? ch.root + q : e === 6 ? next + 1 : ch.root + q;
-    tone({ freq: mtof(note), type: 'triangle', t, dur: 0.42, vol: 0.42, bus: B, filter: { freq: 1400 } });
-    tone({ freq: mtof(note + 12), type: 'triangle', t, dur: 0.25, vol: 0.14, bus: B, filter: { freq: 2000 } });
-    noise({ t, dur: 0.03, vol: 0.05, freq: 700, type: 'bandpass', q: 3, bus: B });
+    // 베이스: 150Hz 이하 사인 중심 + 짧은 어택 클릭만 (중저역 뭉침 제거)
+    const bf = mtof(note > 50 ? note - 12 : note);
+    tone({ freq: bf, type: 'sine', t, dur: 0.28, vol: 0.1, bus: B });
+    noise({ t, dur: 0.012, vol: 0.05, freq: 2400, type: 'bandpass', q: 2, bus: B });
   }
   // 컴핑
   if (song.comp.includes(e)) {
+    // 코드 컴핑: 두 옥타브 올려 600Hz~1.6kHz 중심, 음마다 좌우로 벌림
     ch.notes.forEach((n, i) => {
-      if (mode === 'showdown') tone({ freq: mtof(n), type: 'sawtooth', t: t + i * 0.004, dur: 0.18, vol: 0.035, bus: B, filter: { freq: 1600 } });
-      else tone({ freq: mtof(n), type: 'sine', t: t + i * 0.008, dur: song.bossa ? 0.25 : e === 2 ? 0.9 : 0.5, vol: 0.11, bus: B });
-      if (!song.bossa && mode !== 'showdown') tone({ freq: mtof(n + 12), type: 'sine', t: t + i * 0.008, dur: 0.25, vol: 0.02, bus: B });
+      const side = i % 2 ? bgmR : bgmL;
+      if (mode === 'showdown') tone({ freq: mtof(n + 12), type: 'sawtooth', t: t + i * 0.004, dur: 0.18, vol: 0.022, bus: side, filter: { freq: 2600 } });
+      else tone({ freq: mtof(n + 24), type: 'triangle', t: t + i * 0.008, dur: song.bossa ? 0.22 : e === 2 ? 0.6 : 0.35, vol: 0.05, bus: side, filter: { freq: 3500 } });
+      tone({ freq: mtof(n + 12), type: 'sine', t: t + i * 0.008, dur: 0.25, vol: 0.01, bus: side === bgmL ? bgmR : bgmL });
     });
   }
   if (song.drone && e === 0) tone({ freq: mtof(ch.root - 12), type: 'sawtooth', t, dur: (60 / song.bpm) * 4, vol: 0.05, bus: B, filter: { freq: 900 } });
@@ -312,22 +350,26 @@ function scheduleStep(s, time) {
   if (intensity >= 2 && song.melodyBars && bar % 2 === 1 && (e === 1 || e === 4 || e === 6)) {
     const scale = ch.notes.map((n) => n + 12);
     const n = scale[(s * 7 + bar) % scale.length];
-    tone({ freq: mtof(n), type: 'triangle', t, dur: 0.35, vol: 0.07, bus: B, filter: { freq: 2200 } });
+    tone({ freq: mtof(n + 12), type: 'triangle', t, dur: 0.35, vol: 0.06, bus: bgmR, filter: { freq: 3200 } });
   }
   // 패드 (앤티 5 이상)
-  if (intensity >= 3 && e === 0) ch.notes.forEach((n) => tone({ freq: mtof(n + 12), type: 'sine', t, dur: (60 / song.bpm) * 4, vol: 0.018, attack: 0.4, bus: B }));
+  if (intensity >= 3 && e === 0) ch.notes.forEach((n, i) => tone({ freq: mtof(n + 24), type: 'sine', t, dur: (60 / song.bpm) * 4, vol: 0.014, attack: 0.4, bus: i % 2 ? bgmR : bgmL }));
   // 1~2kHz 플럭 (코드 톤, 엇박)
+  // 1~3kHz 삼각파 플럭 (엇박) + 핑퐁 딜레이
   if (e % 2 === 1 || (mode === 'shop' && e % 2 === 0)) {
-    const pn = ch.notes[(s + bar) % ch.notes.length] + 24;
-    tone({ freq: mtof(pn), type: 'triangle', t, dur: 0.12, vol: 0.09, bus: B, filter: { freq: 3000 } });
+    let pn = ch.notes[(s + bar) % ch.notes.length] + 24;
+    while (mtof(pn) < 1000) pn += 12;
+    while (mtof(pn) > 3000) pn -= 12;
+    tone({ freq: mtof(pn), type: 'triangle', t, dur: 0.12, vol: 0.16, bus: s % 4 < 2 ? bgmR : bgmL });
+    tone({ freq: mtof(pn), type: 'triangle', t, dur: 0.1, vol: 0.12, bus: bgmDly });
   }
-  // 드럼: 3~8kHz 하이햇 + 셰이커
-  noise({ t, dur: e % 2 ? 0.04 : 0.07, vol: e % 2 ? 0.12 : 0.18, freq: 6500, type: 'bandpass', q: 1.2, bus: B });
-  noise({ t: t + 60 / SONGS[mode].bpm / 4, dur: 0.035, vol: 0.07, freq: 4200, type: 'bandpass', q: 2, bus: B });
-  if (e === 2 || e === 6) noise({ t, dur: 0.18, vol: 0.06, freq: 1800, type: 'bandpass', bus: B });
+  // 드럼: 6~10kHz 하이패스 하이햇(오른쪽) + 셰이커(왼쪽)
+  noise({ t, dur: e % 2 ? 0.04 : 0.07, vol: e % 2 ? 0.3 : 0.42, freq: 7000, type: 'highpass', q: 0.7, bus: bgmR });
+  noise({ t: t + 60 / SONGS[mode].bpm / 4, dur: 0.035, vol: 0.24, freq: 8000, type: 'highpass', q: 0.7, bus: bgmL });
+  if (e === 2 || e === 6) { noise({ t, dur: 0.14, vol: 0.12, freq: 1800, type: 'bandpass', q: 0.9, bus: B }); noise({ t, dur: 0.1, vol: 0.1, freq: 5000, type: 'highpass', bus: B }); }
   if ((song.kick && e % 2 === 0) || (intensity >= 3 && e === 0)) { tone({ freq: 90, type: 'sine', t, dur: 0.14, vol: 0.22, slideTo: 45, bus: B }); noise({ t, dur: 0.02, vol: 0.08, freq: 2500, type: 'bandpass', bus: B }); }
   if (song.tom && (e === 7 || (e === 5 && bar % 2))) tone({ freq: 140, type: 'sine', t, dur: 0.2, vol: 0.25, slideTo: 80, bus: B });
-  if (intensity >= 4 && e % 2 === 1) noise({ t, dur: 0.03, vol: 0.05, freq: 9000, bus: B }); // 셰이커 (앤티 7+)
+  if (intensity >= 4 && e % 2 === 1) noise({ t, dur: 0.03, vol: 0.08, freq: 10000, bus: bgmL }); // 셰이커 (앤티 7+)
 }
 
 function startScheduler() {
@@ -370,7 +412,7 @@ export async function renderOffline(name, args = [], seconds = 1.6) {
   const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   if (!OAC) return null;
   const off = new OAC(2, Math.floor(44100 * seconds), 44100);
-  const saved = { ctx, master, sfxBus, bgmBus, bgmFilter, revIn, shaper, noiseBuf };
+  const saved = { ctx, master, sfxBus, bgmBus, bgmFilter, revIn, shaper, noiseBuf, bgmL, bgmR, bgmDly };
   ctx = off;
   buildGraph(off);
   try {
@@ -378,10 +420,38 @@ export async function renderOffline(name, args = [], seconds = 1.6) {
     else if (sfx[name]) sfx[name](...args);
     return await off.startRendering();
   } finally {
-    ({ ctx, master, sfxBus, bgmBus, bgmFilter, revIn, shaper, noiseBuf } = saved);
+    ({ ctx, master, sfxBus, bgmBus, bgmFilter, revIn, shaper, noiseBuf, bgmL, bgmR, bgmDly } = saved);
   }
 }
-// 계측: 피크, 활성 구간 RMS(dB), 150Hz 이하 에너지 비율
+function fftBands(d, sr, cuts) {
+  const N = 4096, re = new Float64Array(N), im = new Float64Array(N);
+  const acc = new Float64Array(cuts.length + 1);
+  for (let off = 0; off + N <= d.length; off += N / 2) {
+    for (let i = 0; i < N; i++) { re[i] = d[off + i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1))); im[i] = 0; }
+    for (let i = 1, j = 0; i < N; i++) { let bit = N >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; } }
+    for (let len = 2; len <= N; len <<= 1) {
+      const ang = (-2 * Math.PI) / len, wr = Math.cos(ang), wi = Math.sin(ang);
+      for (let i = 0; i < N; i += len) {
+        let cr = 1, ci = 0;
+        for (let k = 0; k < len / 2; k++) {
+          const a = i + k, b = a + len / 2;
+          const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+          re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+          const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+        }
+      }
+    }
+    for (let k = 1; k < N / 2; k++) {
+      const f = (k * sr) / N, e = re[k] * re[k] + im[k] * im[k];
+      let bi = 0; while (bi < cuts.length && f >= cuts[bi]) bi++;
+      acc[bi] += e;
+    }
+  }
+  const tot = acc.reduce((x, y) => x + y, 0) || 1;
+  return Array.from(acc, (x) => x / tot);
+}
+
+// 계측: 피크, 활성 구간 RMS(dB), 150Hz 이하 에너지 비율, 5대역 비율, 좌우 상관
 export async function measure(name, args = [], seconds = 1.6) {
   const buf = await renderOffline(name, args, seconds);
   if (!buf) return null;
@@ -398,6 +468,16 @@ export async function measure(name, args = [], seconds = 1.6) {
   }
   const n = Math.max(1, last - first + 1);
   const rms = Math.sqrt(sum / n);
-  return { peak, peakDb: 20 * Math.log10(peak + 1e-9), rmsDb: 20 * Math.log10(rms + 1e-9), lowRatio: lowE / (totE + 1e-12) };
+  // 대역 에너지 (4096점 FFT, 한 창): <150 / 150~500 / 500~2k / 2k~6k / >6k
+  const bands = fftBands(d, buf.sampleRate, [150, 500, 2000, 6000]);
+  // 좌우 상관
+  let corr = 1;
+  if (buf.numberOfChannels > 1) {
+    const r = buf.getChannelData(1);
+    let lr = 0, ll = 0, rr2 = 0;
+    for (let i = 0; i < d.length; i++) { lr += d[i] * r[i]; ll += d[i] * d[i]; rr2 += r[i] * r[i]; }
+    corr = lr / Math.sqrt(ll * rr2 + 1e-12);
+  }
+  return { peak, peakDb: 20 * Math.log10(peak + 1e-9), rmsDb: 20 * Math.log10(rms + 1e-9), lowRatio: lowE / (totE + 1e-12), bands, corr };
 }
 if (typeof window !== 'undefined') window.__bjAudio = { renderOffline, measure, sfxNames: () => Object.keys(sfx) };

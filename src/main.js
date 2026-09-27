@@ -4,7 +4,7 @@ import { Game, DAILY_RULES } from './game.js';
 import { Renderer, computeLayout, GEM_COLOR } from './render.js';
 import { FX } from './fx.js';
 import { UI } from './ui.js';
-import { effectLabel, fmt, JOKERS } from './jokers.js';
+import { effectLabel, fmt, JOKERS, AXIS_LABEL } from './jokers.js';
 import { HANDS } from './items.js';
 import { initAudio, sfx, setMuted, isMuted, startBgm, suspendAudio, resumeAudio, setVolumes, setBgmMode, duckBgm } from './audio.js';
 import { Meta, dateKey } from './meta.js';
@@ -14,6 +14,7 @@ import { hashSeed } from './rng.js';
 const canvas = document.getElementById('cv');
 const renderer = new Renderer(canvas);
 const game = new Game();
+game.isUndiscovered = (id) => !meta.d.discovered.includes(id);
 const meta = new Meta();
 const rec = meta.d;
 setMuted(!!rec.muted);
@@ -32,6 +33,7 @@ const app = {
   showdown: false,
   jokerBounce: [],
   trayAnim: [1, 1, 1],
+  swapSel: new Set(),
   fitCache: [true, true, true],
   calc: { active: false, chips: 0, mult: 0, label: '', labelAlpha: 0, chipsPulse: 0, multPulse: 0, merge: 0, totalShown: 0, fade: 1 },
   shownScore: 0,
@@ -147,7 +149,7 @@ const ui = new UI({
     if (patch.vib) vibrate(30);
   },
   buyJoker: (i) => {
-    const o = game.shop.jokers[i];
+    const o = i === 'rare' ? game.shop.rare : game.shop.jokers[i];
     if (game.buyJoker(i)) { sfx.buy(); vibrate(15); app.coinPulse = 1; meta.onBuy(game, { kind: 'joker', ed: o.ed }); saveShop(); ui.showShop(game); }
     else { sfx.invalid(); ui.toast(game.coins < o.price ? '코인이 부족함' : '조커 슬롯이 가득 참'); }
   },
@@ -170,9 +172,9 @@ const ui = new UI({
     if (game.buyVoucher()) { sfx.buy(); sfx.levelUp(); vibrate(20); meta.onBuy(game, { kind: 'voucher' }); saveShop(); ui.showShop(game); }
     else { sfx.invalid(); ui.toast('코인이 부족함'); }
   },
-  buySpecial: (arg) => {
-    const o = game.shop.special;
-    if (game.buySpecial(arg)) { sfx.buy(); sfx.levelUp(); vibrate(20); meta.onBuy(game, { kind: o.id === 's_clone' ? 'joker' : 'special' }); saveShop(); ui.showShop(game); }
+  buySpecial: (arg, slot = 'special') => {
+    const o = game.shop[slot];
+    if (game.buySpecial(arg, slot)) { sfx.buy(); sfx.levelUp(); vibrate(20); meta.onBuy(game, { kind: o.id === 's_clone' ? 'joker' : 'special' }); saveShop(); ui.showShop(game); }
     else { sfx.invalid(); ui.toast(game.coins < o.price ? '코인이 부족함' : '조건이 맞지 않음'); }
   },
   rescue: (how, idx) => {
@@ -241,7 +243,7 @@ function savePlayNow() { if (game.phase === 'play') meta.saveRun(game.snapshot('
 function resetRunVisuals() {
   app.fx.clear();
   app.bubbles = []; app.clearing = []; app.jokerBounce = []; app.beams = [];
-  app.comboWord = null; app.queue = []; app.seq = null; app.pendingEnd = null; app.intro = null;
+  app.comboWord = null; app.queue = []; app.seq = null; app.pendingEnd = null; app.intro = null; app.swapSel.clear(); renderer.setAnte(game.ante);
   app.calc.active = false; app.calc.merge = 0; app.calc.labelAlpha = 0;
 }
 
@@ -279,6 +281,7 @@ function beginRound() {
   app.shownScore = game.roundScore || 0; app.scoreHold = 0;
   app.seq = null; app.queue = []; app.drag = null; app.pendingEnd = null;
   app.calc.active = false; app.calc.merge = 0; app.calc.labelAlpha = 0;
+  app.swapSel.clear(); renderer.setAnte(game.ante);
   app.timers = [];
   app.trayAnim = [-0.0, -0.12, -0.24];
   app.showdown = game.blind === 2 && game.isShowdown();
@@ -365,6 +368,7 @@ const COMBO_WORDS = [[12, '레전더리!', '#c86bff', 4], [8, '언빌리버블!'
 function doPlace(i, r, c) {
   const res = game.place(i, r, c);
   if (!res) return false;
+  app.swapSel.clear();
   if (app.tutorial) { app.tutorial = false; rec.tutorialDone = true; saveRec(); }
   if (res.cleared) meta.onClear(res, game);
   const cell = L.cell;
@@ -413,7 +417,10 @@ function handleStuck(outcome) {
 }
 
 function doSwap() {
-  if (!game.swapTray()) { rejectInput(); return; }
+  const sel = [...app.swapSel];
+  if (!game.swapTray(sel)) { rejectInput(); return; }
+  app.swapSel.clear();
+  if (sel.length && sel.length < 3) ui.toast(`조각 ${sel.length}개 교체`);
   sfx.newTray(); sfx.card(); vibrate(15);
   app.trayAnim = [0, -0.08, -0.16];
   refreshFit();
@@ -464,6 +471,7 @@ function clearFx(res) {
 function addBubble(idx, text, color) {
   app.bubbles = app.bubbles.filter((b) => b.idx !== idx);
   app.bubbles.push({ idx, text, color, t: 0, life: 1.0 });
+  while (app.bubbles.length > 3) app.bubbles.shift();
   app.jokerBounce[idx] = 0;
 }
 
@@ -504,9 +512,13 @@ function runStep(step, i) {
   } else if (step.kind === 'joker') {
     app.activeJoker = step.idx;
     addBubble(step.idx, (step.ed ? '에디션 ' : '') + effectLabel(e), e.t === 'chips' ? '#1a7fe0' : e.t === 'coins' ? '#c98a00' : e.t === 'xmult' ? '#c0102f' : '#e0304f');
-    if (e.t === 'xmult') { sfx.xmult(); app.fx.shake(5, 0.15); } else sfx.joker(i);
+    const jp = game.jokers.length > 1 ? ((step.idx / (game.jokers.length - 1)) * 2 - 1) * 0.6 : 0; // 슬롯 위치 패닝
+    if (e.t === 'xmult') { sfx.xmult(jp); app.fx.shake(5, 0.15); } else sfx.joker(i, jp);
     if (e.t === 'coins') { app.coinPulse = 1; sfx.coins(e.v); }
     vibrate(6);
+  } else if (step.kind === 'synergy') {
+    app.fx.pop(L.calc.x + L.calc.w / 2, L.calc.y + L.calc.h + 12, `시너지 [${AXIS_LABEL[step.axis]}] ${step.n}장 ${effectLabel(e)}`, '#3ddc97', 17, 1.0);
+    sfx.xmult(); app.fx.shake(4, 0.15); vibrate(8);
   } else if (step.kind === 'curse') {
     app.fx.pop(L.calc.x + L.calc.w / 2, L.calc.y + L.calc.h + 12, '저주 ' + effectLabel(e), '#ff4d6d', 16, 0.9);
     sfx.invalid();
@@ -537,14 +549,14 @@ function updateSeq(rawDt) {
     s.stage = 'merge';
     s.timer = 0.22;
     s.t = 0;
-    k.totalShown = 0;
+    k.totalShown = 0; k.totalReady = false;
     return;
   }
   if (s.stage === 'merge') {
     s.t += dt;
     k.merge = Math.min(1, s.t / 0.22);
     if (s.timer > 0) return;
-    k.merge = 1;
+    k.merge = 1; k.totalReady = true;
     s.stage = 'total';
     s.timer = 0.5; s.t = 0;
     const total = s.res.total;
@@ -583,8 +595,9 @@ function finishSeq() {
   k.active = false; k.merge = 0; k.fade = 1;
   app.gemFlash = null;
   app.seq = null;
-  if (!rec.coach.calc && !app.queue.length) {
-    later(0.1, () => { if (!rec.coach.calc) ui.showCoach('calc', { calc: L.calc, score: L.score, vals: lastRes ? { chips: lastRes.chips, mult: lastRes.mult, total: lastRes.total, hand: lastRes.hand } : null }); });
+  // 칩 x 배수 코치: 두 번째 줄 제거 때, 라운드 클리어 배너와 겹치지 않게
+  if (!rec.coach.calc && !app.queue.length && (app.coachClears = (app.coachClears || 0) + 1) >= 2 && !app.pendingEnd && !app.banner) {
+    later(0.1, () => { if (!rec.coach.calc && !app.pendingEnd && !ui.current) ui.showCoach('calc', { calc: L.calc, score: L.score, vals: lastRes ? { chips: lastRes.chips, mult: lastRes.mult, total: lastRes.total, hand: lastRes.hand } : null }); });
   }
   nextSeq();
 }
@@ -598,10 +611,11 @@ function skipSeq() {
   app.scoreHold = 0;
   app.scorePulse = 1;
   const k = app.calc;
-  if (last) { k.chips = last.chips; k.mult = last.mult; k.totalShown = last.total; }
+  if (last) { k.chips = last.chips; k.mult = last.mult; k.totalShown = last.total; k.totalReady = true; }
   app.seq = null;
   k.active = false; k.merge = 0; k.fade = 1;
   app.gemFlash = null;
+  app.bubbles = [];
   duckBgm(false);
   maybeEnd();
 }
@@ -610,6 +624,7 @@ function maybeEnd() {
   const pe = app.pendingEnd;
   if (!pe || pe.fired || app.seq || app.queue.length) return;
   pe.fired = true;
+  app.bubbles = [];
   if (pe.type === 'roundClear') {
     sfx.roundClear();
     vibrate([20, 40, 20, 40, 60]);
@@ -673,7 +688,8 @@ canvas.addEventListener('pointerdown', (e) => {
   if (!app.inRun || app.paused || ui.current) return;
   const p = pos(e);
   if (inRect(p, { x: L.pause.x - 4, y: L.pause.y - 4, w: L.pause.w + 8, h: L.pause.h + 8 })) { sfx.click(); pause(); return; }
-  if (app.intro) return;
+  // 보스/쇼다운 인트로 중 입력: 인트로를 즉시 끝내고 그대로 조작 이어감
+  if (app.intro) { app.intro = null; sfx.click(); }
   if (game.phase !== 'play' || app.pendingEnd) {
     if (app.seq || app.queue.length) skipSeq();
     return;
@@ -690,7 +706,7 @@ canvas.addEventListener('pointerdown', (e) => {
     const piece = game.tray[i];
     if (!piece) return;
     if (piece.hidden) { rejectInput(); return; }
-    app.drag = { idx: i, piece, fx: p.x, fy: p.y, scale: L.trayScale / L.cell, id: e.pointerId, touch: e.pointerType !== 'mouse', valid: false };
+    app.drag = { idx: i, piece, sx: p.x, sy: p.y, fx: p.x, fy: p.y, scale: L.pieceScale(piece) / L.cell, id: e.pointerId, touch: e.pointerType !== 'mouse', valid: false };
     try { canvas.setPointerCapture(e.pointerId); } catch { /* 무시 */ }
     sfx.pickup();
     vibrate(5);
@@ -723,6 +739,12 @@ function endDrag(e) {
     const tp = performance.now();
     doPlace(d.idx, d.row, d.col);
     if (DEBUG) (window.__bjPerf ||= []).push(['place', Math.round(performance.now() - tp)]);
+  } else if (Math.hypot(p.x - d.sx, p.y - d.sy) < 10 && game.phase === 'play') {
+    // 탭 = 교체 대상 선택 토글
+    app.trayAnim[d.idx] = 0.3;
+    if (app.swapSel.has(d.idx)) app.swapSel.delete(d.idx); else app.swapSel.add(d.idx);
+    sfx.click(); vibrate(8);
+    if (!rec.coach.swapsel && game.swapsLeft > 0) { rec.coach.swapsel = true; meta.save(); ui.toast('선택한 조각만 교체 가능. 아래 교체 버튼을 누를 것'); }
   } else {
     app.trayAnim[d.idx] = 0.6;
     // 보드 위에서 놓았는데 못 놓는 자리면 거절 피드백
