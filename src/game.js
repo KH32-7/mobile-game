@@ -186,7 +186,7 @@ export class Game {
         const e = this.ents.enemies[this.ents.enemies.length - 1];
         // 조우 직전에 현재 인원 기준으로 다시 정할 비율. 가끔은 피해야 하는 큰 무리
         const sec = Math.floor((base + it.d) / CFG.sectionLen);
-        e.frac = it.tut ? null : this.rng() < 0.12 + sec * 0.03 ? 0.85 + this.rng() * 0.4 : 0.2 + this.rng() * 0.25 + Math.min(0.3, sec * 0.06);
+        e.frac = it.tut ? null : this.rng() < 0.15 + sec * 0.04 ? 0.85 + this.rng() * 0.4 : 0.22 + this.rng() * 0.3 + Math.min(0.35, sec * 0.08);
       }
       else if (it.t === 'power') this.ents.addPower(it, base, this.rollPower());
     }
