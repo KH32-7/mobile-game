@@ -453,7 +453,8 @@ export function computePar(h) {
   h.parFeat = feat;
   const est = parEstimate(feat);
   // 사람 근사 AI 분포(파 이하 55~70%, +2 이상 10% 이하)에 맞춘 보정: 물/가짜 컵/긴 경로는 변동이 커서 여유를 더 줌
-  const risk = (water > 0 ? 2 : 0) + (h.cups.length > 1 ? 2 : 0) + (legs >= 3 ? 0.5 : 0);
+  // 움직이는 장애물(풍차/움직이는 벽)은 타이밍 운이 커서 +1
+  const risk = (water > 0 ? 2 : 0) + (h.cups.length > 1 ? 2 : 0) + (legs >= 3 ? 0.5 : 0) + (h.mills.length + h.movers.length > 0 ? 1 : 0);
   // 후반 9홀은 파가 빡빡해져 난이도 곡선이 올라감
   const base = est - 1.2 + risk - (h.idx >= 9 ? 0.3 : 0);
   let par = clamp(Math.round(base), 2, 6);
@@ -827,6 +828,26 @@ function tryGenerate(rng, idx, world) {
   forceObstacle(h, rng, meta);
   h.segs = computeSegments(h);
   let pr = computePar(h);
+  // 짧은 홀(구간 2 이하)은 컵 앞 길목에 범퍼 수비수: 원 샷 홀인원 방지
+  if (pr.legs <= 2 && !h.boss) {
+    const dist = distField(h);
+    const tx = Math.floor(h.tee.x / T),
+      ty = Math.floor(h.tee.y / T);
+    const path = pathFromDist(h, dist, tx, ty);
+    if (path && path.length > 5) {
+      for (const back of [2, 3]) {
+        const [bx, by] = path[path.length - 1 - back];
+        const nb = h.bumpers.length;
+        h.bumpers.push({ x: tcx(bx) + rng.range(-6, 6), y: tcx(by) + rng.range(-6, 6), r: 10 });
+        if (validateHole(h).ok) {
+          h.forced = (h.forced ? h.forced + '+' : '') + 'guard';
+          break;
+        }
+        h.bumpers.length = nb;
+      }
+      pr = computePar(h);
+    }
+  }
   // 짧은 파2/파3 홀도 기둥이나 경사가 최소 1개
   if (pr.par <= 3 && h.forced !== 'pillar' && !h.grid.t.some((v) => v >= TILE.SN)) {
     if (addApproachSlope(h, rng, meta)) {
