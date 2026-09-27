@@ -25,8 +25,8 @@ export const WORLDS = [
     windFrom: 3,
     windChance: 0.55,
     themes: [
-      { hue: 74, sat: 30, light: 40, voidA: '#d39a5c', voidB: '#c2854a', dot: 'rgba(255,225,170,0.45)', rail: '#fff0d6', railSide: '#b77a45', bg: '#b8804a', sand: '#f9e4a8', flag: '#2979ff', water: ['#26c6da', '#00897b'], ice: ['#e6f7ff', '#d3efff'] },
-      { hue: 60, sat: 26, light: 36, voidA: '#a8603f', voidB: '#955436', dot: 'rgba(255,190,150,0.35)', rail: '#ffe3cf', railSide: '#b0694c', bg: '#874c31', sand: '#f6dc9c', flag: '#00e5ff', water: ['#26c6da', '#00897b'], ice: ['#e6f7ff', '#d3efff'] },
+      { hue: 34, sat: 42, light: 47, voidA: '#d39a5c', voidB: '#c2854a', dot: 'rgba(255,225,170,0.45)', rail: '#fff0d6', railSide: '#b77a45', bg: '#b8804a', sand: '#f9e4a8', flag: '#2979ff', water: ['#26c6da', '#00897b'], ice: ['#e6f7ff', '#d3efff'] },
+      { hue: 26, sat: 36, light: 43, voidA: '#a8603f', voidB: '#955436', dot: 'rgba(255,190,150,0.35)', rail: '#ffe3cf', railSide: '#b0694c', bg: '#874c31', sand: '#f6dc9c', flag: '#00e5ff', water: ['#26c6da', '#00897b'], ice: ['#e6f7ff', '#d3efff'] },
     ],
   },
   {
@@ -55,8 +55,8 @@ export const WORLDS = [
     blackhole: true,
     wall: 'neon',
     themes: [
-      { hue: 265, sat: 35, light: 44, voidA: '#120b2e', voidB: '#0e0826', dot: 'rgba(255,255,255,0.5)', rail: '#d7ccff', railSide: '#6a5acd', bg: '#0b0620', sand: '#c7b8ff', flag: '#00e676', water: ['#2a0845', '#000000'], ice: ['#b3e5fc', '#81d4fa'], stars: true },
-      { hue: 300, sat: 30, light: 42, voidA: '#1d0b2b', voidB: '#170823', dot: 'rgba(255,220,255,0.5)', rail: '#ffd1f5', railSide: '#b0479b', bg: '#12061c', sand: '#e0b8ff', flag: '#ffea00', water: ['#2a0845', '#000000'], ice: ['#b3e5fc', '#81d4fa'], stars: true },
+      { hue: 250, sat: 22, light: 34, voidA: '#120b2e', voidB: '#0e0826', dot: 'rgba(255,255,255,0.5)', rail: '#d7ccff', railSide: '#6a5acd', bg: '#0b0620', sand: '#c7b8ff', flag: '#00e676', water: ['#2a0845', '#000000'], ice: ['#b3e5fc', '#81d4fa'], stars: true },
+      { hue: 285, sat: 20, light: 32, voidA: '#1d0b2b', voidB: '#170823', dot: 'rgba(255,220,255,0.5)', rail: '#ffd1f5', railSide: '#b0479b', bg: '#12061c', sand: '#e0b8ff', flag: '#ffea00', water: ['#2a0845', '#000000'], ice: ['#b3e5fc', '#81d4fa'], stars: true },
     ],
   },
 ];

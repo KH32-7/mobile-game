@@ -14,15 +14,15 @@ export const PHYS = {
   crateE: 0.45,
   crateBreakSpeed: 150,
   millE: 0.8,
-  cupR: 11,
-  cupPullR: 1.9, // cupR 배수
-  cupPull: 460,
-  captureSpeed: 250,
+  cupR: 10.5,
+  cupPullR: 1.5, // cupR 배수
+  cupPull: 380,
+  captureSpeed: 215,
   lipSlow: 0.72,
   slopeAccel: 260,
   stopSpeed: 9,
   stopTime: 0.3,
-  maxRollTime: 16,
+  maxRollTime: 10,
   teleR: 11,
   coinR: 12,
   gimmeR: 52, // 이 거리 안에 멈추면 컨시드 (+1타로 홀아웃)

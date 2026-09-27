@@ -204,7 +204,8 @@ try {
     let m = await metaOf(page);
     check(m.worlds.meadow.stars.every(Boolean), '초원 별 3개 획득');
     check(m.worlds.desert.unlocked, '사막 월드 해금');
-    check(m.gems > gems0 + 50, `보석 획득 ${gems0} -> ${m.gems}`);
+    check(m.gems > gems0 && m.gems - gems0 <= 40, `보석 획득 ${gems0} -> ${m.gems} (18홀 전부 홀인원이어도 과다하지 않음)`);
+    await page.evaluate(() => window.__meta.addGems(100)); // 구매 테스트용
     check(Object.keys(m.ach).length >= 5, `업적 달성 ${Object.keys(m.ach).length}개`);
     await page.tap('#title');
     await page.waitForSelector('#tStart');
@@ -461,6 +462,7 @@ try {
       for (const w of ['meadow', 'desert', 'snow', 'space']) out.bgm.push(await A.measure('bgm', [w], 3.2));
       out.bgm.push(await A.measure('bgm', ['meadow', true], 3.2));
       out.mix = await A.measure('mix', [], 3.2);
+      out.cheer = await A.measure('cheer', [2], 2.5);
       return out;
     });
     const fmt = (r) => `${r.name} ${r.rmsDb}dB/${r.peakDb}`;
@@ -471,6 +473,10 @@ try {
     const badLow = res.bgm.filter((r) => r.lowRatio > 0.6);
     check(!badLow.length, `BGM 150Hz 이하 에너지 60% 이하 (${res.bgm.map((r) => r.lowRatio).join(', ')})`);
     check(res.mix.peakDb <= -0.5 && res.mix.peakDb >= -6, `겹친 믹스 마스터 피크 약 -3dBFS (${res.mix.peakDb})`);
+    const shot = res.main[0];
+    check(shot.lowRatio <= 0.4 && shot.hiRatio >= 0.3 && shot.rmsDb >= -27, `샷: 150Hz 이하 ${shot.lowRatio} (<=0.4), 2kHz 이상 ${shot.hiRatio} (>=0.3), RMS ${shot.rmsDb}`);
+    check(res.bgm.every((r) => r.midRatio >= 0.08), `BGM 모티프 500Hz~2kHz 비중 (${res.bgm.map((r) => r.midRatio).join(', ')})`);
+    check(res.bgm.every((r) => r.stereo >= 0.1) && res.cheer.stereo >= 0.1, `스테레오 L-R 비율 0.1 이상 (BGM ${res.bgm.map((r) => r.stereo).join(', ')}, 환호 ${res.cheer.stereo})`);
     await ctx.close();
   }
 

@@ -50,9 +50,11 @@ export function relicMods(R, lv = {}, ctx = {}) {
     captureMul: (has('bigcup') ? 1.3 : 1) * (L('radar') === 2 ? 1.7 : L('radar') ? 1.4 : 1),
     fricMul: L('feather') === 2 ? 0.65 : L('feather') ? 0.75 : 1,
     sandMul: (has('bouncy') ? 1.5 : 1) * terr,
-    slopeMul: (has('sloperider') ? 1.6 : 1) * terr,
+    // 경사 타기는 경사를 '타는' 유물이므로 지형 시너지가 깎지 않음
+    slopeMul: has('sloperider') ? 1.6 : terr,
     windMul: terr,
     teleBoost: has('warpmaster') ? 1.4 : 1,
+    skimMax: 1 + (syn.물 || 0),
     wallBoost: [1, 1.08, 1.2][syn.벽 || 0],
     crateEasy: (syn.상자 || 0) >= 2,
   };
@@ -267,7 +269,7 @@ export function stepBall(h, st, b, dt, M, ev) {
         b.vx += nx * kick;
         b.vy += ny * kick;
         const s2 = Math.hypot(b.vx, b.vy);
-        const cap = PHYS.maxShotSpeed * 1.15;
+        const cap = PHYS.maxShotSpeed * 1.1;
         if (s2 > cap) {
           b.vx *= cap / s2;
           b.vy *= cap / s2;
@@ -351,7 +353,7 @@ export function stepBall(h, st, b, dt, M, ev) {
       const cr = PHYS.cupR * M.cupMul;
       if (d < cr) {
         const rel = Math.hypot(b.vx - c.vx, b.vy - c.vy);
-        if (rel < PHYS.captureSpeed * M.captureMul * (M.teeShot ? 0.75 : 1)) {
+        if (rel < PHYS.captureSpeed * M.captureMul) {
           b.sunk = true;
           b.moving = false;
           b.sinkCup = i;
@@ -382,9 +384,9 @@ export function stepBall(h, st, b, dt, M, ev) {
     // 물
     if (tv === TILE.WATER) {
       spn = Math.hypot(b.vx, b.vy);
-      if (!b.skimming && M.waterski && !b.skimUsed && spn > 110) {
+      if (!b.skimming && M.waterski && (b.skimUsed || 0) < (M.skimMax || 1) && spn > 110) {
         b.skimming = true;
-        b.skimUsed = true;
+        b.skimUsed = (b.skimUsed || 0) + 1;
         ev.push({ type: 'skim', x: b.x, y: b.y });
       }
       if (!b.skimming) {

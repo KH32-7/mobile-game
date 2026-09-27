@@ -183,7 +183,8 @@ export function renderStatic(h, theme, world, S = 2, pattern = null) {
     x.stroke();
   }
   x.globalAlpha = 0.55;
-  x.fillStyle = grassTexture(x);
+  x.globalAlpha = world.id === 'snow' ? 0.9 : world.id === 'space' ? 0.8 : 0.55;
+  x.fillStyle = grassTexture(x, world.id);
   for (let ty = 0; ty < g.rows; ty++)
     for (let tx = 0; tx < g.cols; tx++) {
       const v = g.t[ty * g.cols + tx];
@@ -280,28 +281,64 @@ function mixHex(a, b, t) {
   const ch = (sh) => Math.round(((pa >> sh) & 255) * (1 - t) + ((pb >> sh) & 255) * t);
   return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
 }
-// 잔디결 노이즈 텍스처 (한 번 그려 캐시)
-let grassTex = null;
-function grassTexture(x) {
-  if (!grassTex) {
+// 월드별 지면 텍스처 (한 번 그려 캐시): 잔디결 / 눈 덮인 잔디 / 모래 물결 / 금속 패널
+const texCache = {};
+function grassTexture(x, kind = 'meadow') {
+  if (!texCache[kind]) {
     const c = document.createElement('canvas');
     c.width = c.height = 96;
     const g = c.getContext('2d');
     const rng = mulberry32(4321);
-    for (let k = 0; k < 900; k++) {
-      const px = rng() * 96,
-        py = rng() * 96,
-        l = 2 + rng() * 3;
-      g.strokeStyle = rng() < 0.5 ? 'rgba(0,40,0,0.22)' : 'rgba(255,255,220,0.2)';
-      g.lineWidth = 0.8;
-      g.beginPath();
-      g.moveTo(px, py);
-      g.lineTo(px + (rng() - 0.5) * 1.5, py - l);
-      g.stroke();
+    if (kind === 'desert') {
+      g.strokeStyle = 'rgba(120,70,20,0.28)';
+      g.lineWidth = 1.2;
+      for (let k = 0; k < 12; k++) {
+        const y0 = k * 8 + rng() * 3;
+        g.beginPath();
+        for (let px = -4; px <= 100; px += 4) g.lineTo(px, y0 + Math.sin(px * 0.13 + k) * 2.2);
+        g.stroke();
+      }
+      g.fillStyle = 'rgba(255,240,200,0.35)';
+      for (let k = 0; k < 260; k++) g.fillRect(rng() * 96, rng() * 96, 1.2, 1.2);
+    } else if (kind === 'space') {
+      g.strokeStyle = 'rgba(120,230,255,0.35)';
+      g.lineWidth = 1;
+      g.strokeRect(0.5, 0.5, 47, 47);
+      g.strokeRect(48.5, 48.5, 47, 47);
+      g.strokeStyle = 'rgba(0,0,0,0.35)';
+      g.strokeRect(48.5, 0.5, 47, 47);
+      g.strokeRect(0.5, 48.5, 47, 47);
+      g.fillStyle = 'rgba(255,255,255,0.35)';
+      for (const [px, py] of [[4, 4], [44, 4], [4, 44], [44, 44], [52, 52], [92, 52], [52, 92], [92, 92]]) g.fillRect(px - 1, py - 1, 2, 2);
+      g.fillStyle = 'rgba(255,255,255,0.06)';
+      for (let k = 0; k < 140; k++) g.fillRect(rng() * 96, rng() * 96, 3, 0.8);
+    } else {
+      for (let k = 0; k < 900; k++) {
+        const px = rng() * 96,
+          py = rng() * 96,
+          l = 2 + rng() * 3;
+        g.strokeStyle = rng() < 0.5 ? 'rgba(0,40,0,0.22)' : 'rgba(255,255,220,0.2)';
+        g.lineWidth = 0.8;
+        g.beginPath();
+        g.moveTo(px, py);
+        g.lineTo(px + (rng() - 0.5) * 1.5, py - l);
+        g.stroke();
+      }
+      if (kind === 'snow') {
+        // 눈 덮인 잔디: 흰 눈 얼룩과 반짝임
+        for (let k = 0; k < 26; k++) {
+          g.fillStyle = `rgba(255,255,255,${0.35 + rng() * 0.35})`;
+          g.beginPath();
+          g.ellipse(rng() * 96, rng() * 96, 3 + rng() * 7, 2 + rng() * 4, rng() * 3, 0, 7);
+          g.fill();
+        }
+        g.fillStyle = 'rgba(255,255,255,0.9)';
+        for (let k = 0; k < 120; k++) g.fillRect(rng() * 96, rng() * 96, 1.2, 1.2);
+      }
     }
-    grassTex = c;
+    texCache[kind] = c;
   }
-  return x.createPattern(grassTex, 'repeat');
+  return x.createPattern(texCache[kind], 'repeat');
 }
 
 // 이음매 없는 지면 패턴 (월드 좌표 320 단위 반복, 2배 해상도)
@@ -1162,7 +1199,8 @@ export class Renderer {
   drawAim(c, G, time) {
     const b = G.st.balls[0];
     const a = G.aim;
-    const hue = 120 * (1 - a.power);
+    // 파워 구간: 30% 미만 초록, 60% 미만 노랑, 90% 미만 주황, 그 이상 빨강
+    const hue = a.power < 0.3 ? 120 : a.power < 0.6 ? 52 : a.power < 0.9 ? 28 : 0;
     const col = `hsl(${hue},95%,${60 - a.power * 8}%)`;
     // 새총 고무줄: 공 양옆 두 점에서 당긴 지점으로
     const pull = 10 + a.power * 48;
@@ -1465,14 +1503,13 @@ export class Renderer {
         c.roundRect(-w / 2, -size * 0.72, w, size * 1.44, 18);
         c.fill();
       }
-      c.shadowColor = 'rgba(0,0,0,0.55)';
-      c.shadowBlur = 8;
-      c.shadowOffsetY = 5;
       c.lineJoin = 'round';
+      // 그림자는 블러 없이 오프셋 외곽선으로 (저사양 대비)
       c.lineWidth = 12;
+      c.strokeStyle = 'rgba(0,0,0,0.45)';
+      c.strokeText(bt.text, 0, 5);
       c.strokeStyle = '#ffffff';
       c.strokeText(bt.text, 0, 0);
-      c.shadowColor = 'transparent';
       c.lineWidth = 3;
       c.strokeStyle = 'rgba(0,0,0,0.35)';
       c.strokeText(bt.text, 0, 0);

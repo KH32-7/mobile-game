@@ -64,13 +64,14 @@ export class Game {
       worldH = h.rows * T;
     const top = this.view.top,
       bot = this.view.bottom;
-    const availH = Math.max(100, bot - top);
+    // 타이틀: 데모 코스는 화면 상단 영역에만
+    const availH = this.state === 'title' ? Math.max(100, this.R.h * 0.42 - top) : Math.max(100, bot - top);
     const fit = Math.min((W - 6) / worldW, 1.6);
     const over = Math.min(fit, availH / (worldH + 8));
     let scale = this.cam.overview || this.state === 'intro' || this.state === 'title' ? over : fit;
     let cy, y;
     if (worldH * scale <= availH) {
-      cy = top + availH * (this.state === 'title' ? 0.64 : 0.5);
+      cy = top + availH * 0.5;
       y = worldH / 2;
     } else {
       cy = top + availH / 2;
@@ -165,6 +166,14 @@ export class Game {
       parTotal: 0,
       counts: { aces: 0, eagles: 0, birdies: 0 },
     };
+    // 시즌 보상으로 모아 둔 출발 보너스
+    const sb = meta.takeStartBonus();
+    if (sb.coins || sb.hearts) {
+      this.run.coins += sb.coins;
+      this.run.hearts += sb.hearts;
+      this.run.maxHearts += sb.hearts;
+      this.after(2.2, () => this.ui.toast(`시즌 출발 보너스: ${sb.coins ? `코인 +${sb.coins} ` : ''}${sb.hearts ? `하트 +${sb.hearts}` : ''}`));
+    }
     if (startRelic) this.addRelic(startRelic, true);
     this.startHole(this.run.holeIdx);
   }
@@ -346,8 +355,9 @@ export class Game {
     this.updateMods();
     this.introT = 1.6;
     this.camTarget(true);
-    this.cam.scale *= 0.82;
-    this.ui.wipe();
+    // 홀 전환: 멀리서 줌인하며 아래에서 위로 팬
+    this.cam.scale *= 0.5;
+    this.cam.y += h.rows * T * 0.35;
     setBgmStyle(r.world, !!h.boss);
     this.saveProgress();
     const boss = BOSS[idx];
@@ -439,7 +449,8 @@ export class Game {
       aa = 140;
     const full = v0 / k - (aa / (k * k)) * Math.log(1 + (k * v0) / aa);
     const long = this.has('longaim');
-    const dist = full * (long ? 0.8 : 0.4) * [1, 1.3, 1.7][this.synLv('조준')];
+    // 약한 샷도 방향이 보이게 화면 기준 최소 90px
+    const dist = Math.max(90 / this.cam.scale, full * (long ? 0.8 : 0.4) * [1, 1.3, 1.7][this.synLv('조준')] * (0.55 + a.power * 0.45));
     const bounces = (long ? 3 : 0) + (this.has('cushion') ? 1 : 0) + (this.synLv('조준') >= 2 ? 1 : 0);
     a.path = previewPath(this.hole, this.st, b.x, b.y, a.dx, a.dy, dist, bounces);
     a.path.fullLen = dist;
@@ -489,6 +500,8 @@ export class Game {
     };
     this.glassHit = false;
     this.bumpCount = 0;
+    this.bumpCoinN = 0;
+    this.bumpT = new Map();
     this.stingDone = false;
     this.shotStart = { x: b.x, y: b.y };
     const reset = (bb) => Object.assign(bb, { moving: true, stopT: 0, rollT: 0, ghostUsed: false, ghostComp: -1, skimUsed: false, skimming: false, lip: -1, waterHit: false, steerUsed: false, brakeUsed: false, trail: [] });
@@ -509,7 +522,6 @@ export class Game {
     this.strokes++;
     meta.track('shots');
     // 티샷은 컵이 조금 더 엄격 (홀인원은 드물게)
-    this.M.teeShot = this.firstShot;
     this.firstShot = false;
     this.state = 'rolling';
     this.shotPath = [[b.x, b.y]];
@@ -571,7 +583,7 @@ export class Game {
       }
     }
     // 보스 제한 시간
-    if (this.timeLeft > 0 && (this.state === 'ready' || this.state === 'rolling') && this.strokes > 0 && !this.ui.coachOpen) {
+    if (this.timeLeft > 0 && this.state === 'ready' && !this.aim && this.strokes > 0 && !this.ui.coachOpen) {
       const before = Math.ceil(this.timeLeft);
       this.timeLeft -= dtReal;
       if (Math.ceil(this.timeLeft) !== before && this.timeLeft <= 10 && this.timeLeft > 0) sfx.tick();
@@ -707,7 +719,16 @@ export class Game {
           sfx.bumper();
           meta.track('bumpers');
           this.bumpCount = (this.bumpCount || 0) + 1;
-          if (this.has('bounceking') || this.synLv('범퍼') >= 2) this.gainCoins(this.lv('bounceking') + (this.synLv('범퍼') >= 2 ? 1 : 0), e.x, e.y - 16);
+          // 범퍼 코인: 샷당 최대 5회, 같은 범퍼 0.25초 안 재충돌은 코인 없음 (핑퐁 루프 차단)
+          if (this.has('bounceking') || this.synLv('범퍼') >= 2) {
+            this.bumpT = this.bumpT || new Map();
+            const lastT = this.bumpT.get(e.bp);
+            this.bumpT.set(e.bp, this.st.t);
+            if ((this.bumpCoinN || 0) < 5 && (lastT == null || this.st.t - lastT > 0.25)) {
+              this.bumpCoinN = (this.bumpCoinN || 0) + 1;
+              this.gainCoins(this.lv('bounceking') + (this.synLv('범퍼') >= 2 ? 1 : 0), e.x, e.y - 16);
+            }
+          }
           break;
         case 'crate':
           this.fx.debris(e.x, e.y);
@@ -1035,6 +1056,7 @@ export class Game {
     }
     const level = ace || diff <= -2 ? 2 : diff === -1 ? 1 : 0;
     if (diff <= 0) sfx.fanfare(level);
+    if (diff < 0) sfx.cheer(level);
     const ci = this.hole.cups.findIndex((c) => c.real);
     const cp = cupPos(this.hole, this.st, ci);
     const cx = ball ? ball.sinkX : cp.x,
@@ -1077,7 +1099,7 @@ export class Game {
     if (this.hole.boss) meta.track('bossClears');
     meta.persist();
     const ach = meta.checkAchievements();
-    for (const a of ach) this.ui.toast(`업적 달성! <b>${a.name}</b> +${a.gems} 보석`, 2600);
+    for (const a of ach) this.ui.toast(`업적 달성! <b>${a.name}</b> ${a.gems ? `+${a.gems} 보석` : '시즌 +40 XP'}`, 2600);
     if (ach.length) meta.takeNotices();
     this.ui.hud(this);
     r.holeState = null;

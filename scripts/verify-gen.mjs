@@ -115,7 +115,6 @@ function playHole(seed, idx, wid, rngSeed) {
   const rng = mulberry32(rngSeed);
   const M = relicMods(new Set());
   const MM = relicMods(new Set(), {}, { mercy: true }); // 게임과 같은 위기 보정
-  const MT = { ...M, teeShot: true };
   const h = generateHole(seed, idx, wid);
   const st = makeState(h);
   const b = newBall(h.tee.x, h.tee.y);
@@ -123,7 +122,7 @@ function playHole(seed, idx, wid, rngSeed) {
   let strokes = 0;
   let done = false;
   while (strokes < 12 && !done) {
-    const Mh = strokes >= h.par ? MM : { ...M, teeShot: strokes === 0 };
+    const Mh = strokes >= h.par ? MM : M;
     const shot = humanize(planShot(h, st, b.x, b.y, Mh, PHYS.maxShotSpeed, { angles: 20, powers: [0.2, 0.35, 0.5, 0.7, 0.9] }), rng);
     const px = b.x,
       py = b.y;
@@ -134,7 +133,7 @@ function playHole(seed, idx, wid, rngSeed) {
     const ev = [];
     let guard = 0;
     while (b.moving && guard++ < 120 * 20) {
-      stepWorld(h, st, 1 / 120, strokes - 1 >= h.par ? MM : strokes === 1 ? MT : M, ev);
+      stepWorld(h, st, 1 / 120, strokes - 1 >= h.par ? MM : M, ev);
       for (const e of ev) {
         if (e.type === 'cup') {
           if (h.cups[e.cup].real) done = true;

@@ -454,9 +454,10 @@ export function computePar(h) {
   const est = parEstimate(feat);
   // 사람 근사 AI 분포(파 이하 55~70%, +2 이상 10% 이하)에 맞춘 보정: 물/가짜 컵/긴 경로는 변동이 커서 여유를 더 줌
   const risk = (water > 0 ? 2 : 0) + (h.cups.length > 1 ? 2 : 0) + (legs >= 3 ? 0.5 : 0);
-  const base = est - 1.2 + risk;
+  // 후반 9홀은 파가 빡빡해져 난이도 곡선이 올라감
+  const base = est - 1.2 + risk - (h.idx >= 9 ? 0.3 : 0);
   let par = clamp(Math.round(base), 2, 6);
-  if (h.boss) par = clamp(Math.round(base), 3, 7);
+  if (h.boss) par = clamp(Math.round(base) + (h.boss === 'movingCup' || h.boss === 'giantMill' ? 1 : 0), 3, 7);
   return { par, legs, pathLen: path.length - 1, est };
 }
 
@@ -679,7 +680,7 @@ function placeElements(h, rng, idx, meta, world) {
   ]
     .map(([k, from, w]) => [k, wt[k] > 2 ? Math.min(from, 1) : from, w * (wt[k] ?? 1)])
     .filter((p) => p[1] <= eff && p[2] > 0);
-  const n = Math.min(6, 1 + Math.floor(eff * 0.28) + rng.int(0, 1));
+  const n = Math.min(7, 1 + Math.floor(eff * 0.28) + rng.int(0, 1) + (idx >= 9 ? 1 : 0));
   const counts = {};
   for (let k = 0; k < n; k++) {
     let tw = 0;
@@ -800,7 +801,10 @@ function tryGenerate(rng, idx, world) {
             for (let oy = -1; oy <= 1 && ok; oy++) for (let ox = -1; ox <= 1; ox++) if (!isFloor(tileAt(g, xx + ox, yy + oy))) ok = false;
             if (ok) cands.push([xx, yy]);
           }
-        const [cxx, cyy] = cands.length ? rng.pick(cands) : [x0 + (w >> 1), y0 + 1];
+        // 컵 배치로 난이도: 가능하면 입구(아래)에서 먼 구석 쪽
+        cands.sort((a, b) => a[1] - b[1] + (Math.abs(b[0] - cx) - Math.abs(a[0] - cx)) * 0.5);
+        const pickFrom = cands.slice(0, Math.max(1, Math.ceil(cands.length / 2)));
+        const [cxx, cyy] = cands.length ? rng.pick(pickFrom) : [x0 + (w >> 1), y0 + 1];
         h.cups.push({ x: tcx(cxx), y: tcx(cyy), real: true });
       }
     } else if (p.type === 'millroom') {
@@ -822,10 +826,55 @@ function tryGenerate(rng, idx, world) {
   if (!validateHole(h).ok) return null;
   forceObstacle(h, rng, meta);
   h.segs = computeSegments(h);
-  const pr = computePar(h);
+  let pr = computePar(h);
+  // 짧은 파2/파3 홀도 기둥이나 경사가 최소 1개
+  if (pr.par <= 3 && h.forced !== 'pillar' && !h.grid.t.some((v) => v >= TILE.SN)) {
+    if (addApproachSlope(h, rng, meta)) {
+      h.segs = computeSegments(h);
+      pr = computePar(h);
+    }
+  }
   h.par = pr.par;
   h.pathLen = pr.pathLen;
   return h;
+}
+
+// 컵으로 가는 길목에 경사 패치 (짧은 홀의 단순 직진 방지)
+function addApproachSlope(h, rng, meta) {
+  const g = h.grid;
+  const dist = distField(h);
+  const tx = Math.floor(h.tee.x / T),
+    ty = Math.floor(h.tee.y / T);
+  const path = pathFromDist(h, dist, tx, ty);
+  if (!path || path.length < 4) return false;
+  const cands = path.slice(Math.floor(path.length * 0.3), path.length - 2);
+  rng.shuffle(cands);
+  for (const [x, y] of cands) {
+    if (meta.noGoRows && y >= meta.noGoRows[0] && y <= meta.noGoRows[1]) continue;
+    const i = path.findIndex((p) => p[0] === x && p[1] === y);
+    const nx = path[Math.min(path.length - 1, i + 1)];
+    const ddx = nx[0] - x,
+      ddy = nx[1] - y;
+    // 진행 방향에 수직으로 미는 경사
+    const dir = ddx ? (rng.chance(0.5) ? TILE.SN : TILE.SS) : rng.chance(0.5) ? TILE.SE : TILE.SW;
+    let n = 0;
+    for (let oy = 0; oy < 2; oy++)
+      for (let ox = 0; ox < 2; ox++) {
+        const xx = x + ox,
+          yy = y + oy;
+        if (xx < 0 || yy < 0 || xx >= g.cols || yy >= g.rows) continue;
+        if (g.t[yy * g.cols + xx] !== GRASS) continue;
+        const cup = h.cups[0];
+        if (Math.hypot((xx + 0.5) * T - cup.x, (yy + 0.5) * T - cup.y) < T * 1.5 || Math.hypot((xx + 0.5) * T - h.tee.x, (yy + 0.5) * T - h.tee.y) < T * 1.5) continue;
+        g.t[yy * g.cols + xx] = dir;
+        n++;
+      }
+    if (n) {
+      h.forced = (h.forced ? h.forced + '+' : '') + 'slope';
+      return true;
+    }
+  }
+  return false;
 }
 
 function fallbackHole(idx) {

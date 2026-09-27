@@ -167,12 +167,13 @@ export const sfx = {
   shot(p) {
     if (!ok()) return;
     const k = rnd();
-    // 클럽 페이스 딱: 노이즈 버스트 + 레조넌트 밴드패스 + 피치 드롭
-    noise({ dur: 0.05, vol: 0.45 + p * 0.35, type: 'bandpass', f: 2600 * k, q: 7 });
-    noise({ dur: 0.025, vol: 0.3, type: 'highpass', f: 5000, q: 0.7 });
-    tone({ f: 1100 * k + p * 400, f2: 240, type: 'triangle', dur: 0.07, vol: 0.32 });
-    tone({ f: 160 * k, f2: 70, type: 'sine', dur: 0.14, vol: 0.08 + p * 0.14 });
-    tone({ f: 420 * k, f2: 260, type: 'triangle', dur: 0.1, vol: 0.12 + p * 0.1 }); // 폰 스피커용 배음
+    // 주 레이어: 2~4kHz 클럽 페이스 '딱' 클릭 (폰 스피커가 잘 내는 대역)
+    noise({ dur: 0.045, vol: 0.7 + p * 0.3, type: 'bandpass', f: 3000 * k, q: 2.5 });
+    tone({ f: 3300 * k, f2: 2400, type: 'sine', dur: 0.035, vol: 0.35 });
+    noise({ dur: 0.02, vol: 0.25, type: 'highpass', f: 5500, q: 0.7 });
+    // 보조: 공 몸체 톤 (500Hz~1kHz 피치 드롭) + 약한 저역 무게감
+    tone({ f: 1000 * k + p * 300, f2: 420, type: 'triangle', dur: 0.06, vol: 0.18 });
+    tone({ f: 150 * k, f2: 80, type: 'sine', dur: 0.08, vol: 0.02 + p * 0.03 });
   },
   wall(speed, mat = 'wood') {
     if (!ok()) return;
@@ -280,6 +281,34 @@ export const sfx = {
     if (!ok()) return;
     [392, 330, 262, 196].forEach((f, i) => tone({ f, type: 'triangle', t: i * 0.18, dur: 0.4, vol: 0.18 }));
   },
+  // 관중 환호: 대역 노이즈 군중 + 박수 (버디 이상)
+  cheer(level = 1) {
+    if (!ok()) return;
+    const dur = 1.2 + level * 0.5;
+    for (const pan of [-0.6, 0.6]) {
+      const s0 = ctx.createBufferSource();
+      s0.buffer = noiseBuf;
+      s0.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 1100 + pan * 200;
+      f.Q.value = 0.6;
+      const g = ctx.createGain();
+      const now = ctx.currentTime;
+      const v = (0.22 + level * 0.06) * gainK;
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(v, now + 0.25);
+      g.gain.setValueAtTime(v, now + dur * 0.5);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+      const pn = panNode(pan);
+      if (pn) s0.connect(f).connect(g).connect(pn).connect(sfxBus);
+      else s0.connect(f).connect(g).connect(sfxBus);
+      s0.start(now, Math.random() * 0.5);
+      s0.stop(now + dur + 0.05);
+    }
+    for (let i = 0; i < 10 + level * 8; i++) noise({ t: 0.1 + Math.random() * dur * 0.8, dur: 0.03, vol: 0.12 + Math.random() * 0.1, type: 'bandpass', f: 1500 + Math.random() * 1500, q: 1.2 });
+    [1047, 1319].forEach((f, i) => tone({ f, type: 'triangle', t: 0.15 + i * 0.2, dur: 0.25, vol: 0.05 }));
+  },
   tick() {
     if (!ok()) return;
     tone({ f: 1500, type: 'square', dur: 0.04, vol: 0.08, lp: 3000 });
@@ -306,7 +335,7 @@ export const sfx = {
 };
 
 // 믹스 기준(주요 효과음 RMS -24~-20dB, 작은 소리도 -35dB 이상)에 맞춘 효과음별 게인
-const SFX_GAIN = { shot: 2.4, wall: 4.3, cup: 0.6, splash: 1.3, coin: 1.6, bumper: 2.2, crate: 1.7, relic: 0.7, lip: 3.4, tele: 1.05, heart: 0.75, heal: 0.8, click: 4.2, aimTick: 11, tick: 4.2, sting: 1.6, ghost: 2.6, fanfare: 0.72, stinger: 0.66, gameOver: 0.8 };
+const SFX_GAIN = { cheer: 1, shot: 2.7, wall: 4.3, cup: 0.6, splash: 1.3, coin: 1.6, bumper: 2.2, crate: 1.7, relic: 0.7, lip: 3.4, tele: 1.05, heart: 0.75, heal: 0.8, click: 4.2, aimTick: 11, tick: 4.2, sting: 1.6, ghost: 2.6, fanfare: 0.72, stinger: 0.66, gameOver: 0.8 };
 for (const [k, g] of Object.entries(SFX_GAIN)) {
   const orig = sfx[k];
   sfx[k] = (...a) => {
@@ -383,11 +412,54 @@ export function rollSound(surface, speed) {
 }
 
 // ---------- BGM: 월드별 4종 + 보스 변주 ----------
+// 모티프: MIDI 72(C5 523Hz) ~ 95(B6 1976Hz), null 은 쉼표
+const MOTIFS = {
+  meadow: [
+    [76, null, 79, 81, 79, null, 76, 74],
+    [72, null, 74, 76, null, null, 74, null],
+    [76, null, 79, 81, 84, null, 81, 79],
+    [81, null, null, 79, 76, null, null, null],
+    [74, null, 76, 79, 76, null, 74, 72],
+    [74, null, 76, null, 72, null, null, null],
+    [76, 79, 81, 84, 86, null, 84, 81],
+    [79, null, 76, null, 72, null, null, null],
+  ],
+  desert: [
+    [74, 75, 78, 79, 78, null, 75, 74],
+    [74, null, null, 72, 74, null, null, null],
+    [79, 81, 82, 81, 79, null, 78, 75],
+    [74, null, null, null, 75, 74, null, null],
+    [86, null, 84, 82, 81, null, 79, 78],
+    [79, null, 78, 75, 74, null, null, null],
+    [74, 75, 78, 79, 81, 82, 81, 79],
+    [78, null, 75, null, 74, null, null, null],
+  ],
+  snow: [
+    [79, null, null, 83, 86, null, null, null],
+    [84, null, 83, null, 79, null, null, null],
+    [76, null, null, 79, 83, null, null, null],
+    [81, null, 79, null, 76, null, null, null],
+    [77, null, null, 81, 84, null, 88, null],
+    [86, null, 84, null, 81, null, null, null],
+    [79, null, 83, null, 86, null, 91, null],
+    [88, null, null, null, 86, null, null, null],
+  ],
+  space: [
+    [81, null, 84, 81, 88, null, 86, 84],
+    [81, null, null, 79, 76, null, null, null],
+    [77, null, 81, 77, 84, null, 83, 81],
+    [79, null, null, 76, 72, null, null, null],
+    [72, 76, 79, 84, 88, null, 84, 79],
+    [81, null, 79, null, 76, null, null, null],
+    [74, 79, 83, 86, 91, null, 86, 83],
+    [84, null, null, null, 81, null, null, null],
+  ],
+};
 const STYLES = {
-  meadow: { bpm: 76, chords: [[53, 57, 60, 64], [52, 55, 59, 62], [50, 53, 57, 60], [48, 52, 55, 59], [46, 50, 53, 57], [45, 48, 52, 55], [43, 46, 50, 53], [48, 53, 55, 58]], scale: [72, 74, 76, 79, 81, 84], pad: 'triangle', lead: 'sine', padCut: 1100, kick: [0, 2], hat: 0.05, leadP: 0.38, arp: false },
-  desert: { bpm: 90, chords: [[50, 53, 57, 62], [51, 55, 58, 62], [50, 53, 57, 60], [48, 51, 55, 58]], scale: [74, 75, 78, 79, 81, 82, 86], pad: 'sawtooth', lead: 'square', padCut: 700, kick: [0, 1.5, 2.5], hat: 0.07, leadP: 0.45, arp: false, shaker: true },
-  snow: { bpm: 62, chords: [[48, 55, 62, 64], [45, 52, 59, 60], [41, 48, 55, 57], [43, 50, 57, 59]], scale: [79, 81, 83, 86, 88, 91], pad: 'sine', lead: 'sine', padCut: 1600, kick: [], hat: 0.02, leadP: 0.5, arp: false, bell: true },
-  space: { bpm: 100, chords: [[45, 52, 57, 60], [41, 48, 53, 57], [48, 55, 60, 64], [43, 50, 55, 59]], scale: [69, 72, 74, 76, 79, 81], pad: 'sawtooth', lead: 'triangle', padCut: 900, kick: [0, 1, 2, 3], hat: 0.04, leadP: 0.2, arp: true },
+  meadow: { id: 'meadow', bpm: 76, chords: [[53, 57, 60, 64], [52, 55, 59, 62], [50, 53, 57, 60], [48, 52, 55, 59], [46, 50, 53, 57], [45, 48, 52, 55], [43, 46, 50, 53], [48, 53, 55, 58]], scale: [72, 74, 76, 79, 81, 84], pad: 'triangle', lead: 'sine', padCut: 1100, kick: [0, 2], hat: 0.05, leadP: 0.38, arp: false },
+  desert: { id: 'desert', bpm: 90, chords: [[50, 53, 57, 62], [51, 55, 58, 62], [50, 53, 57, 60], [48, 51, 55, 58]], scale: [74, 75, 78, 79, 81, 82, 86], pad: 'sawtooth', lead: 'square', padCut: 700, kick: [0, 1.5, 2.5], hat: 0.07, leadP: 0.45, arp: false, shaker: true },
+  snow: { id: 'snow', bpm: 62, chords: [[48, 55, 62, 64], [45, 52, 59, 60], [41, 48, 55, 57], [43, 50, 57, 59]], scale: [79, 81, 83, 86, 88, 91], pad: 'sine', lead: 'sine', padCut: 1600, kick: [], hat: 0.02, leadP: 0.5, arp: false, bell: true },
+  space: { id: 'space', bpm: 100, chords: [[45, 52, 57, 60], [41, 48, 53, 57], [48, 55, 60, 64], [43, 50, 55, 59]], scale: [69, 72, 74, 76, 79, 81], pad: 'sawtooth', lead: 'triangle', padCut: 900, kick: [0, 1, 2, 3], hat: 0.04, leadP: 0.2, arp: true },
 };
 let style = STYLES.meadow;
 let bossMode = false;
@@ -397,7 +469,13 @@ export function setBgmStyle(world, boss) {
 }
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
-function note(freq, t, dur, vol, type = 'sine', cut = 0) {
+function panNode(p) {
+  if (!ctx.createStereoPanner) return null;
+  const pn = ctx.createStereoPanner();
+  pn.pan.value = p;
+  return pn;
+}
+function note(freq, t, dur, vol, type = 'sine', cut = 0, pan = 0) {
   const o = ctx.createOscillator();
   o.type = type;
   o.frequency.value = freq;
@@ -413,7 +491,9 @@ function note(freq, t, dur, vol, type = 'sine', cut = 0) {
     o.connect(f);
     n = f;
   }
-  n.connect(g).connect(musicBus);
+  const pn = pan ? panNode(pan) : null;
+  if (pn) n.connect(g).connect(pn).connect(musicBus);
+  else n.connect(g).connect(musicBus);
   o.start(t);
   o.stop(t + dur + 0.05);
 }
@@ -427,7 +507,9 @@ function hat(t, vol, cut = 7000, dur = 0.05) {
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(vol, t + 0.003);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  s.connect(fl).connect(g).connect(musicBus);
+  const pn = panNode(0.45);
+  if (pn) s.connect(fl).connect(g).connect(pn).connect(musicBus);
+  else s.connect(fl).connect(g).connect(musicBus);
   s.start(t, Math.random() * 0.5);
   s.stop(t + dur + 0.02);
 }
@@ -446,7 +528,7 @@ function scheduleBar(t0) {
     const o = ctx.createOscillator();
     o.type = S.pad;
     o.frequency.value = mtof(m);
-    o.detune.value = (i - 1.5) * 5;
+    o.detune.value = (i - 1.5) * 9; // 스테레오 디튠
     const g = ctx.createGain();
     const fl = ctx.createBiquadFilter();
     fl.type = 'lowpass';
@@ -456,7 +538,9 @@ function scheduleBar(t0) {
     g.gain.exponentialRampToValueAtTime(pv, t0 + (S.bell ? 0.4 : 0.08));
     g.gain.exponentialRampToValueAtTime(pv * 0.4, t0 + BEAT * 2);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + BEAT * 4 - 0.02);
-    o.connect(fl).connect(g).connect(musicBus);
+    const pn = panNode([-0.75, 0.75, -0.35, 0.35][i % 4]);
+    if (pn) o.connect(fl).connect(g).connect(pn).connect(musicBus);
+    else o.connect(fl).connect(g).connect(musicBus);
     o.start(t0);
     o.stop(t0 + BEAT * 4);
   });
@@ -490,16 +574,22 @@ function scheduleBar(t0) {
   if (bossMode) note(mtof(ch[0] - 24), t0, BEAT * 4, 0.08, 'sawtooth', 200);
   // 아르페지오 (우주)
   if (S.arp) for (let k = 0; k < 16; k++) note(mtof(ch[k % 4] + 12 + (k % 8 >= 4 ? 12 : 0)), t0 + k * BEAT * 0.25, BEAT * 0.3, 0.035, 'square', 1800);
-  // 멜로디
-  for (let k = 0; k < 8; k++) {
-    if (Math.random() > (barIdx % 4 === 3 ? S.leadP * 0.5 : S.leadP)) continue;
-    const t = t0 + k * BEAT * 0.5 + (k % 2 ? BEAT * 0.08 : 0);
-    const m = S.scale[Math.floor(Math.random() * S.scale.length)] - (barIdx % 2 ? 0 : 12) - (bossMode ? 2 : 0);
+  // 월드별 고정 모티프 (8마디, 8분음표, 500Hz~2kHz 대역) - 매번 같은 선율이라 기억에 남음
+  const motif = MOTIFS[S.id] || MOTIFS.meadow;
+  const bar = motif[barIdx % motif.length];
+  bar.forEach((m, k) => {
+    if (m == null) return;
+    const t = t0 + k * BEAT * 0.5 + (k % 2 ? BEAT * 0.06 : 0);
+    const f = mtof(m - (bossMode ? 1 : 0));
+    const len = bar[k + 1] == null && k < 7 ? 0.95 : 0.45;
     if (S.bell) {
-      note(mtof(m), t, 1.6, 0.05, 'sine');
-      note(mtof(m) * 2.76, t, 0.8, 0.012, 'sine');
-    } else note(mtof(m), t, S.lead === 'square' ? 0.25 : 0.6, S.lead === 'square' ? 0.03 : 0.06, S.lead, S.lead === 'square' ? 2400 : 0);
-  }
+      note(f, t, BEAT * 1.6, 0.15, 'sine', 0, 0.25);
+      note(f * 2.76, t, BEAT * 0.6, 0.025, 'sine', 0, -0.25);
+    } else {
+      note(f, t, BEAT * len * 1.4, S.lead === 'square' ? 0.07 : 0.15, S.lead, S.lead === 'square' ? 2600 : 0, 0.2);
+      note(f * 2, t, BEAT * len, 0.03, 'sine', 0, -0.3);
+    }
+  });
   barIdx++;
 }
 
@@ -558,8 +648,16 @@ export async function measure(name, args = [], dur = 1.2) {
   let peak = 0,
     tot = 0,
     low = 0,
-    y = 0;
+    y = 0,
+    y5 = 0,
+    y2k = 0,
+    mid = 0,
+    hi = 0,
+    diff = 0,
+    sum = 0;
   const a = 1 - Math.exp((-2 * Math.PI * 150) / sr);
+  const a5 = 1 - Math.exp((-2 * Math.PI * 500) / sr);
+  const a2 = 1 - Math.exp((-2 * Math.PI * 2000) / sr);
   const win = Math.floor(sr * 0.1);
   let acc = 0,
     best = 0;
@@ -568,13 +666,19 @@ export async function measure(name, args = [], dur = 1.2) {
     const x = (L[i] + R[i]) / 2;
     peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
     y += a * (x - y);
+    y5 += a5 * (x - y5);
+    y2k += a2 * (x - y2k);
     tot += x * x;
     low += y * y;
+    mid += (y2k - y5) ** 2;
+    hi += (x - y2k) ** 2;
+    diff += (L[i] - R[i]) ** 2;
+    sum += (L[i] + R[i]) ** 2;
     sq[i] = x * x;
     acc += sq[i];
     if (i >= win) acc -= sq[i - win];
     if (acc > best) best = acc;
   }
   const db = (v) => (v > 0 ? 20 * Math.log10(v) : -120);
-  return { name, peakDb: +db(peak).toFixed(1), rmsDb: +db(Math.sqrt(best / win)).toFixed(1), lowRatio: +(tot ? low / tot : 0).toFixed(3) };
+  return { name, peakDb: +db(peak).toFixed(1), rmsDb: +db(Math.sqrt(best / win)).toFixed(1), lowRatio: +(tot ? low / tot : 0).toFixed(3), midRatio: +(tot ? mid / tot : 0).toFixed(3), hiRatio: +(tot ? hi / tot : 0).toFixed(3), stereo: +(sum ? Math.sqrt(diff / sum) : 0).toFixed(3) };
 }

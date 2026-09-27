@@ -342,6 +342,7 @@ export class UI {
       <div class="logo"><div class="l1">로그 퍼트</div><div class="l2">ROGUE PUTT</div><div class="l3">당겨서 치는 로그라이크 미니골프</div></div>
       ${notices.length ? `<div class="notices">${notices.slice(-3).map((n) => `<div>${esc(n)}</div>`).join('')}</div>` : ''}
       <div class="spacer"></div>
+      <div class="menu-panel">
       <div class="meta-row">
         <button class="meta-btn" id="tMissions">${ICONS.mission}<span>미션</span>${badge ? `<em>${badge}</em>` : ''}</button>
         <button class="meta-btn" id="tCollect">${ICONS.collect}<span>컬렉션</span>${affordable ? '<em>N</em>' : ''}</button>
@@ -357,6 +358,7 @@ export class UI {
       ${run ? `<button class="btn gold" id="tCont">이어하기<small>${WORLD_MAP[run.world].name}${run.mode === 'daily' ? ' 데일리' : ''} · ${run.holeIdx + 1}번 홀 · 하트 ${run.hearts}</small></button>` : ''}
       <button class="btn" id="tStart" ${w.unlocked ? '' : 'disabled'}>${w.unlocked ? `${w.name} 런 시작` : '잠긴 월드'}</button>
       <button class="btn ghost small" id="tDaily">데일리 코스<small>${date} · ${dw.name}${dBest ? ` · 오늘 최고 ${dBest.holes}홀 ${fmtToPar(dBest.toPar)}` : ' · 모두 같은 코스'}</small></button>
+      </div>
     `,
       'title'
     );
@@ -508,33 +510,59 @@ export class UI {
   seasonScreen() {
     const m = meta.meta();
     const sv = meta.seasonView();
+    const left = meta.seasonLeft();
     const claimed = (m.season && m.season.claimed) || [];
-    const rows = [];
+    const icon = (rw) =>
+      ({
+        gems: GEM,
+        coins: '<svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" fill="#ffca28" stroke="#fff" stroke-width="2"/></svg>',
+        heart: HEART('#ff4f8b'),
+        relic: `<img src="${relicIcon('_up', 64)}" alt="">`,
+        flag: '<svg viewBox="0 0 24 24" width="30" height="30"><path d="M6 3v19" stroke="#fff" stroke-width="2"/><path d="M7 4h11l-3 4 3 4H7z" fill="#ff7aa8"/></svg>',
+        ball: '<svg viewBox="0 0 24 24" width="30" height="30"><circle cx="12" cy="12" r="9" fill="#ffe4ef" stroke="#ff7aa8" stroke-width="3"/></svg>',
+        trail: '<svg viewBox="0 0 24 24" width="30" height="30"><circle cx="18" cy="8" r="4" fill="#fff"/><circle cx="11" cy="13" r="3" fill="#ffaac8"/><circle cx="6" cy="17" r="2" fill="#ffd1e0"/></svg>',
+      })[rw.kind];
+    const nodes = [];
     for (let lv = 1; lv <= meta.SEASON.levels; lv++) {
       const rw = meta.seasonReward(lv);
       const got = claimed.includes(lv);
       const can = lv <= sv.level && !got;
-      rows.push(`<div class="srow ${lv <= sv.level ? 'reached' : ''} ${rw.kind !== 'gems' ? 'big' : ''}"><div class="slv">${lv}</div><div class="sr-t"><b>${rw.kind === 'gems' ? GEM + ' ' + rw.n : rw.label}</b>${rw.kind !== 'gems' ? '<small>시즌 한정 꾸미기</small>' : ''}</div><button class="mini-btn" data-lv="${lv}" ${can ? '' : 'disabled'}>${got ? '받음' : can ? '받기' : '잠김'}</button></div>`);
+      nodes.push(`<div class="snode ${lv <= sv.level ? 'reached' : ''} ${rw.big ? 'big' : ''} ${got ? 'got' : ''}" data-node="${lv}">
+        <div class="sn-lv">${lv}</div><div class="sn-ic">${icon(rw)}</div><div class="sn-l">${rw.label}</div>
+        <button class="mini-btn" data-lv="${lv}" ${can ? '' : 'disabled'}>${got ? '받음' : can ? '받기' : '잠김'}</button></div>`);
     }
     const root = this.screen(
-      `<div class="card-panel wide"><h2>${meta.SEASON.name}</h2><div class="sub">Lv ${sv.level}/${meta.SEASON.levels} · 다음 레벨까지 ${meta.SEASON.xpPer - sv.into} XP<br>홀 클리어, 버디, 별, 미션, 출석으로 경험치 획득</div>
-      <div class="list" id="seasonList">${rows.join('')}</div></div>${this.backBtn()}`
+      `<div class="card-panel wide"><h2>${meta.SEASON.name}</h2>
+      <div class="sub">Lv ${sv.level}/${meta.SEASON.levels} · 다음 레벨까지 ${meta.SEASON.xpPer - sv.into} XP<br><b class="countdown">시즌 종료까지 ${left.days}일 ${left.hours}시간</b></div>
+      <div class="lane" id="lane"><div class="lane-track"><i style="width:${(sv.level / meta.SEASON.levels) * 100}%"></i></div>${nodes.join('')}</div>
+      <div class="sub" style="margin-top:6px">5레벨마다 큰 보상: 유물 해금권, 시즌 한정 깃발/공/트레일<br>홀 클리어, 버디, 별, 미션, 출석, 업적으로 경험치</div></div>${this.backBtn()}`
     );
     this.wireBack(root);
     root.querySelectorAll('[data-lv]').forEach(
       (b) =>
         (b.onclick = () => {
           const r = meta.claimSeason(+b.dataset.lv);
-          if (r) {
-            sfx.relic();
-            this.toast(`시즌 보상: <b>${r.label}</b>`);
-          }
-          this.seasonScreen();
+          if (r) this.chestOpen(r, () => this.seasonScreen());
         })
     );
-    const list = $('#seasonList', root);
-    const cur = list.children[Math.max(0, sv.level - 2)];
-    if (cur) list.scrollTop = cur.offsetTop - list.offsetTop;
+    const lane = $('#lane', root);
+    const cur = lane.querySelector(`[data-node="${Math.max(1, sv.level)}"]`);
+    if (cur) lane.scrollLeft = cur.offsetLeft - lane.clientWidth / 2 + cur.clientWidth / 2;
+  }
+  // 상자 열림 연출
+  chestOpen(r, done) {
+    sfx.relic();
+    const el = document.createElement('div');
+    el.className = 'chest-wrap';
+    el.innerHTML = `<div class="chest"><div class="lid"></div><div class="box"></div><div class="burst"></div></div><div class="chest-t">${r.label}</div>`;
+    $('#app').appendChild(el);
+    setTimeout(() => sfx.cheer(1), 350);
+    const close = () => {
+      el.remove();
+      done && done();
+    };
+    el.addEventListener('click', close);
+    setTimeout(close, 1800);
   }
   collectionScreen(tab) {
     const m = meta.meta();
@@ -665,7 +693,7 @@ export class UI {
       body = `<div class="stat-list">${rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
     } else if (tab === 'ach') {
       body = meta.ACHIEVEMENTS.map(
-        (a) => `<div class="ach ${m.ach[a.id] ? 'got' : ''}"><div class="ach-ic">${m.ach[a.id] ? '★' : '☆'}</div><div class="sr-t"><b>${a.name}</b><small>${a.desc}</small></div><div class="ach-r">${GEM}${a.gems}</div></div>`
+        (a) => `<div class="ach ${m.ach[a.id] ? 'got' : ''}"><div class="ach-ic">${m.ach[a.id] ? '★' : '☆'}</div><div class="sr-t"><b>${a.name}</b><small>${a.desc}</small></div><div class="ach-r">${a.gems ? GEM + a.gems : '+40 XP'}</div></div>`
       ).join('');
     } else if (tab === 'hist') {
       const h = m.history || [];
@@ -915,6 +943,15 @@ export class UI {
         <div class="row2"><button class="btn ghost small" id="share">결과 복사</button><button class="btn ghost small" id="title">타이틀로</button></div>
       </div>`
     );
+    // 스코어카드 순차 채움: 칸마다 틱, 버디 이하 칸은 반짝
+    r.scorecard.forEach((sc, i) => {
+      setTimeout(() => {
+        if (!root.isConnected) return;
+        const d0 = sc.strokes - sc.par;
+        if (d0 < 0) sfx.coin();
+        else sfx.aimTick(0.3 + (i / 18) * 0.7);
+      }, 350 + i * 60);
+    });
     // 숫자 카운트업
     root.querySelectorAll('[data-count]').forEach((el, k) => {
       const target = +el.dataset.count;
