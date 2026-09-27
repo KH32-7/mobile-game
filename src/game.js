@@ -47,6 +47,7 @@ export class Game {
     this.applySkin();
     this.mods = {};
     this.ui = new UI(uiRoot);
+    this.ui.audio = Audio;
     this.metaUI = new MetaUI(this, uiRoot);
     this.fx = new FX(this.scene, this.camera, this.ui.$('#dmg-layer'));
     this.enemies = new Enemies(this.scene, this);
@@ -93,6 +94,9 @@ export class Game {
       this.showTitle(true);
       this.startRun({ daily: false, tutorial: true });
     } else this.showTitle();
+    // 손상된 저장 데이터 알림
+    if (Save.status === 'restored') setTimeout(() => this.ui.toast('저장 데이터가 손상되어 백업에서 복구함'), 600);
+    else if (Save.status === 'failed') setTimeout(() => this.ui.toast('저장 데이터를 복구하지 못함'), 600);
     if (DEBUG) {
       window.__game = this;
       window.__meta = Meta;
@@ -247,13 +251,13 @@ export class Game {
     this.fx.clear();
     const up = sv.upg;
     const r0 = CFG.hole.startR * (1 + (up.size || 0) * 0.05) * (md.startR || 1);
-    const hp = Math.round((CFG.hole.hp + (up.hp || 0) * 10) * (md.hp || 1));
+    const hp = Math.round((CFG.hole.hp + (up.hp || 0) * 15) * (md.hp || 1));
     this.hole = { x: 0, z: 0, vx: 0, vz: 0, r: r0, targetR: r0, hp, maxHp: hp, invuln: 0 };
     this.upSpeed = (1 + (up.speed || 0) * 0.04) * (md.speed || 1);
     this.upXp = (1 + (up.xp || 0) * 0.06) * this.mods.xp;
     this.coinMul = 1 + (up.coin || 0) * 0.08;
     this.powerMul = 1 + (up.power || 0) * 0.06;
-    this.armorMul = 1 - (up.armor || 0) * 0.03;
+    this.armorMul = 1 - (up.armor || 0) * 0.04;
     this.rerolls = up.reroll || 0;
     this.revives = up.revive || 0;
     this.time = DEBUG && params.get('t') ? parseFloat(params.get('t')) : 0;
@@ -263,6 +267,7 @@ export class Game {
     this.pendingLevels = 0;
     this.combo = 0;
     this.lastSwallowT = -9;
+    this.dmgLog = {};
     this.stats = { swallowed: 0, kills: 0, maxR: r0, damage: 0, maxCombo: 0, miniKills: 0 };
     this.bonusCoins = 0;
     this.miniSpawned = this.time > CFG.run.miniAt + 5;
@@ -286,10 +291,12 @@ export class Game {
     this.tutorialT = 0;
     this.tutorial = !!opts.tutorial || !this.save.tutorialDone;
     this.tutCount = 0;
+    this.tutStep = 1;
+    this.tutTarget = null;
     ui.hide('#tutorial');
     if (this.tutorial) {
       ui.show('#tutorial');
-      ui.setTutorial(0);
+      ui.setTutorial(1, 0);
     }
     if (mod && mod.startSkill) {
       for (let i = 0; i < mod.startSkill[1]; i++) this.skills.apply({ kind: 'skill', id: mod.startSkill[0] });
@@ -332,8 +339,12 @@ export class Game {
     const h = this.hole;
     if (this.state !== 'play') return false;
     if (h.invuln > 0 || this.god) return false;
-    h.hp -= amount * this.mods.dmgE * this.armorMul;
-    h.invuln = CFG.hole.iframe;
+    const dmg = amount * this.mods.dmgE * this.armorMul * (this.tutorial ? 0.25 : 1);
+    h.hp -= dmg;
+    const key = typeof src === 'string' ? src : src ? src.type + (src.state === 'dash' ? '-dash' : '') : 'etc';
+    this.dmgLog[key] = Math.round((this.dmgLog[key] || 0) + dmg);
+    // 체력이 낮을수록 무적 시간을 길게
+    h.invuln = h.hp / h.maxHp <= 0.3 ? CFG.hole.iframeLow : CFG.hole.iframe;
     this.ui.hurt();
     Audio.hurt();
     vibrate(45);
@@ -379,7 +390,9 @@ export class Game {
 
   grow(size, k) {
     const h = this.hole;
-    const add = k * size * size * CFG.growthFalloff(h.targetR) * this.skills.growthMul() * (this.mods.growth || 1);
+    // 240초 이후엔 감쇠를 풀어 도시를 통째로 삼키는 후반 와이드 샷
+    const fall = this.time > CFG.run.lateAt ? CFG.growthFalloffLate(h.targetR) : CFG.growthFalloff(h.targetR);
+    const add = k * size * size * fall * this.skills.growthMul() * (this.mods.growth || 1);
     h.targetR = Math.min(CFG.hole.maxR, Math.sqrt(h.targetR * h.targetR + add));
     this.stats.maxR = Math.max(this.stats.maxR, h.targetR);
     const tiers = CFG.sizeTiers;
@@ -394,13 +407,14 @@ export class Game {
     }
   }
 
-  countCombo(size) {
+  countCombo(size, bot = false) {
     if (this.time - this.lastSwallowT < CFG.combo.window) this.combo++;
     else this.combo = 1;
     this.lastSwallowT = this.time;
     this.stats.maxCombo = Math.max(this.stats.maxCombo, this.combo);
     this.ui.combo(this.combo);
-    Audio.pop(size, this.combo);
+    if (bot) Audio.eatBot(size);
+    else Audio.pop(size, this.combo);
   }
 
   onSwallowProp(it) {
@@ -421,7 +435,7 @@ export class Game {
     const xp = e.def.xp * 0.35 * (e.baseSize / e.def.size);
     if (swallowed) {
       this.stats.swallowed++;
-      this.countCombo(e.size);
+      this.countCombo(e.size, true);
       this.gainXp(xp);
       this.grow(e.size, CFG.hole.enemyGrowthK);
       this.fx.burst(e.x, 0.6, e.z, 8 + e.size * 4, e.size * 0.6, ['#7ff8ff', '#ffffff', '#c79bff']);
@@ -434,7 +448,7 @@ export class Game {
       }
     } else {
       this.gainXp(xp * 0.6);
-      Audio.hit();
+      Audio.kill();
       if (e.type === 'mini') {
         this.stats.miniKills++;
         this.ui.banner('대장 트럭 격파!', 'size');
@@ -566,6 +580,53 @@ export class Game {
     pick(this.skills.choices(3));
   }
 
+  updateTutorial(dt, moving) {
+    const h = this.hole;
+    const ui = this.ui;
+    const en = this.enemies;
+    if (moving) this.tutorialT += dt;
+    if (this.tutStep === 1) {
+      const n = Math.min(3, this.stats.swallowed);
+      if (n !== this.tutCount) {
+        this.tutCount = n;
+        ui.setTutorial(1, n);
+      }
+      if (n >= 3 || this.time > 40) {
+        this.tutStep = 2;
+        Audio.levelUp();
+        const a = Math.random() * Math.PI * 2;
+        this.tutTarget = en.spawn('sweeper', h.x + Math.cos(a) * 9, h.z + Math.sin(a) * 9, Math.max(0.5, (h.r * 0.55) / ENEMY_DEFS.sweeper.size), 0.5);
+        ui.setTutorial(2, 0);
+      }
+    } else if (this.tutStep === 2) {
+      const t = this.tutTarget;
+      if (!t || t.dead) {
+        this.tutStep = 3;
+        this.tutSafe = 0;
+        Audio.levelUp();
+        const a = Math.random() * Math.PI * 2;
+        this.tutTarget = en.spawn('sweeper', h.x + Math.cos(a) * 11, h.z + Math.sin(a) * 11, (h.r * 1.7) / ENEMY_DEFS.sweeper.size, 50);
+        if (this.tutTarget) this.tutTarget.speedMul = 0.75;
+        ui.setTutorial(3, 0);
+      }
+    } else if (this.tutStep === 3) {
+      const t = this.tutTarget;
+      this.tutSafe += dt;
+      if (h.invuln > 0.9) this.tutSafe = 0; // 맞으면 처음부터
+      ui.setTutorial(3, Math.min(5, this.tutSafe));
+      if (this.tutSafe >= 5 || !t || t.dead) {
+        if (t && !t.dead) en.kill(t);
+        this.tutorial = false;
+        this.tutTarget = null;
+        this.save.tutorialDone = true;
+        Save.save();
+        ui.hide('#tutorial');
+        ui.banner('튜토리얼 완료!<small>이제 진짜 청소 로봇 군단이 온다</small>', 'level');
+        Audio.levelUp();
+      }
+    }
+  }
+
   // 화면 밖 목표(삼킬 수 있게 된 보스, 먹을 만한 큰 물체)를 가리키는 가장자리 화살표
   updateArrow() {
     const el = this.ui.arrow;
@@ -574,10 +635,17 @@ export class Game {
     let tgt = null;
     let label = '';
     let gold = false;
-    if (boss && boss.size < h.r * CFG.hole.fit) {
-      tgt = boss;
+    let red = false;
+    const tut = this.tutorial && this.tutTarget && !this.tutTarget.dead ? this.tutTarget : null;
+    const target = tut || boss || this.enemies.mini;
+    if (target && target.size < h.r * CFG.hole.fit) {
+      tgt = target;
       label = '삼켜!';
       gold = true;
+    } else if (target) {
+      tgt = target;
+      red = true;
+      label = Math.round(Math.max(0, Math.hypot(target.x - h.x, target.z - h.z) - target.size)) + 'm';
     } else if (this.world.bigTarget) {
       tgt = this.world.bigTarget;
       label = '';
@@ -592,6 +660,7 @@ export class Game {
     let sy = v.y;
     const on = Math.abs(sx) < 0.85 && Math.abs(sy) < 0.8 && v.z < 1;
     if (on && !gold) {
+      el.classList.remove('red');
       el.style.display = 'none';
       return;
     }
@@ -623,6 +692,7 @@ export class Game {
     }
     el.style.display = 'block';
     el.classList.toggle('gold', gold);
+    el.classList.toggle('red', red);
     el.style.transform = `translate(${px.toFixed(0)}px, ${py.toFixed(0)}px)`;
     el.firstChild.style.transform = `rotate(${ang.toFixed(3)}rad)`;
     if (el.lastChild.textContent !== label) el.lastChild.textContent = label;
@@ -632,18 +702,26 @@ export class Game {
   timeline() {
     const t = this.time;
     const h = this.hole;
-    const front = (size) => {
-      const H = CFG.map.half + 4;
-      const z = h.z - (this.viewFar + size * 0.8);
-      return [h.x, z < -H ? h.z + this.viewNear + size : z];
+    // 화면 좌/우 가장자리 바로 바깥 (가까운 쪽이 맵 안이면 그쪽)
+    const edge = (size) => {
+      const H = CFG.map.half;
+      const off = this.viewHalfW + size * 0.7;
+      let side = Math.random() < 0.5 ? -1 : 1;
+      if (Math.abs(h.x + side * off) > H) side = -side;
+      return [Math.max(-H, Math.min(H, h.x + side * off)), Math.max(-H, Math.min(H, h.z - this.viewFar * 0.25))];
     };
     if (!this.miniSpawned && t >= CFG.run.miniAt) {
       this.miniSpawned = true;
       this.ui.banner(`경고! 미니보스<small>${this.mods.miniName} 접근 중</small>`, 'boss');
-      Audio.warn();
+      Audio.stinger();
       const p = t / CFG.run.length;
-      const [x, z] = front(5);
-      this.enemies.spawn('mini', x, z, 1 + p * 0.4, (1 + p) * this.mods.hpE);
+      const sm = Math.max(1, (h.r * 1.3) / ENEMY_DEFS.mini.size);
+      const [x, z] = edge(ENEMY_DEFS.mini.size * sm);
+      const mn = this.enemies.spawn('mini', x, z, sm, (1 + p) * this.mods.hpE);
+      if (mn) {
+        mn.introT = 2;
+        mn.atk = 4;
+      }
     }
     if (!this.bossWarned && t >= CFG.run.bossAt - 3) {
       this.bossWarned = true;
@@ -653,10 +731,11 @@ export class Game {
     }
     if (!this.bossSpawned && t >= CFG.run.bossAt) {
       this.bossSpawned = true;
-      const [x, z] = front(11);
+      const sm = Math.max(1, (h.r * 1.6) / ENEMY_DEFS.boss.size);
+      const [x, z] = edge(ENEMY_DEFS.boss.size * sm);
       // 일반 적 정리 + 5초 무적 + 보스 비추는 카메라 인트로
       this.enemies.clearMinions();
-      const b = this.enemies.spawn('boss', x, z, 1, this.mods.hpE);
+      const b = this.enemies.spawn('boss', x, z, sm, this.mods.hpE);
       if (b) {
         b.introT = 3.2;
         this.camFocus = { x, z, t: 0, T: 3.2 };
@@ -673,6 +752,7 @@ export class Game {
   update(dt) {
     const h = this.hole;
     this.time += dt;
+    Audio.setRunTime(this.time);
     holeU.uTime.value += dt;
     holeU.uHoleHurt.value = Math.max(0, holeU.uHoleHurt.value - dt * 3);
     h.invuln = Math.max(0, h.invuln - dt);
@@ -705,22 +785,8 @@ export class Game {
     const pull = this.skills.update(dt, h);
     const eaten = this.world.update(dt, h, this.skills.horizonMul(), pull);
     for (const it of eaten) this.onSwallowProp(it);
-    // 튜토리얼: 작은 것 3개 먹기
-    if (this.tutorial) {
-      if (moving) this.tutorialT += dt;
-      if (this.tutCount !== this.stats.swallowed) {
-        this.tutCount = Math.min(3, this.stats.swallowed);
-        this.ui.setTutorial(this.tutCount);
-      }
-      if (this.stats.swallowed >= 3 || this.time > 40) {
-        this.tutorial = false;
-        this.save.tutorialDone = true;
-        Save.save();
-        this.ui.hide('#tutorial');
-        this.ui.banner('좋아!<small>작은 로봇은 먹고, 빨간 원 로봇은 피해!</small>', 'level');
-        Audio.levelUp();
-      }
-    }
+    // 튜토리얼 3단계: 작은 것 3개 -> 보라 링 청소봇 삼키기 -> 빨간 링 5초 피하기
+    if (this.tutorial) this.updateTutorial(dt, moving);
 
     this.enemies.update(dt, h, this.time);
     if (Math.random() < 0.5) this.fx.suck(h.x, h.z, h.r, 1);
@@ -748,7 +814,9 @@ export class Game {
       want *= 1 + 0.35 * fw;
       if (f.t >= f.T) this.camFocus = null;
     }
-    if (dt > 0) this.camDist += (want - this.camDist) * Math.min(1, dt * (f ? 4 : CFG.cam.lerp));
+    if (this.state === 'dying') want = this.camDist; // 사망 연출: 현재 거리 고정
+    if (this.state === 'clearing') want = Math.max(want, this.camDist);
+    if (dt > 0) this.camDist += (want - this.camDist) * Math.min(1, dt * (f ? 4 : this.state === 'clearing' ? 1.6 : CFG.cam.lerp));
     // 카메라 펀치 (스프링)
     this.camPunchV += (-this.camPunch * 60 - this.camPunchV * 9) * dt;
     this.camPunch += this.camPunchV * dt;
@@ -813,12 +881,22 @@ export class Game {
       this.enemies.update(dt * 0.3, h, this.time);
       if (this.endT > 1.6) this.finish();
     } else if (this.state === 'clearing') {
+      // 피날레: 3초간 반경이 급팽창하며 블록째 건물을 빨아들이는 와이드 샷
       this.endT += realDt;
       holeU.uTime.value += dt;
-      this.world.update(dt * 0.5, h, 1, null);
+      if (this.endT > 0.4 && this.endT < 3.4) {
+        h.r += dt * (3 + h.r * 0.25);
+        h.targetR = h.r;
+      }
+      this.world.setHole(h.x, h.z, h.r);
+      const eaten = this.world.update(dt, h, 1.4, null);
+      for (const it of eaten) {
+        if (it.size > 1.5 && Math.random() < 0.35) Audio.pop(it.size, 3);
+        if (it.size > 3) this.shake(0.4);
+      }
       this.enemies.update(dt * 0.5, h, this.time);
       if (Math.random() < 0.8) this.fx.suck(h.x, h.z, h.r, 3);
-      if (this.endT > 2.4) this.finish();
+      if (this.endT > 4.2) this.finish();
     } else if (this.state === 'title') {
       holeU.uTime.value += dt;
       this.world.setHole(h.x, h.z, h.r);

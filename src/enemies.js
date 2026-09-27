@@ -162,7 +162,7 @@ export class Enemies {
       sawCd: 0,
       hitCd: 0,
       speedMul: (0.9 + Math.random() * 0.2) * (0.85 + 0.15 * sizeMul),
-      dmgMul: 1 + (sizeMul - 1) * 0.2,
+      dmgMul: Math.min(1.5, 1 + (sizeMul - 1) * 0.2),
       shadowI: 0,
       bob: Math.random() * 10,
       spawnT: 0,
@@ -239,8 +239,8 @@ export class Enemies {
       if (this.list.length >= S.maxAlive) break;
       const r = Math.random();
       const pd = t > 35 ? (0.16 + p * 0.1) * W.dasher : 0;
-      const pt = t > 70 ? (0.16 + p * 0.05) * W.thrower : 0;
-      const pg = t > 105 ? (0.06 + p * 0.06) * W.giant : 0;
+      const pt = t > 85 ? (0.14 + p * 0.05) * W.thrower : 0;
+      const pg = t > 130 ? (0.06 + p * 0.06) * W.giant : 0;
       let type = 'sweeper';
       if (r < pd) type = 'dasher';
       else if (r < pd + pt) type = 'thrower';
@@ -319,6 +319,7 @@ export class Enemies {
       fa.array[e.slot] = 0;
     });
     f.enemyType = e.type;
+    fa.array[e.slot] = -1; // 떨어지는 중: 홀 클립 제외
     this.fallers.push(f);
     g.onKill(e, true);
     if (e === this.boss) this.boss = null;
@@ -350,7 +351,8 @@ export class Enemies {
     const tx = hole.x + hole.vx * flight * 0.55 + (Math.random() - 0.5) * 2;
     const tz = hole.z + hole.vz * flight * 0.55 + (Math.random() - 0.5) * 2;
     const rad = 1.1 + e.size * 0.25;
-    this.projs.push({ sx: e.x, sz: e.z, sy: e.size * 1.8, tx, tz, t: 0, T: flight, dmg: e.def.dmg * e.dmgMul, rad, s: 0.5 + e.size * 0.35 });
+    // 착탄 피해는 크기 배율 상한 1.2
+    this.projs.push({ sx: e.x, sz: e.z, sy: e.size * 1.8, tx, tz, t: 0, T: flight, dmg: e.def.dmg * Math.min(1.2, e.dmgMul), rad, s: 0.5 + e.size * 0.35 });
     this.marks.push({ x: tx, z: tz, r: rad, t: 0, T: flight, kind: 'trash' });
   }
 
@@ -418,7 +420,8 @@ export class Enemies {
       if (!e) continue;
       const def = e.def;
       e.spawnT += dt;
-      const shrink = e.type === 'boss' ? 0.22 + 0.78 * (e.hp / e.maxHp) : 0.55 + 0.45 * Math.max(0, e.hp / e.maxHp);
+      // 보스는 HP를 70% 이상 깎아야 홀(반지름의 1.6배로 등장)보다 작아짐
+      const shrink = e.type === 'boss' ? 0.41 + 0.59 * (e.hp / e.maxHp) : 0.55 + 0.45 * Math.max(0, e.hp / e.maxHp);
       const target = e.baseSize * shrink;
       e.size += (target - e.size) * Math.min(1, dt * 6);
       const dx = hole.x - e.x;
@@ -428,6 +431,7 @@ export class Enemies {
       const nz = dz / d;
       const small = e.size < fitR;
       let spd = def.speed * e.speedMul * g.enemySlow;
+      if (e.type === 'boss' || e.type === 'mini') spd *= 1 + Math.max(0, d - (e.size + hole.r + 6)) / 10;
       let mx = 0;
       let mz = 0;
       e.atk -= dt;
@@ -440,7 +444,12 @@ export class Enemies {
       if (e.fleeT > 0) e.fleeT -= dt;
       const fleeing = e.fleeT > 0;
 
-      if (e.type === 'dasher' || e.type === 'mini') {
+      if (e.type === 'mini' && e.introT > 0) {
+        e.introT -= dt;
+        spd *= 0.3;
+        mx = nx;
+        mz = nz;
+      } else if (e.type === 'dasher' || e.type === 'mini') {
         if (e.state === 'move') {
           mx = nx;
           mz = nz;
@@ -482,7 +491,7 @@ export class Enemies {
           mz = nx * 0.4;
         }
         if (d < range * 1.15 && e.atk <= 0) {
-          e.atk = 2.4 + Math.random() * 1.2;
+          e.atk = 3.0 + Math.random() * 1.4;
           this.throwTrash(e, hole);
           e.flash = 0.6;
         }
@@ -575,7 +584,7 @@ export class Enemies {
         this.projs.splice(n, 1);
         const dd = Math.hypot(p.tx - hole.x, p.tz - hole.z);
         g.fx.burst(p.tx, 0.3, p.tz, 10, 0.6, ['#6b7b6e', '#a8b8a0', '#ffffff']);
-        if (dd < hole.r + p.rad * 0.7) g.hurt(p.dmg, null);
+        if (dd < hole.r * 0.85 + p.rad * 0.5) g.hurt(p.dmg, 'trash');
         continue;
       }
     }
@@ -603,7 +612,7 @@ export class Enemies {
           g.fx.burst(m.x, 0.3, m.z, 24, 1.5, ['#ffffff', '#ff8fa3', '#ffd84d']);
           g.shake(0.6);
           g.audio.boom(0.7);
-          if (Math.hypot(m.x - hole.x, m.z - hole.z) < m.r + hole.r * 0.5) g.hurt(m.dmg, null);
+          if (Math.hypot(m.x - hole.x, m.z - hole.z) < m.r + hole.r * 0.5) g.hurt(m.dmg, 'slam');
         }
       }
     }
@@ -638,8 +647,14 @@ export class Enemies {
       const bob = e.type === 'sweeper' ? Math.abs(Math.sin(t * 10 + e.bob)) * 0.05 * e.size : 0;
       _q.setFromAxisAngle(_up, e.rot);
       // 큰 적은 키를 눌러서 카메라를 가리지 않게
-      const squash = e.type === 'boss' ? 0.5 : 1 / (1 + Math.max(0, s - 2) * 0.09);
-      const sy = s * squash * (1 + (e.state === 'wind' ? 0.1 * Math.sin(e.timer * 50) : 0));
+      // 큰 적은 키를 강하게 눌러 화면을 가리지 않게
+      const squash = e.type === 'boss' ? 0.42 : 1 / (1 + Math.max(0, s - 1.5) * 0.2);
+      // 홀과 카메라 사이(화면상 홀 아래쪽)에 선 적은 키를 눌러 홀을 가리지 않게
+      const dzc = e.z - hole.z;
+      const dxc = Math.abs(e.x - hole.x);
+      const occ = dzc > 0 && dxc < hole.r + e.size * 0.8 && dzc < hole.r + e.size * 2.2 ? 0.35 : 1;
+      e.occ = (e.occ ?? 1) + (occ - (e.occ ?? 1)) * Math.min(1, dt * 8);
+      const sy = s * squash * e.occ * (1 + (e.state === 'wind' ? 0.1 * Math.sin(e.timer * 50) : 0));
       _m.compose(_v.set(e.x, bob, e.z), _q, _s.set(s, sy, s));
       mesh.setMatrixAt(e.slot, _m);
       this.flash[e.type].array[e.slot] = e.flash;

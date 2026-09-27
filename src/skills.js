@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CFG, SKILLS, EVOLUTIONS, SKILL_MAX } from './config.js';
+import { CFG, SKILLS, EVOLUTIONS, SKILL_MAX, WEAPONS, PASSIVES } from './config.js';
 import { MISC } from './models.js';
 import { Save } from './save.js';
 
@@ -34,6 +34,7 @@ export class Skills {
     this.timers = { cannon: 1, pulse: 3, bolt: 1.5, dash: 4, nova: 10 };
     this.orbAngle = 0;
     this.bullets = [];
+    this.rifts = [];
     this.orbMesh.count = 0;
     this.bulletMesh.count = 0;
   }
@@ -76,7 +77,17 @@ export class Skills {
       const l = this.level(id);
       if (l >= SKILL_MAX) continue;
       if (l === 0 && full) continue;
-      pool.push({ kind: 'skill', id, lvl: l + 1, w: l > 0 ? 1.6 : 1 });
+      // 빌드 방향성: 가진 무기는 올리기 쉽게, 가진 무기의 진화 짝 패시브는 더 자주
+      let w = l > 0 ? 1.7 : 1;
+      if (l === 0) {
+        for (const [, ev] of Object.entries(EVOLUTIONS)) {
+          const [wp, ps] = ev.from;
+          if (id === ps && this.level(wp) > 0) w = Math.max(w, 2.2);
+          if (id === wp && this.level(ps) > 0) w = Math.max(w, 1.5);
+        }
+        if (WEAPONS.includes(id) && WEAPONS.filter((x) => this.lv[x]).length >= 4) w *= 0.6;
+      }
+      pool.push({ kind: 'skill', id, lvl: l + 1, w });
     }
     const out = [];
     while (out.length < n && pool.length) {
@@ -114,7 +125,7 @@ export class Skills {
 
   onRimContact(e, dt) {
     const l = this.level('saw');
-    if (!l || e.dead) return;
+    if (!l || e.dead || this.evo.vampsaw) return;
     e.sawCd = (e.sawCd || 0) - dt;
     if (e.sawCd <= 0) {
       e.sawCd = 0.4;
@@ -272,8 +283,9 @@ export class Skills {
     if (pl) {
       this.timers.pulse -= dt;
       if (this.timers.pulse <= 0) {
-        this.timers.pulse = 5.4 - pl * 0.5;
-        const R = r * 2 + 5 + pl * 1.2;
+        const col = !!this.evo.collapse;
+        this.timers.pulse = (5.4 - pl * 0.5) * (col ? 0.8 : 1);
+        const R = (r * 2 + 5 + pl * 1.2) * (col ? 1.3 : 1);
         fx.ring(hole.x, hole.z, R, '#c79bff', 0.6);
         fx.ring(hole.x, hole.z, R * 0.6, '#8a6bff', 0.45);
         g.audio.pulse();
@@ -285,6 +297,10 @@ export class Skills {
             if (e.size < fitR) {
               e.kx -= (dx / d) * 16;
               e.kz -= (dz / d) * 16;
+            } else if (col) {
+              // 중력 붕괴: 큰 적도 안쪽으로 끌어당기며 2배 피해
+              const kb = e.type === 'boss' ? 1 : 10 / Math.max(1, e.size * 0.5);
+              en.damage(e, (6 + pl * 4) * 2.2, (-dx / d) * kb, (-dz / d) * kb);
             } else {
               const kb = e.type === 'boss' ? 2 : 16 / Math.max(1, e.size * 0.5);
               en.damage(e, 6 + pl * 4, (dx / d) * kb, (dz / d) * kb);
@@ -304,22 +320,26 @@ export class Skills {
     if (bl) {
       this.timers.bolt -= dt;
       if (this.timers.bolt <= 0) {
-        this.timers.bolt = Math.max(0.9, 2.4 - bl * 0.22);
-        let cur = en.nearest(hole.x, hole.z, 12 + r * 2);
-        if (cur) {
+        const st = !!this.evo.storm;
+        this.timers.bolt = Math.max(0.9, 2.4 - bl * 0.22) * (st ? 0.5 : 1);
+        const hitSet = new Set();
+        let any = false;
+        for (let strand = 0; strand < (st ? 2 : 1); strand++) {
+          let cur = en.nearest(hole.x, hole.z, 12 + r * 2, hitSet);
+          if (!cur) break;
+          any = true;
           const pts = [[hole.x, 1 + r * 0.3, hole.z]];
-          const hitSet = new Set();
           const chains = 2 + bl;
           for (let c = 0; c < chains && cur; c++) {
             hitSet.add(cur);
             pts.push([cur.x, cur.size * 1.2 + 0.4, cur.z]);
-            en.damage(cur, 10 + bl * 5);
+            en.damage(cur, (10 + bl * 5) * (st ? 1.6 : 1));
             fx.burst(cur.x, cur.size, cur.z, 5, 0.4, ['#c8f4ff', '#ffffff']);
             cur = en.nearest(cur.x, cur.z, 9 + r, hitSet);
           }
           fx.lightning(pts);
-          g.audio.zap();
         }
+        if (any) g.audio.zap();
       }
     }
 
@@ -329,7 +349,8 @@ export class Skills {
       this.timers.dash -= dt;
       const sp = Math.hypot(hole.vx, hole.vz);
       if (this.timers.dash <= 0 && sp > 1.5) {
-        this.timers.dash = 6.5 - dl * 0.6;
+        const rift = !!this.evo.rift;
+        this.timers.dash = (6.5 - dl * 0.6) * (rift ? 0.5 : 1);
         const dist = 6 + dl * 1.5 + r * 1.2;
         const nx = hole.vx / sp;
         const nz = hole.vz / sp;
@@ -348,6 +369,7 @@ export class Skills {
           const d = Math.hypot(e.x - hole.x, e.z - hole.z);
           if (d < R + e.size * 0.5) en.damage(e, 20 + dl * 8, ((e.x - hole.x) / (d || 1)) * 8, ((e.z - hole.z) / (d || 1)) * 8);
         }
+        if (rift) this.rifts.push({ ax: ox, az: oz, bx: hole.x, bz: hole.z, t: 2.5, cd: 0, w: r + 1.5, dmg: 12 + dl * 4 });
       }
     }
 
@@ -356,8 +378,13 @@ export class Skills {
     if (nl) {
       this.timers.nova -= dt;
       if (this.timers.nova <= 0) {
-        this.timers.nova = 20 - nl * 2;
+        const gold = !!this.evo.goldnova;
+        this.timers.nova = (20 - nl * 2) * (gold ? 0.6 : 1);
         const R = 10 + nl * 2 + r * 2;
+        if (gold) {
+          g.bonusCoins += 4;
+          g.audio.coin();
+        }
         fx.ring(hole.x, hole.z, R, '#ffe066', 0.7);
         fx.ring(hole.x, hole.z, R * 0.7, '#ff8f5a', 0.55);
         fx.burst(hole.x, 1, hole.z, 50, 2.5, ['#ffe066', '#ff8f5a', '#ffffff', '#ff5d8f']);
@@ -369,8 +396,51 @@ export class Skills {
           const dx = e.x - hole.x;
           const dz = e.z - hole.z;
           const d = Math.hypot(dx, dz) || 1;
-          if (d < R + e.size * 0.5) en.damage(e, 40 + nl * 35, (dx / d) * 18, (dz / d) * 18);
+          if (d < R + e.size * 0.5) en.damage(e, (40 + nl * 35) * (gold ? 1.5 : 1), (dx / d) * 18, (dz / d) * 18);
         }
+      }
+    }
+
+    // 흡혈 톱니: 테두리 근처 모든 적을 갈고 회복
+    if (this.evo.vampsaw) {
+      const sl = this.level('saw');
+      for (const e of [...en.list]) {
+        const d = Math.hypot(e.x - hole.x, e.z - hole.z);
+        if (d > r + e.size + 1.8) continue;
+        e.sawCd = (e.sawCd || 0) - dt;
+        if (e.sawCd <= 0) {
+          e.sawCd = 0.3;
+          const dmg = (10 + sl * 7) * 2;
+          en.damage(e, dmg);
+          hole.hp = Math.min(hole.maxHp, hole.hp + 1.2);
+          const a = Math.atan2(e.z - hole.z, e.x - hole.x);
+          fx.burst(hole.x + Math.cos(a) * r, 0.3, hole.z + Math.sin(a) * r, 5, 0.5, ['#ff5d7a', '#ffffff']);
+        }
+      }
+    }
+
+    // 차원 균열: 대시 경로에 남은 균열이 적을 벰
+    for (let k = this.rifts.length - 1; k >= 0; k--) {
+      const rf = this.rifts[k];
+      rf.t -= dt;
+      rf.cd -= dt;
+      if (rf.t <= 0) {
+        this.rifts.splice(k, 1);
+        continue;
+      }
+      if (Math.random() < 0.6) {
+        const u = Math.random();
+        fx.emit(rf.ax + (rf.bx - rf.ax) * u, 0.3, rf.az + (rf.bz - rf.az) * u, 0, 1.5, 0, u < 0.5 ? '#ff9bf2' : '#8a6bff', 0.5 + r * 0.06, 0.4, 0);
+      }
+      if (rf.cd > 0) continue;
+      rf.cd = 0.35;
+      const vx = rf.bx - rf.ax;
+      const vz = rf.bz - rf.az;
+      const L2 = vx * vx + vz * vz || 1;
+      for (const e of [...en.list]) {
+        const u = Math.max(0, Math.min(1, ((e.x - rf.ax) * vx + (e.z - rf.az) * vz) / L2));
+        const d = Math.hypot(e.x - (rf.ax + vx * u), e.z - (rf.az + vz * u));
+        if (d < rf.w + e.size * 0.5) en.damage(e, rf.dmg);
       }
     }
 

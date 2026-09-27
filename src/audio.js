@@ -82,156 +82,178 @@ function duck(amount = 0.45, hold = 0.35) {
 }
 
 // ---------- BGM ----------
+// 16마디 곡 구조: A(0-3) A'(4-7) B(8-11) C(12-15). 리드(1~3kHz) + 카운터 멜로디 + 드럼 변주
 const MODES = {
   normal: {
     bpm: 112,
+    // 마디별 코드 [베이스, 코드음 3개]
     prog: [
-      [45, 57, 60, 64],
-      [41, 53, 57, 60],
-      [48, 55, 60, 64],
-      [43, 55, 59, 62],
+      [45, 57, 60, 64], [41, 53, 57, 60], [48, 55, 60, 64], [43, 55, 59, 62],
+      [45, 57, 60, 64], [41, 53, 57, 60], [48, 55, 60, 64], [43, 55, 59, 62],
+      [50, 53, 57, 62], [48, 52, 55, 60], [46, 50, 53, 58], [45, 49, 52, 57],
+      [41, 53, 57, 60], [43, 55, 59, 62], [45, 57, 60, 64], [40, 56, 59, 64],
     ],
-    lead: false,
+    boss: false,
   },
   boss: {
-    bpm: 132,
+    bpm: 134,
     prog: [
-      [38, 50, 53, 57],
-      [46, 50, 53, 58],
-      [43, 50, 55, 58],
-      [45, 49, 52, 57],
+      [38, 50, 53, 57], [46, 50, 53, 58], [43, 50, 55, 58], [45, 49, 52, 57],
+      [38, 50, 53, 57], [46, 50, 53, 58], [43, 50, 55, 58], [45, 49, 52, 57],
+      [41, 48, 53, 57], [43, 50, 55, 58], [44, 48, 51, 56], [45, 49, 52, 57],
+      [38, 50, 53, 57], [36, 48, 52, 55], [46, 50, 53, 58], [45, 49, 52, 57],
     ],
-    lead: true,
+    boss: true,
   },
 };
+// 리드 모티프: 8분음표 8칸, 코드음 인덱스(0~3, 3 = 근음 옥타브 위), -1 쉼표, 10+ = 스케일 경과음(반음 위)
+const LEAD = [
+  [2, -1, 1, 2, 3, -1, 2, -1],
+  [1, -1, 0, 1, 2, -1, -1, -1],
+  [3, 2, 1, -1, 2, 1, 0, -1],
+  [0, -1, 1, -1, 2, -1, 3, 2],
+];
+const COUNTER = [
+  [0, -1, -1, -1, 1, -1, -1, -1],
+  [2, -1, -1, -1, 1, -1, 0, -1],
+];
 let mode = 'normal';
 let seqTimer = null;
 let nextTime = 0;
 let step = 0;
+let tempoBoost = 0;
+let fillBar = -1;
+
+function voice(type, freq, t, dur, vol, filt = null, attack = 0.006, dest = null) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  env(g, t, attack, vol, dur);
+  let n = o;
+  if (filt) {
+    const f = ctx.createBiquadFilter();
+    f.type = filt[0];
+    f.frequency.value = filt[1];
+    f.Q.value = filt[2] || 0.8;
+    n = o.connect(f);
+  }
+  n.connect(g).connect(dest || music);
+  o.start(t);
+  o.stop(t + dur + attack + 0.05);
+  return o;
+}
+
+function hat(t, vol, open = false) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter();
+  f.type = 'highpass';
+  f.frequency.value = 7000;
+  const g = ctx.createGain();
+  env(g, t, 0.002, vol, open ? 0.18 : 0.04);
+  src.connect(f).connect(g).connect(music);
+  src.start(t, Math.random());
+  src.stop(t + 0.25);
+}
+
+function snare(t, vol) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter();
+  f.type = 'bandpass';
+  f.frequency.value = 2200;
+  f.Q.value = 0.7;
+  const g = ctx.createGain();
+  env(g, t, 0.002, vol, 0.13);
+  src.connect(f).connect(g).connect(music);
+  src.start(t, Math.random());
+  src.stop(t + 0.2);
+  voice('triangle', 330, t, 0.06, vol * 0.6, null, 0.001);
+}
 
 function scheduleStep(s, t) {
   const M = MODES[mode === 'boss' ? 'boss' : 'normal'];
-  const STEP = 60 / M.bpm / 4;
-  const bar = Math.floor(s / 16) % 4;
+  const STEP = 60 / (M.bpm + tempoBoost) / 4;
+  const barN = Math.floor(s / 16);
+  const bar = barN % 16;
   const st = s % 16;
   const ch = M.prog[bar];
-  const boss = M.lead;
-  // 킥 (피치 드롭)
-  if (st % 4 === 0 || (boss && st === 10)) {
+  const boss = M.boss;
+  const sect = bar >> 2; // 0 A, 1 A', 2 B, 3 C
+  const isFill = barN === fillBar || (bar % 8 === 7 && st >= 12);
+  // 킥 (저역은 짧게, 중역 노크로 존재감)
+  if ((st % 4 === 0 || (boss && st === 10) || (sect >= 2 && st === 14)) && !(isFill && st >= 12)) {
     const o = ctx.createOscillator();
     const g = ctx.createGain();
-    o.frequency.setValueAtTime(150, t);
-    o.frequency.exponentialRampToValueAtTime(42, t + 0.14);
-    env(g, t, 0.002, 0.26, 0.18);
+    o.frequency.setValueAtTime(170, t);
+    o.frequency.exponentialRampToValueAtTime(75, t + 0.09);
+    env(g, t, 0.002, 0.13, 0.1);
     o.connect(g).connect(music);
     o.start(t);
-    o.stop(t + 0.3);
-    // 폰 스피커용 중역 노크 + 클릭
-    const k2 = ctx.createOscillator();
-    const g2 = ctx.createGain();
-    k2.type = 'triangle';
-    k2.frequency.setValueAtTime(420, t);
-    k2.frequency.exponentialRampToValueAtTime(180, t + 0.06);
-    env(g2, t, 0.001, 0.32, 0.08);
-    k2.connect(g2).connect(music);
-    k2.start(t);
-    k2.stop(t + 0.12);
+    o.stop(t + 0.25);
+    voice('triangle', 420, t, 0.06, 0.26, null, 0.001);
   }
-  // 스네어
-  if (st === 4 || st === 12) {
+  // 스네어 / 필
+  if (isFill && st >= 12) snare(t, 0.1 + (st - 12) * 0.03);
+  else if (st === 4 || st === 12) snare(t, 0.16);
+  // 하이햇 (섹션이 올라갈수록 촘촘하게)
+  if (st % 2 === 1 || boss || sect >= 1) hat(t, st % 2 ? 0.11 : 0.06, st === 14 && sect === 3);
+  // 셰이커 (고역 질감)
+  if (st % 4 === 2) {
     const src = ctx.createBufferSource();
     src.buffer = noiseBuf;
     const f = ctx.createBiquadFilter();
     f.type = 'bandpass';
-    f.frequency.value = 1800;
+    f.frequency.value = 4500;
+    f.Q.value = 1.2;
     const g = ctx.createGain();
-    env(g, t, 0.002, 0.16, 0.14);
+    env(g, t, 0.01, 0.06, 0.06);
     src.connect(f).connect(g).connect(music);
     src.start(t, Math.random());
-    src.stop(t + 0.2);
+    src.stop(t + 0.12);
   }
-  // 하이햇
-  if (st % 2 === 1 || boss) {
-    const src = ctx.createBufferSource();
-    src.buffer = noiseBuf;
-    const f = ctx.createBiquadFilter();
-    f.type = 'highpass';
-    f.frequency.value = 7500;
-    const g = ctx.createGain();
-    env(g, t, 0.002, st % 2 ? 0.07 : 0.035, 0.035);
-    src.connect(f).connect(g).connect(music);
-    src.start(t, Math.random());
-    src.stop(t + 0.08);
+  if (st === 0 && bar % 4 === 0) hat(t, 0.1, true);
+  // 베이스: 옥타브 올린 톱니 + 배음 (150Hz 이하 비중 억제)
+  if (st % 4 === 0 || st === 6 || st === 14 || (boss && st % 2 === 0)) {
+    const n = ch[0] + 12 + (st === 14 ? 12 : 0);
+    voice('sawtooth', mtof(n), t, STEP * (boss ? 1.5 : 2.5), 0.09, ['lowpass', 2000], 0.008);
+    voice('square', mtof(n + 12), t, STEP * 1.6, 0.06, ['bandpass', 800, 0.9], 0.006);
+    voice('sine', mtof(n - 12), t, STEP * 1.2, 0.035, null, 0.01);
   }
-  // 베이스
-  if (st % 4 === 0 || st === 14 || (boss && st % 2 === 0)) {
-    const o = ctx.createOscillator();
-    const f = ctx.createBiquadFilter();
-    const g = ctx.createGain();
-    o.type = 'sawtooth';
-    o.frequency.value = mtof(ch[0] - 12 + (st === 14 ? 12 : 0));
-    f.type = 'lowpass';
-    f.frequency.setValueAtTime(boss ? 1800 : 1400, t);
-    f.frequency.exponentialRampToValueAtTime(450, t + STEP * 2);
-    env(g, t, 0.01, 0.16, STEP * (boss ? 1.6 : 3));
-    o.connect(f).connect(g).connect(music);
-    o.start(t);
-    o.stop(t + STEP * 4);
-    // 베이스 배음 (한 옥타브 + 5도 위, 250~800Hz 대역)
-    const o2 = ctx.createOscillator();
-    const g2 = ctx.createGain();
-    o2.type = 'square';
-    o2.frequency.value = mtof(ch[0] + 12 + (st === 14 ? 12 : 0));
-    const f2 = ctx.createBiquadFilter();
-    f2.type = 'bandpass';
-    f2.frequency.value = 500;
-    f2.Q.value = 0.8;
-    env(g2, t, 0.01, 0.1, STEP * (boss ? 1.4 : 2.5));
-    o2.connect(f2).connect(g2).connect(music);
-    o2.start(t);
-    o2.stop(t + STEP * 4);
-  }
-  // 아르페지오
+  // 아르페지오 (800Hz 이상)
   const arp = [1, 2, 3, 2, 1, 3, 2, 3];
-  if (st % 2 === 0) {
-    const n = ch[arp[(st >> 1) % 8]] + 12;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = 'triangle';
-    o.frequency.value = mtof(n);
-    env(g, t, 0.005, 0.065, STEP * 1.6);
-    o.connect(g).connect(music);
-    o.start(t);
-    o.stop(t + STEP * 2);
+  if (st % 2 === 0) voice('triangle', mtof(ch[arp[(st >> 1) % 8]] + 12), t, STEP * 1.5, 0.055);
+  // 리드 (1~3kHz): B/C 섹션과 A' 후반, 보스는 항상
+  if (st % 2 === 0 && (boss || sect >= 1 || bar % 2 === 1)) {
+    const motif = LEAD[(bar + (boss ? 1 : 0)) % 4];
+    const k = motif[st >> 1];
+    if (k >= 0) {
+      const tones = [ch[1], ch[2], ch[3], ch[1] + 12];
+      const n = tones[k] + 24;
+      voice('square', mtof(n), t, STEP * 1.7, 0.045, ['bandpass', 2000, 0.7], 0.01);
+      voice('sine', mtof(n + 12), t, STEP * 1.2, 0.02, null, 0.01);
+    }
   }
-  // 보스 리드
-  if (boss && (st === 0 || st === 6 || st === 8 || st === 11)) {
-    const o = ctx.createOscillator();
-    const f = ctx.createBiquadFilter();
-    const g = ctx.createGain();
-    o.type = 'square';
-    o.frequency.value = mtof(ch[[3, 2, 3, 1][st % 4]] + 12);
-    f.type = 'lowpass';
-    f.frequency.value = 2200;
-    env(g, t, 0.01, 0.05, STEP * 2.5);
-    o.connect(f).connect(g).connect(music);
-    o.start(t);
-    o.stop(t + STEP * 3);
+  // 카운터 멜로디 (500~900Hz): A', C 섹션
+  if ((sect === 1 || sect === 3 || boss) && st % 2 === 0) {
+    const k = COUNTER[bar % 2][st >> 1];
+    if (k >= 0) voice('triangle', mtof([ch[1], ch[2], ch[3]][k] + 12), t, STEP * 5, 0.06, null, 0.03);
   }
   // 패드 (마디 시작, 디튠 두 겹)
   if (st === 0) {
     for (const m of ch.slice(1)) {
-      for (const det of [-6, 6]) {
+      for (const det of [-7, 7]) {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.type = 'sawtooth';
-        o.frequency.value = mtof(m);
+        o.frequency.value = mtof(m + 12);
         o.detune.value = det;
         const f = ctx.createBiquadFilter();
         f.type = 'lowpass';
-        f.frequency.value = 900;
+        f.frequency.value = 2200;
         g.gain.setValueAtTime(0.0001, t);
-        g.gain.linearRampToValueAtTime(0.012, t + 0.5);
+        g.gain.linearRampToValueAtTime(0.008, t + 0.4);
         g.gain.linearRampToValueAtTime(0.0001, t + STEP * 16);
         o.connect(f).connect(g).connect(music);
         o.start(t);
@@ -283,7 +305,7 @@ function build(c) {
   // BGM 저역 정리 (폰 스피커): 60Hz 이하 컷
   const hp = ctx.createBiquadFilter();
   hp.type = 'highpass';
-  hp.frequency.value = 90;
+  hp.frequency.value = 110;
   musicDuck = ctx.createGain();
   music.connect(hp).connect(musicFilter).connect(musicDuck).connect(master);
   const mSend = ctx.createGain();
@@ -297,7 +319,7 @@ function applyVolumes() {
   const t = now();
   master.gain.setTargetAtTime(muted ? 0 : 0.9, t, 0.02);
   sfx.gain.setTargetAtTime(volSfx, t, 0.02);
-  music.gain.setTargetAtTime(volMusic * 0.42, t, 0.02);
+  music.gain.setTargetAtTime(volMusic * 0.55, t, 0.02);
 }
 
 export const Audio = {
@@ -361,11 +383,73 @@ export const Audio = {
       return;
     }
     if (m === 'boss' && mode !== 'boss') step = 0;
+    if (m === 'boss') tempoBoost = 0;
     mode = m;
     if (musicFilter) musicFilter.frequency.setTargetAtTime(18000, now(), 0.15);
   },
   get mode() {
     return mode;
+  },
+  // 시간대 레이어: 60초 드럼 필, 240초 템포 +8
+  setRunTime(t) {
+    if (t < 1) {
+      tempoBoost = 0;
+      fillBar = -1;
+      this._fill60 = false;
+    }
+    if (t >= 60 && !this._fill60) {
+      this._fill60 = true;
+      fillBar = Math.floor(step / 16);
+    }
+    tempoBoost = t >= 240 ? 8 : 0;
+  },
+  // 150초 미니보스 스팅어
+  stinger() {
+    if (!ctx) return;
+    [0, 3, 7, 10].forEach((s, i) => {
+      tone('sawtooth', mtof(62 + s), mtof(62 + s) * 0.98, 0.7, 0.06, sfx, i * 0.03);
+      tone('square', mtof(74 + s), mtof(74 + s), 0.25, 0.04, sfx, 0.35 + i * 0.07);
+    });
+    noise(1.2, 0.18, 8000, 0.5, 'highpass', sfx, 3000);
+    tone('triangle', 440, 220, 0.5, 0.2);
+    duck(0.6, 0.8);
+  },
+  // 적 삼킴 전용: 금속성 "끼익" + "꿀꺽"
+  eatBot(size = 1) {
+    if (!ctx) return;
+    const k = 1 / (0.7 + size * 0.2);
+    const out = ctx.createGain();
+    out.gain.value = 0.2;
+    out.connect(sfx);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 1900 * k;
+    f.Q.value = 6;
+    const g = ctx.createGain();
+    const t = now();
+    env(g, t, 0.005, 0.12, 0.2);
+    f.connect(g).connect(out);
+    for (const det of [0, 37]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(2200 * k + det, t);
+      o.frequency.exponentialRampToValueAtTime(700 * k + det, t + 0.18);
+      o.connect(f);
+      o.start(t);
+      o.stop(t + 0.25);
+    }
+    tone('square', 900 * k, 1300 * k, 0.08, 0.1, out, 0.02);
+    // 꿀꺽
+    tone('sine', 360 * k, 110 * k, 0.16, 0.3, out, 0.14, 0.004);
+    tone('triangle', 620 * k, 260 * k, 0.12, 0.15, out, 0.15, 0.004);
+    noise(0.08, 0.2, 500, 1.5, 'bandpass', out, 200, 0.14);
+  },
+  // 처치: 부서지는 소리
+  kill() {
+    if (!ctx) return;
+    noise(0.14, 1.5, 1800, 1.2, 'bandpass', sfx, 600);
+    tone('square', 420 * (0.9 + Math.random() * 0.2), 160, 0.14, 1.2);
+    tone('triangle', 700, 300, 0.11, 0.9);
   },
   // 삼키기 팝: 크기가 클수록 낮고 두꺼움, 콤보가 이어질수록 높아짐
   pop(size, combo) {
@@ -396,8 +480,8 @@ export const Audio = {
     }
   },
   hit() {
-    noise(0.07, 0.6, 2500, 2, 'bandpass');
-    tone('square', 360 * (0.9 + Math.random() * 0.2), 180, 0.08, 0.45);
+    noise(0.07, 0.8, 2500, 2, 'bandpass');
+    tone('square', 360 * (0.9 + Math.random() * 0.2), 180, 0.08, 0.6);
   },
   hurt() {
     tone('sawtooth', 420, 110, 0.28, 0.28);
@@ -477,7 +561,7 @@ export const Audio = {
       applyVolumes();
       master.gain.value = 0.9;
       sfx.gain.value = volSfx;
-      music.gain.value = volMusic * 0.42;
+      music.gain.value = volMusic * 0.55;
       fn();
       return ctx.startRendering();
     };
@@ -559,6 +643,9 @@ export const Audio = {
       pulse: () => this.pulse(),
       evolve: () => this.evolve(),
       hit: () => this.hit(),
+      kill: () => this.kill(),
+      eat_bot: () => this.eatBot(1.2),
+      stinger: () => this.stinger(),
       coin: () => this.coin(),
       select: () => this.select(),
     };

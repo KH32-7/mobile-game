@@ -114,14 +114,21 @@ try {
   const p1 = await G(() => ({ x: window.__game.hole.x, z: window.__game.hole.z, sw: window.__game.stats.swallowed, st: window.__game.state }));
   const trav = await G(() => window.__game.traveled);
   check(trav > 3, `드래그로 홀 이동 (이동 거리 ${trav.toFixed(1)})`);
-  check(p1.sw > 0, `오브젝트 삼키기 (${p1.sw}개)`);
   // 튜토리얼 목표: 가장 가까운 작은 물체 쪽으로 조이스틱을 계속 밀어 3개 먹기
-  for (let i = 0; i < 25 && !(await G(() => window.__game.save.tutorialDone)); i++) {
+  let tutShot = false;
+  for (let i = 0; i < 40 && !(await G(() => window.__game.save.tutorialDone)); i++) {
+    if (!tutShot && (await G(() => window.__game.tutStep)) >= 2) {
+      tutShot = true;
+      await page.screenshot({ path: `${SHOTS}/02b-tutorial-step2.png` });
+    }
     await clearLevelups();
     const a = await G(() => {
       const g = window.__game;
       const h = g.hole;
       const w = g.world;
+      const tt = g.tutTarget;
+      if (tt && !tt.dead && g.tutStep === 2) return Math.atan2(tt.z - h.z, tt.x - h.x);
+      if (tt && !tt.dead && g.tutStep === 3) return Math.atan2(h.z - tt.z, h.x - tt.x);
       let best = null;
       let bd = 1e9;
       for (const k of w.query(h.x, h.z, 12, [])) {
@@ -134,7 +141,9 @@ try {
     await drag(195, 600, [a], 900);
   }
   await clearLevelups();
-  check(await G(() => window.__game.save.tutorialDone), '튜토리얼 목표 (3개 먹기) 완료');
+  const swN = await G(() => window.__game.stats.swallowed);
+  check(swN > 0, `오브젝트 삼키기 (${swN}개)`);
+  check(await G(() => window.__game.save.tutorialDone), '튜토리얼 3단계 (작은 것 3개, 보라 링 로봇, 빨간 링 5초 회피) 완료');
   await page.screenshot({ path: `${SHOTS}/03-play.png` });
 
   // 레벨업 카드 (자연 레벨업이 없으면 XP 주입)
@@ -370,17 +379,28 @@ try {
   const mig = await G(() => ({ v: window.__game.save.ver, c: window.__game.save.coins, s: window.__game.save.upg.size, b: window.__game.save.maps.beach.unlocked }));
   check(mig.v === 2 && mig.c >= 77 && mig.s === 2 && mig.b, `v1 -> v2 마이그레이션 (코인 ${mig.c}, 해변 ${mig.b})`);
   if (await page.isVisible('#modal')) await page.tap('#modal [data-act=claimStreak]');
-  // 깨진 저장 데이터도 안전하게
+  // 깨진 저장 데이터: 백업(void-maw-save-bak)에서 복구 + 알림
   await G(() => localStorage.setItem('void-maw-save', '{broken json'));
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.__game && window.__game.frames > 3, null, { timeout: 30000 });
-  check((await G(() => window.__game.save.ver)) === 2, '손상된 저장 데이터 복구');
-  // 저장이 초기화되었으므로 첫 실행처럼 튜토리얼 런이 시작됨 -> 일시정지 메뉴로 타이틀
-  await safeTap('#btnPause');
-  await sleep(300);
-  await page.screenshot({ path: `${SHOTS}/06b-pause-volume.png` });
-  await safeTap('#btnToTitle');
-  await sleep(500);
+  await sleep(900);
+  const rest = await G(() => ({ v: window.__game.save.ver, coins: window.__game.save.coins, toast: document.querySelector('#toast').textContent }));
+  check(rest.v === 2 && rest.coins >= 77 && /복구/.test(rest.toast), `손상된 저장 데이터 백업 복구 + 알림 (코인 ${rest.coins}, "${rest.toast}")`);
+  await G(() => {
+    localStorage.setItem('void-maw-save', '{broken');
+    localStorage.setItem('void-maw-save-bak', 'also broken');
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__game && window.__game.frames > 3, null, { timeout: 30000 });
+  await sleep(900);
+  const fail = await G(() => ({ v: window.__game.save.ver, toast: document.querySelector('#toast').textContent, st: window.__game.state }));
+  check(fail.v === 2 && /복구하지 못함/.test(fail.toast), `백업도 손상 시 초기화 + "${fail.toast}"`);
+  if (fail.st === 'play') {
+    await safeTap('#btnPause');
+    await sleep(300);
+    await safeTap('#btnToTitle');
+    await sleep(500);
+  }
   if (await page.isVisible('#modal')) await page.tap('#modal [data-act=claimStreak]');
 
   // 작은 화면 레이아웃
@@ -407,10 +427,10 @@ try {
   for (const [k, v] of Object.entries(snd.sfx)) console.log(`     sfx ${k.padEnd(10)} peak ${v.peakDb}dB  rms ${v.rmsDb}dB  <150Hz ${(v.low * 100).toFixed(0)}%`);
   for (const k of ['bgm_normal', 'bgm_boss', 'mix']) console.log(`     ${k.padEnd(14)} peak ${snd[k].peakDb}dB  rms ${snd[k].rmsDb}dB  <150Hz ${(snd[k].low * 100).toFixed(0)}%`);
   check(snd.mix.peakDb <= -1.5 && snd.mix.peakDb >= -6, `마스터 피크 약 -3dBFS (${snd.mix.peakDb})`);
-  const main = ['pop_mid', 'hurt', 'boom', 'levelUp', 'sizeUp', 'pulse'];
+  const main = ['pop_mid', 'hurt', 'boom', 'levelUp', 'sizeUp', 'pulse', 'kill', 'eat_bot'];
   check(main.every((k) => snd.sfx[k].rmsDb >= -26 && snd.sfx[k].rmsDb <= -16), `주요 효과음 RMS -24~-20dB 근처 (${main.map((k) => snd.sfx[k].rmsDb).join(', ')})`);
   check(Object.values(snd.sfx).every((v) => v.rmsDb >= -35), '모든 효과음 RMS -35dB 이상');
-  check(snd.bgm_normal.low <= 0.6 && snd.bgm_boss.low <= 0.6, `BGM 150Hz 이하 비중 60% 이하 (${snd.bgm_normal.low}, ${snd.bgm_boss.low})`);
+  check(snd.bgm_normal.low <= 0.35 && snd.bgm_boss.low <= 0.35, `BGM 150Hz 이하 비중 35% 이하 (${snd.bgm_normal.low}, ${snd.bgm_boss.low})`);
   check(snd.sfx.pop_big.low <= 0.6, `삼키기 "쿵" 에 중역 배음 (150Hz 이하 ${snd.sfx.pop_big.low})`);
 
   const fps = await G(async () => {

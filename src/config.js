@@ -10,22 +10,24 @@ export const CFG = {
     decel: 4.2,
     hp: 120,
     iframe: 1.2,
+    iframeLow: 1.8,
     growthK: 0.15, // r^2 += growthK * size^2 * growthFalloff(r)
     enemyGrowthK: 0.07,
     fit: 0.94, // size < r * fit 이면 삼킬 수 있음
     visualLerp: 3.2,
-    maxR: 14,
+    maxR: 16,
   },
 
   // 화면 가로 폭(월드 유닛) = baseW + r * wPerR, 세로 화면 aspect 에 맞춰 거리 자동 계산
   cam: { fov: 50, tilt: 66, baseW: 13, wPerR: 5.2, lerp: 2.6 },
 
-  run: { length: 300, miniAt: 150, bossAt: 300 },
+  run: { length: 300, miniAt: 150, bossAt: 300, lateAt: 240 },
 
   // 레벨 L -> L+1 필요 XP
   xpNeed: (lvl) => Math.floor(8 + lvl * 6 + Math.pow(lvl, 1.95)),
   // 홀이 클수록 같은 물체의 성장/XP 효율 감소 (후반 폭주 방지)
   growthFalloff: (r) => 1 / (1 + 0.085 * r * r),
+  growthFalloffLate: (r) => 1 / (1 + 0.025 * r * r),
   xpFalloff: (r) => 1 / (1 + 0.05 * r * r),
   // 오브젝트 XP
   propXp: (size) => 1 + size * size * 1.6,
@@ -50,26 +52,26 @@ export const CFG = {
 export const ENEMY_DEFS = {
   sweeper: { name: '청소봇', size: 0.75, hp: 8, speed: 3.3, dmg: 8, xp: 3, cap: 160 },
   dasher: { name: '돌진봇', size: 1.05, hp: 16, speed: 2.6, dmg: 12, xp: 6, cap: 60, dashSpeed: 15 },
-  thrower: { name: '투척봇', size: 1.15, hp: 14, speed: 2.4, dmg: 8, xp: 7, cap: 50, range: 13 },
-  giant: { name: '거대 청소기', size: 2.5, hp: 80, speed: 1.5, dmg: 18, xp: 26, cap: 24 },
-  mini: { name: '청소 트럭 대장', size: 5.0, hp: 450, speed: 2.1, dmg: 22, xp: 160, cap: 2, dashSpeed: 12 },
+  thrower: { name: '투척봇', size: 1.15, hp: 14, speed: 2.4, dmg: 5, xp: 7, cap: 50, range: 13 },
+  giant: { name: '거대 청소기', size: 2.5, hp: 80, speed: 1.5, dmg: 14, xp: 26, cap: 24 },
+  mini: { name: '청소 트럭 대장', size: 5.0, hp: 450, speed: 2.1, dmg: 16, xp: 160, cap: 2, dashSpeed: 12 },
   boss: { name: '거대 청소 메카', size: 11, hp: 2600, speed: 1.7, dmg: 28, xp: 600, cap: 1 },
 };
 
 // 영구 업그레이드 트리 (tier 2 는 tier 1 합계 레벨, tier 3 은 tier 2 합계 레벨 필요)
-const costs = (base, n, g = 1.32) => Array.from({ length: n }, (_, i) => Math.round((base * Math.pow(g, i)) / 5) * 5);
+const costs = (base, n, g = 1.38) => Array.from({ length: n }, (_, i) => Math.round((base * Math.pow(g, i)) / 5) * 5);
 export const UPGRADES = [
-  { id: 'size', tier: 1, name: '시작 크기', desc: (l) => `시작 반지름 +${l * 5}%`, max: 10, cost: costs(40, 10) },
-  { id: 'hp', tier: 1, name: '최대 HP', desc: (l) => `최대 HP +${l * 10}`, max: 10, cost: costs(30, 10) },
-  { id: 'speed', tier: 1, name: '이동 속도', desc: (l) => `이동 속도 +${l * 4}%`, max: 10, cost: costs(35, 10) },
-  { id: 'xp', tier: 2, name: 'XP 획득', desc: (l) => `XP 획득 +${l * 6}%`, max: 10, cost: costs(60, 10) },
-  { id: 'coin', tier: 2, name: '코인 획득', desc: (l) => `코인 획득 +${l * 8}%`, max: 10, cost: costs(70, 10) },
-  { id: 'power', tier: 2, name: '스킬 위력', desc: (l) => `스킬 피해 +${l * 6}%`, max: 10, cost: costs(80, 10) },
-  { id: 'armor', tier: 3, name: '중력 장갑', desc: (l) => `받는 피해 -${l * 3}%`, max: 10, cost: costs(120, 10) },
-  { id: 'reroll', tier: 3, name: '카드 재추첨', desc: (l) => `판마다 카드 다시 뽑기 ${l}회`, max: 3, cost: [200, 450, 800] },
-  { id: 'revive', tier: 3, name: '재탄생', desc: () => '판마다 1회 HP 50%로 부활', max: 1, cost: [900] },
+  { id: 'hp', tier: 1, name: '최대 HP', desc: (l) => `최대 HP +${l * 15}`, max: 10, cost: costs(40, 10) },
+  { id: 'armor', tier: 1, name: '중력 장갑', desc: (l) => `받는 피해 -${l * 4}%`, max: 10, cost: costs(50, 10) },
+  { id: 'size', tier: 1, name: '시작 크기', desc: (l) => `시작 반지름 +${l * 5}%`, max: 10, cost: costs(55, 10) },
+  { id: 'speed', tier: 2, name: '이동 속도', desc: (l) => `이동 속도 +${l * 4}%`, max: 10, cost: costs(90, 10) },
+  { id: 'xp', tier: 2, name: 'XP 획득', desc: (l) => `XP 획득 +${l * 6}%`, max: 10, cost: costs(100, 10) },
+  { id: 'power', tier: 2, name: '스킬 위력', desc: (l) => `스킬 피해 +${l * 6}%`, max: 10, cost: costs(110, 10) },
+  { id: 'coin', tier: 3, name: '코인 획득', desc: (l) => `코인 획득 +${l * 8}%`, max: 10, cost: costs(160, 10) },
+  { id: 'reroll', tier: 3, name: '카드 재추첨', desc: (l) => `판마다 카드 다시 뽑기 ${l}회`, max: 3, cost: [300, 650, 1100] },
+  { id: 'revive', tier: 3, name: '재탄생', desc: () => '판마다 1회 HP 50%로 부활', max: 1, cost: [1400] },
 ];
-export const TIER_REQ = { 1: 0, 2: 6, 3: 8 };
+export const TIER_REQ = { 1: 0, 2: 10, 3: 12 };
 
 // 맵 (테마)
 export const MAPS = {
@@ -137,21 +139,21 @@ export const SKILL_COST = { bolt: 120, saw: 160, dash: 220, greed: 260, nova: 38
 // 업적
 export const ACHIEVEMENTS = [
   { id: 'first_bite', name: '첫 한 입', desc: '처음으로 무언가 삼키기', reward: 10, test: (s) => s.swallowed >= 1 },
-  { id: 'swallow_500', name: '먹보', desc: '누적 500개 삼키기', reward: 50, test: (s) => s.swallowed >= 500 },
+  { id: 'swallow_500', name: '먹보', desc: '누적 2,000개 삼키기', reward: 60, test: (s) => s.swallowed >= 2000 },
   { id: 'swallow_5000', name: '도시 청소부', desc: '누적 5,000개 삼키기', reward: 150, test: (s) => s.swallowed >= 5000 },
   { id: 'swallow_20000', name: '우주의 위장', desc: '누적 20,000개 삼키기', reward: 400, test: (s) => s.swallowed >= 20000 },
-  { id: 'kill_100', name: '로봇 사냥꾼', desc: '누적 처치 100', reward: 50, test: (s) => s.kills >= 100 },
+  { id: 'kill_100', name: '로봇 사냥꾼', desc: '누적 처치 400', reward: 50, test: (s) => s.kills >= 400 },
   { id: 'kill_1000', name: '고철 수집가', desc: '누적 처치 1,000', reward: 200, test: (s) => s.kills >= 1000 },
   { id: 'survive_3', name: '버티기 성공', desc: '한 판에서 3분 생존', reward: 60, test: (s) => s.bestTime >= 180 },
-  { id: 'survive_5', name: '5분의 기적', desc: '한 판에서 5분 생존', reward: 100, test: (s) => s.bestTime >= 300 },
+  { id: 'survive_5', name: '끈기', desc: '누적 플레이 30분', reward: 100, test: (s) => s.playTime >= 1800 },
   { id: 'mini_kill', name: '트럭 제압', desc: '미니보스 처치', reward: 80, test: (s) => s.miniKills >= 1 },
   { id: 'boss_city', name: '시티 해방', desc: '파스텔 시티 메카 삼키기', reward: 200, test: (s, m) => m.city.clear >= 1 },
   { id: 'boss_beach', name: '해변 해방', desc: '선샤인 비치 메카 삼키기', reward: 250, test: (s, m) => m.beach.clear >= 1 },
   { id: 'boss_factory', name: '공장 해방', desc: '러스티 팩토리 메카 삼키기', reward: 300, test: (s, m) => m.factory.clear >= 1 },
-  { id: 'size_10', name: '거대 구멍', desc: '지름 10m 달성', reward: 60, test: (s) => s.maxSize >= 10 },
-  { id: 'size_20', name: '싱크홀', desc: '지름 20m 달성', reward: 150, test: (s) => s.maxSize >= 20 },
-  { id: 'combo_30', name: '폭풍 흡입', desc: '콤보 x30 달성', reward: 80, test: (s) => s.maxCombo >= 30 },
-  { id: 'level_15', name: '성장 가속', desc: '한 판에서 Lv 15 도달', reward: 80, test: (s) => s.maxLevel >= 15 },
+  { id: 'size_10', name: '거대 구멍', desc: '지름 24m 달성', reward: 60, test: (s) => s.maxSize >= 24 },
+  { id: 'size_20', name: '싱크홀', desc: '지름 30m 달성', reward: 150, test: (s) => s.maxSize >= 30 },
+  { id: 'combo_30', name: '폭풍 흡입', desc: '콤보 x80 달성', reward: 80, test: (s) => s.maxCombo >= 80 },
+  { id: 'level_15', name: '성장 가속', desc: '한 판에서 Lv 25 도달', reward: 80, test: (s) => s.maxLevel >= 25 },
   { id: 'evolve', name: '진화', desc: '스킬 진화 달성', reward: 100, test: (s) => s.evolutions >= 1 },
   { id: 'streak_7', name: '개근상', desc: '7일 연속 출석', reward: 200, test: (s) => s.bestStreak >= 7 },
   { id: 'daily_clear', name: '오늘의 도전자', desc: '데일리 챌린지 완료', reward: 100, test: (s) => s.dailyClears >= 1 },
@@ -253,21 +255,62 @@ export const SKILLS = {
 };
 
 // 진화 스킬: 두 스킬 조합
+// 진화 스킬: 무기 Lv5 + 짝 패시브 보유. 12개 스킬이 모두 한 번 이상 재료로 쓰임
+export const WEAPONS = ['orbit', 'cannon', 'pulse', 'bolt', 'dash', 'nova', 'saw'];
+export const PASSIVES = ['horizon', 'glutton', 'haste', 'regen', 'greed'];
 export const EVOLUTIONS = {
   accretion: {
     name: '강착 원반',
     color: '#c6b8ff',
     from: ['orbit', 'horizon'],
-    need: { orbit: 3, horizon: 1 },
+    need: { orbit: 5, horizon: 1 },
     desc: () => '파편 위성 진화: 파편 10개가 넓게 돌며 2.5배 피해, 작은 적을 끌어당김',
   },
   singularity: {
     name: '특이점 포',
     color: '#ff9f6b',
     from: ['cannon', 'glutton'],
-    need: { cannon: 3, glutton: 1 },
+    need: { cannon: 5, glutton: 1 },
     desc: () => '역류 캐논 진화: 탄환이 작은 블랙홀이 되어 적을 빨아들이고 폭발',
   },
+  storm: {
+    name: '폭풍 번개',
+    color: '#9ff4ff',
+    from: ['bolt', 'haste'],
+    need: { bolt: 5, haste: 1 },
+    desc: () => '블랙 번개 진화: 두 배로 자주, 두 줄기로 튀며 1.6배 피해',
+  },
+  vampsaw: {
+    name: '흡혈 톱니',
+    color: '#ff5d7a',
+    from: ['saw', 'regen'],
+    need: { saw: 5, regen: 1 },
+    desc: () => '톱니 테두리 진화: 테두리 근처 모든 적을 갈아내고 피해만큼 HP 회복',
+  },
+  collapse: {
+    name: '중력 붕괴',
+    color: '#b07bff',
+    from: ['pulse', 'horizon'],
+    need: { pulse: 5, horizon: 1 },
+    desc: () => '중력 펄스 진화: 큰 적까지 끌어당긴 뒤 2배 충격파로 튕겨냄',
+  },
+  goldnova: {
+    name: '황금 초신성',
+    color: '#ffd24a',
+    from: ['nova', 'greed'],
+    need: { nova: 5, greed: 1 },
+    desc: () => '초신성 진화: 재사용 40% 단축, 1.5배 피해, 터질 때마다 코인',
+  },
+  rift: {
+    name: '차원 균열',
+    color: '#ff9bf2',
+    from: ['dash', 'haste'],
+    need: { dash: 5, haste: 1 },
+    desc: () => '웜홀 대시 진화: 대시 간격 절반, 지나간 자리에 균열이 남아 적을 벰',
+  },
 };
+// 무기 -> 진화, 패시브 -> 진화 목록
+export const EVO_OF = {};
+for (const [id, ev] of Object.entries(EVOLUTIONS)) for (const f of ev.from) (EVO_OF[f] ||= []).push(id);
 
 export const SKILL_MAX = 5;

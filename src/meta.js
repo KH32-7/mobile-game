@@ -126,7 +126,9 @@ export const Meta = {
   // ---------- 데일리 챌린지 ----------
   dailyChallenge(key = Save.data.daily.date || todayKey()) {
     const rng = makeRng(hash('challenge' + key));
-    const map = MAP_ORDER[Math.floor(rng() * MAP_ORDER.length)];
+    // 해금된 맵 중에서만
+    const open = MAP_ORDER.filter((m) => Save.data.maps[m] && Save.data.maps[m].unlocked);
+    const map = open[Math.floor(rng() * open.length)] || 'city';
     const mod = DAILY_MODS[Math.floor(rng() * DAILY_MODS.length)];
     return { map, mod, seed: hash('seed' + key) % 1000000, diff: 2, key };
   },

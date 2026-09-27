@@ -75,20 +75,33 @@ export function patchHoleClip(mat, rim = false) {
   return mat;
 }
 
-// 인스턴스별 흰색 플래시 (aFlash 0..1)
-export function patchFlash(mat, clip = false) {
+// 인스턴스별 흰색 플래시 (aFlash 0..1) + 홀 가독성: 떨어지는 중(aFlash < 0)이 아닌 적은
+// 홀 원 안쪽의 지면 위 부분을 잘라 홀을 가리지 않게 함
+export function patchFlash(mat) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, holeU);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aFlash;\nvarying float vFlash;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFlash = aFlash;');
+      .replace('#include <common>', '#include <common>\nattribute float aFlash;\nvarying float vFlash;\nvarying vec3 vW;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFlash = aFlash;')
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        {
+          vec4 hw = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+          hw = instanceMatrix * hw;
+          #endif
+          vW = (modelMatrix * hw).xyz;
+        }`
+      );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vFlash;')
+      .replace('#include <common>', '#include <common>\nvarying float vFlash;\nvarying vec3 vW;\nuniform vec2 uHolePos;\nuniform float uHoleR;')
+      .replace('void main() {', 'void main() {\n  if (vFlash > -0.5 && vW.y > 0.02 && distance(vW.xz, uHolePos) < uHoleR * 0.985) discard;\n')
       .replace(
         '#include <dithering_fragment>',
         'gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), clamp(vFlash, 0.0, 1.0));\n#include <dithering_fragment>'
       );
   };
-  mat.customProgramCacheKey = () => 'flash' + (clip ? 'c' : '');
+  mat.customProgramCacheKey = () => 'flash-clip';
   return mat;
 }

@@ -1,4 +1,4 @@
-import { SKILLS, EVOLUTIONS, SKILL_MAX } from './config.js';
+import { SKILLS, EVOLUTIONS, SKILL_MAX, EVO_OF } from './config.js';
 
 const S = (inner) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 export const ICONS = {
@@ -16,6 +16,11 @@ export const ICONS = {
   greed: S('<path d="M6 4 H18 L22 9 L12 21 L2 9 Z" fill="currentColor"/><path d="M2 9 H22 M9 4 L7.5 9 L12 21 L16.5 9 L15 4" stroke="#1a1030" stroke-width="1.3"/>'),
   accretion: S('<ellipse cx="12" cy="12" rx="10" ry="4" /><ellipse cx="12" cy="12" rx="6.5" ry="2.4"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/>'),
   singularity: S('<circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M2 12 H6 M22 12 H18 M12 2 V6 M12 22 V18 M4.5 4.5 L7.5 7.5 M19.5 19.5 L16.5 16.5"/>'),
+  storm: S('<path d="M9 2 L4 11 H8 L6 20 L13 9 H9 Z" fill="currentColor"/><path d="M17 4 L13 12 H16 L14 21 L21 10 H17 Z" fill="currentColor" opacity=".7"/>'),
+  vampsaw: S('<circle cx="12" cy="12" r="5" fill="currentColor"/><path d="M12 1 L14 5 L18 3 L18 7.5 L23 9 L20 12.5 L23 16 L18 16.5 L17 21 L12.5 19 L9 22.5 L7 18 L2 17 L4.5 12.5 L1.5 8 L6.5 7 L7 2.5 L11 4.5 Z"/>'),
+  collapse: S('<circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M3 12 H8 M21 12 H16 M12 3 V8 M12 21 V16"/><circle cx="12" cy="12" r="9.5" stroke-dasharray="3 2.5"/>'),
+  goldnova: S('<path d="M12 1 L14.5 8.5 L22 7 L16.5 12 L22 17 L14.5 15.5 L12 23 L9.5 15.5 L2 17 L7.5 12 L2 7 L9.5 8.5 Z" fill="currentColor"/><circle cx="12" cy="12" r="3" fill="#1a1030"/>'),
+  rift: S('<path d="M4 20 L9 13 L7 11 L13 5 L11 9 L14 11 L20 4"/><ellipse cx="5" cy="19" rx="2.5" ry="1.5"/><ellipse cx="19" cy="5" rx="2.5" ry="1.5"/>'),
   heal: S('<path d="M12 20 C4 14 3 9 6 6.5 C8.5 4.5 11 6 12 8 C13 6 15.5 4.5 18 6.5 C21 9 20 14 12 20 Z" fill="currentColor"/>'),
   coin: S('<circle cx="12" cy="12" r="8.5" fill="currentColor"/><circle cx="12" cy="12" r="5" stroke="#1a1030"/>'),
 };
@@ -35,14 +40,18 @@ export class UI {
       <div id="joy"><div class="base"><div class="knob"></div></div></div>
       <div id="hud" class="hidden">
         <div class="hud-top">
-          <div class="xpbar"><div class="fill"></div><span class="lv">Lv 1</span></div>
+          <div class="hud-row1">
+            <div class="xpbar"><div class="fill"></div><span class="lv">Lv 1</span></div>
+            <div class="hud-stats"><span id="stSwallow">삼킴 0</span><span id="stKill">처치 0</span><span id="stSize">1.0m</span></div>
+          </div>
           <div class="hud-row">
             <div class="hpbar"><div class="fill"></div><span class="txt">100</span></div>
+            <div id="bossbar" class="hidden"><div class="bar"><div class="fill"></div><span class="name"></span></div></div>
+            <div class="hpchip hidden">♥ <b>0</b></div>
             <div class="timer">0:00</div>
             <button class="btn icon" id="btnPause" aria-label="일시정지"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg></button>
           </div>
-          <div class="hud-stats"><span id="stSwallow">삼킴 0</span><span id="stKill">처치 0</span><span id="stSize">1.0m</span></div>
-          <div id="bossbar" class="hidden"><div class="name"></div><div class="bar"><div class="fill"></div></div></div>
+          <div id="comboSmall"></div>
         </div>
         <div id="combo"></div>
         <div id="banner"></div>
@@ -51,7 +60,7 @@ export class UI {
       </div>
       <div id="tutorial" class="hidden">
         <div class="finger"><div class="trail"></div><div class="dot"></div></div>
-        <div class="tip">화면 아무 곳이나 누르고 드래그해서 이동<br><b class="goal">콘을 3개 먹어봐 (0/3)</b></div>
+        <div class="tip"><span class="tip-t">화면 아무 곳이나 누르고 드래그해서 이동</span><br><b class="goal"></b></div>
       </div>
       <div id="title" class="screen"></div>
       <div id="levelup" class="screen hidden">
@@ -140,9 +149,18 @@ export class UI {
     this.set('time', this.timerEl, 'text', g.time < 300 ? fmtTime(remain) : `+${fmtTime(g.time - 300)}`);
     this.set('sw', this.$('#stSwallow'), 'text', `삼킴 ${g.stats.swallowed}`);
     this.set('kl', this.$('#stKill'), 'text', `처치 ${g.stats.kills}`);
+    const cs = g.combo >= 3 ? `x${g.combo}` : '';
+    this.set('cs', this.$('#comboSmall'), 'text', cs);
     this.set('sz', this.$('#stSize'), 'text', `${(h.r * 2).toFixed(1)}m`);
     this.hpFill.classList.toggle('low', h.hp / h.maxHp < 0.3);
     const boss = g.enemies.boss || g.enemies.mini;
+    // 보스전: HP 바 자리를 보스 바로 바꾸고 HP 는 작은 칩으로
+    this.hpbar ||= this.$('.hpbar');
+    this.hpchip ||= this.$('.hpchip');
+    this.hpbar.classList.toggle('hidden', !!boss);
+    this.hpchip.classList.toggle('hidden', !boss);
+    this.hpchip.classList.toggle('low', h.hp / h.maxHp < 0.3);
+    if (boss) this.set('hc', this.hpchip.querySelector('b'), 'text', Math.ceil(Math.max(0, h.hp)));
     if (boss) {
       this.bossbar.classList.remove('hidden');
       const eat = boss.size < h.r * 0.94;
@@ -157,8 +175,9 @@ export class UI {
     for (const id of skills.order) {
       let icon = id;
       let color = SKILLS[id].color;
-      if (id === 'orbit' && skills.evo.accretion) (icon = 'accretion'), (color = EVOLUTIONS.accretion.color);
-      if (id === 'cannon' && skills.evo.singularity) (icon = 'singularity'), (color = EVOLUTIONS.singularity.color);
+      for (const ev of EVO_OF[id] || []) {
+        if (skills.evo[ev] && EVOLUTIONS[ev].from[0] === id) (icon = ev), (color = EVOLUTIONS[ev].color);
+      }
       items.push(`<div class="sk" style="color:${color}">${ICONS[icon]}<span>${skills.lv[id]}</span></div>`);
     }
     this.$('#skillbar').innerHTML = items.join('');
@@ -180,6 +199,7 @@ export class UI {
     cards.innerHTML = choices
       .map((c, i) => {
         let name, desc, color, icon, tag;
+        let recipe = '';
         if (c.kind === 'skill') {
           const d = SKILLS[c.id];
           name = d.name;
@@ -187,6 +207,15 @@ export class UI {
           color = d.color;
           icon = ICONS[c.id];
           tag = c.lvl === 1 ? '<span class="tag new">NEW</span>' : `<span class="tag">Lv ${c.lvl}${c.lvl === SKILL_MAX ? ' MAX' : ''}</span>`;
+          // 진화 재료 표시: 짝 스킬 아이콘 -> 진화 아이콘
+          recipe = (EVO_OF[c.id] || [])
+            .map((ev) => {
+              const E = EVOLUTIONS[ev];
+              const [a, b] = E.from;
+              const have = (k) => (skills.lv[k] || 0) >= E.need[k] || (k === c.id && c.lvl >= E.need[k]);
+              return `<span class="rc" title="${E.name}"><i class="${have(a) ? 'ok' : ''}" style="color:${SKILLS[a].color}">${ICONS[a]}</i>+<i class="${have(b) ? 'ok' : ''}" style="color:${SKILLS[b].color}">${ICONS[b]}</i>→<i style="color:${E.color}">${ICONS[ev]}</i></span>`;
+            })
+            .join('');
         } else if (c.kind === 'evo') {
           const d = EVOLUTIONS[c.id];
           name = d.name;
@@ -194,6 +223,7 @@ export class UI {
           color = d.color;
           icon = ICONS[c.id];
           tag = '<span class="tag evo">진화</span>';
+          recipe = `<span class="rc"><i class="ok" style="color:${SKILLS[d.from[0]].color}">${ICONS[d.from[0]]}</i>+<i class="ok" style="color:${SKILLS[d.from[1]].color}">${ICONS[d.from[1]]}</i></span>`;
         } else if (c.kind === 'heal') {
           name = 'HP 회복';
           desc = '최대 HP의 35% 회복';
@@ -210,7 +240,7 @@ export class UI {
         const pips = c.kind === 'skill' ? `<div class="pips">${Array.from({ length: SKILL_MAX }, (_, k) => `<i class="${k < c.lvl ? 'on' : ''}${k === c.lvl - 1 ? ' next' : ''}"></i>`).join('')}</div>` : '';
         return `<button class="card ${c.kind}" data-i="${i}" style="--c:${color}; animation-delay:${i * 0.07}s">
           <div class="card-icon" style="color:${color}">${icon}</div>
-          <div class="card-body"><div class="card-name">${name} ${tag}</div><div class="card-desc">${desc}</div>${pips}</div>
+          <div class="card-body"><div class="card-name">${name} ${tag}</div><div class="card-desc">${desc}</div>${pips}${recipe ? `<div class="recipe">${recipe}</div>` : ''}</div>
         </button>`;
       })
       .join('');
@@ -226,10 +256,22 @@ export class UI {
     });
   }
 
-  setTutorial(n) {
+  setTutorial(step, v) {
     const el = this.$('#tutorial .goal');
-    el.textContent = n >= 3 ? '완벽해!' : `작은 걸 3개 먹어봐 (${n}/3)`;
-    el.classList.toggle('done', n >= 3);
+    const tip = this.$('#tutorial .tip-t');
+    const tut = this.$('#tutorial');
+    tut.dataset.step = step;
+    if (step === 1) {
+      tip.textContent = '화면 아무 곳이나 누르고 드래그해서 이동';
+      el.textContent = `1단계: 홀보다 작은 걸 3개 먹어봐 (${v}/3)`;
+    } else if (step === 2) {
+      tip.textContent = '보라색 링 = 삼킬 수 있는 로봇. 화살표를 따라가!';
+      el.textContent = '2단계: 보라 링 청소봇 1대 삼키기';
+    } else {
+      tip.textContent = '빨간 링 = 홀보다 큰 로봇. 닿으면 아파!';
+      el.textContent = `3단계: 빨간 링 로봇 피하기 ${v.toFixed(1)} / 5초`;
+    }
+    el.classList.toggle('done', false);
   }
 
   showResult(r) {
@@ -304,6 +346,7 @@ export class UI {
         c.style.transform = `translate(${tx}px, ${ty}px) scale(0.7)`;
         c.style.opacity = '0';
       }, delay + 20);
+      setTimeout(() => this.audio && this.audio.coin(), delay + 560);
       setTimeout(() => c.remove(), delay + 800);
     }
     const t0 = performance.now() + 350;
@@ -321,10 +364,11 @@ export class UI {
     requestAnimationFrame(tick);
   }
 
+  // 콤보: 평소엔 우상단 작은 카운터, 10 단위에서만 크게
   combo(n) {
-    if (n < 3) return;
+    if (n < 10 || n % 10 !== 0) return;
     const el = this.comboEl;
-    const word = n >= 40 ? '대식가!!' : n >= 25 ? '꿀꺽!!' : n >= 12 ? '냠냠!' : '냠!';
+    const word = n >= 50 ? '대식가!!' : n >= 30 ? '꿀꺽!!' : n >= 20 ? '냠냠!' : '냠!';
     el.innerHTML = `<b>x${n}</b> ${word}`;
     el.classList.remove('pop');
     void el.offsetWidth;

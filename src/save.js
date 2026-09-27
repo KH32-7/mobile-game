@@ -2,6 +2,7 @@
 import { MAP_ORDER, START_SKILLS } from './config.js';
 
 const KEY = 'void-maw-save';
+const BAK = 'void-maw-save-bak';
 const OLD_KEYS = ['void-maw-save-v1'];
 export const SAVE_VER = 2;
 
@@ -101,11 +102,36 @@ export const Save = {
     } catch (e) {
       raw = null;
     }
+    this.status = 'ok';
     try {
       const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed !== null && typeof parsed !== 'object') throw new Error('bad');
       this.data = parsed ? mergeDeep(defaults(), migrate(parsed)) : defaults();
+      // 정상 로드된 원본을 백업으로 보관
+      if (raw) {
+        try {
+          localStorage.setItem(BAK, JSON.stringify(this.data));
+        } catch (e) {
+          /* 무시 */
+        }
+      }
     } catch (e) {
-      this.data = defaults();
+      // 손상: 백업으로 복원 시도
+      let bak = null;
+      try {
+        bak = localStorage.getItem(BAK);
+      } catch (e2) {
+        bak = null;
+      }
+      try {
+        const pb = bak ? JSON.parse(bak) : null;
+        if (!pb || typeof pb !== 'object') throw new Error('no bak');
+        this.data = mergeDeep(defaults(), migrate(pb));
+        this.status = 'restored';
+      } catch (e3) {
+        this.data = defaults();
+        this.status = 'failed';
+      }
     }
     // 무결성 보정
     const d = this.data;

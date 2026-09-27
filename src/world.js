@@ -400,7 +400,7 @@ export class World {
     // 건물 뒤에서도 보이는 홀 실루엣 (깊이 테스트 없이 한 번 더)
     const sg = new THREE.RingGeometry(0.97, 1.06, 64);
     sg.rotateX(-Math.PI / 2);
-    this.silMat = new THREE.MeshBasicMaterial({ color: '#b890ff', transparent: true, opacity: 0.45, depthTest: false, depthWrite: false });
+    this.silMat = new THREE.MeshBasicMaterial({ color: '#b890ff', transparent: true, opacity: 0.75, depthTest: false, depthWrite: false });
     this.sil = new THREE.Mesh(sg, this.silMat);
     this.sil.renderOrder = 9;
     this.sil.frustumCulled = false;
@@ -577,12 +577,17 @@ export class World {
       }
     }
     // 시작 지점: 즉시 삼킬 수 있는 작은 것들
-    for (let i = 0; i < 18; i++) {
-      const a = (i / 18) * Math.PI * 2;
-      const r = 3.2 + (i % 2) * 1.2;
+    // 시작 지점 주변에 흩어진 작은 것들 (한곳에 몰지 않음)
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + rng.range(-0.3, 0.3);
+      const r = rng.range(4.5, 11);
       add(th === 'city' ? 'cone' : rng.pick(T.start), Math.cos(a) * r, Math.sin(a) * r);
     }
-    for (let i = 0; i < 8; i++) add(rng.pick(T.start), rng.range(-7, 7), rng.range(-7, 7));
+    for (let i = 0; i < 8; i++) {
+      const a = rng() * Math.PI * 2;
+      const d = rng.range(5, 13);
+      add(rng.pick(T.start), Math.cos(a) * d, Math.sin(a) * d);
+    }
     this.layout = L.filter((p) => p.s > 0 && Math.hypot(p.x, p.z) > 2.2 && PROP_TYPES[p.t]);
   }
 
