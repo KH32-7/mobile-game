@@ -18,7 +18,7 @@ export function newRun() {
     belts: {},
     stack: [],
     seats: {},
-    hist: [0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+    hist: [0.7, 0.7, 0.7, 0.7, 0.7, 0.7],
     combo: 0,
     rushT: 0,
     time: 0,
@@ -46,6 +46,8 @@ export function defaultProfile() {
     dex: {},
     settings: { sfx: true, bgm: true, haptic: true, shadows: true, qLocked: false },
     tut: 0,
+    perks: {},
+    season: 1,
     doubleDay: '',
     finished: false,
   };
@@ -68,6 +70,11 @@ function migrate(p) {
     p.cos.skin = p.cos.skin || 'base';
     v = 3;
   }
+  if (v < 4) {
+    p.perks = p.perks || {};
+    p.season = p.season || 1;
+    v = 4;
+  }
   p.v = SAVE_VERSION;
   return p;
 }
@@ -86,6 +93,8 @@ function sanitize(p) {
   run.earned = Math.max(0, num(run.earned));
   out.pearls = Math.max(0, num(out.pearls));
   out.stage = Math.max(0, Math.min(4, Math.floor(num(out.stage))));
+  out.season = Math.max(1, Math.floor(num(out.season, 1)));
+  if (!out.perks || typeof out.perks !== 'object') out.perks = {};
   if (!Array.isArray(run.hist) || !run.hist.length) run.hist = dr.hist;
   run.hist = run.hist.filter((x) => Number.isFinite(x)).slice(-20);
   if (!run.hist.length) run.hist = dr.hist;

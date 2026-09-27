@@ -1,6 +1,6 @@
 // DOM UI: HUD, 월드 말풍선, 패널(업그레이드/미션/출석/도감/코스튬/업적/통계/설정), 타이틀, 결과
 import { SVG, menuImg, iconURL } from './icons.js';
-import { STAGES, MENUS, MENU_ORDER, UPGRADES, HATS, APRONS, SKINS, ACHIEVEMENTS, ATTEND, CFG } from './config.js';
+import { STAGES, MENUS, MENU_ORDER, UPGRADES, HATS, APRONS, SKINS, ACHIEVEMENTS, ATTEND, CFG, PERKS, GIMMICKS } from './config.js';
 import { fmt } from './world.js';
 import { project } from './gfx.js';
 import { audio } from './audio.js';
@@ -24,28 +24,29 @@ export class UI {
   // ---------------- HUD ----------------
   buildHud() {
     this.hud.innerHTML = `
+      <div class="hud-grad"></div>
       <div class="hud-top">
         <div class="hud-left">
           <div class="pill money" id="h-money-pill"><span class="ic">${SVG.coin}</span><b id="h-money">0</b></div>
           <div class="pill pearls"><span class="ic">${SVG.pearl}</span><b id="h-pearls">0</b></div>
         </div>
         <div class="hud-center">
-          <div class="stage-name" id="h-stage"></div>
           <div class="prog"><div class="prog-fill" id="h-prog"></div><span id="h-prog-t"></span></div>
-          <div class="next-goal" id="h-next"></div>
-          <div class="rating"><span class="ic">${SVG.star}</span><b id="h-stars">3.0</b><div class="heart-bar"><span class="ic sm">${SVG.heart}</span><div class="hb"><div id="h-heart"></div></div></div></div>
+          <div class="subline"><span class="next-goal" id="h-next"></span><span class="rating"><span class="ic">${SVG.star}</span><b id="h-stars">3.0</b><span class="hb"><i id="h-heart"></i></span></span></div>
         </div>
         <div class="hud-right">
           <button class="rbtn" id="b-pause" aria-label="일시정지">${SVG.pause}</button>
-          <button class="rbtn" id="b-mute" aria-label="소리">${SVG.sound}</button>
+          <button class="rbtn" id="b-menu" aria-label="메뉴">${SVG.menu}<i class="dot" id="bd-menu"></i></button>
         </div>
       </div>
-      <div class="side-btns">
-        <button class="sbtn" id="b-mission">${SVG.mission}<span>미션</span><i class="badge" id="bd-mission"></i></button>
-        <button class="sbtn" id="b-attend">${SVG.calendar}<span>출석</span><i class="badge" id="bd-attend"></i></button>
-        <button class="sbtn" id="b-dex">${SVG.book}<span>도감</span><i class="badge" id="bd-dex"></i></button>
-        <button class="sbtn" id="b-cos">${SVG.shirt}<span>코스튬</span></button>
-        <button class="sbtn" id="b-ach">${SVG.trophy}<span>업적</span><i class="badge" id="bd-ach"></i></button>
+      <div class="menu-pop" id="menu-pop">
+        <button class="mitem" data-m="mission">${SVG.mission}<span>미션</span><i class="badge" id="bd-mission"></i></button>
+        <button class="mitem" data-m="attend">${SVG.calendar}<span>출석</span><i class="badge" id="bd-attend"></i></button>
+        <button class="mitem" data-m="perk">${SVG.up2}<span>영구 강화</span><i class="badge" id="bd-perk"></i></button>
+        <button class="mitem" data-m="dex">${SVG.book}<span>도감</span><i class="badge" id="bd-dex"></i></button>
+        <button class="mitem" data-m="cos">${SVG.shirt}<span>코스튬</span></button>
+        <button class="mitem" data-m="ach">${SVG.trophy}<span>업적</span><i class="badge" id="bd-ach"></i></button>
+        <button class="mitem" data-m="mute" id="b-mute">${SVG.sound}<span>소리</span></button>
       </div>
       <div class="demand" id="h-demand"></div>
       <div class="combo" id="h-combo"></div>
@@ -63,18 +64,37 @@ export class UI {
         audio.play('click');
         f();
       });
-    on('#b-pause', () => this.openPause());
-    on('#b-mute', () => this.app.toggleMute());
-    on('#b-mission', () => this.openMissions());
-    on('#b-attend', () => this.openAttend());
-    on('#b-dex', () => this.openDex());
-    on('#b-cos', () => this.openCostume());
-    on('#b-ach', () => this.openAch());
+    on('#b-pause', () => {
+      this.toggleMenu(false);
+      this.openPause();
+    });
+    on('#b-menu', () => this.toggleMenu());
+    this.hud.querySelectorAll('.mitem').forEach((b) =>
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        audio.play('click');
+        const m = b.dataset.m;
+        if (m === 'mute') {
+          this.app.toggleMute();
+          return;
+        }
+        this.toggleMenu(false);
+        ({ mission: () => this.openMissions(), attend: () => this.openAttend(), perk: () => this.openPerks(), dex: () => this.openDex(), cos: () => this.openCostume(), ach: () => this.openAch() })[m]();
+      })
+    );
     this.hud.querySelectorAll('button').forEach((b) => b.addEventListener('pointerdown', (e) => e.stopPropagation()));
+    document.getElementById('gl').addEventListener('pointerdown', () => this.toggleMenu(false));
+  }
+
+  toggleMenu(on) {
+    const el = $('#menu-pop');
+    const v = on === undefined ? !el.classList.contains('show') : on;
+    el.classList.toggle('show', v);
   }
 
   setMuteIcon(on) {
-    $('#b-mute').innerHTML = on ? SVG.sound : SVG.mute;
+    const b = $('#b-mute');
+    if (b) b.innerHTML = `${on ? SVG.sound : SVG.mute}<span>${on ? '소리 켜짐' : '소리 꺼짐'}</span>`;
   }
 
   updateHud(dt) {
@@ -110,9 +130,8 @@ export class UI {
     const key = st.name + done;
     if (this._sk !== key) {
       this._sk = key;
-      $('#h-stage').textContent = `${p.stage + 1}호점 · ${st.name}`;
       $('#h-prog').style.width = `${(done / total) * 100}%`;
-      $('#h-prog-t').textContent = `${done}/${total}`;
+      $('#h-prog-t').textContent = `${p.season > 1 ? p.season + '시즌 ' : ''}${p.stage + 1}호점 ${st.name} ${done}/${total}`;
     }
     const pad = g.pads[0];
     const nk = pad ? pad.u.id + (g.run.money >= pad.u.cost - pad.paid ? 1 : 0) : '';
@@ -121,7 +140,7 @@ export class UI {
       const el = $('#h-next');
       if (pad) {
         const lb = g.unlockLabel(pad.u).label;
-        el.innerHTML = `다음 <b>${lb}</b> <span class="ic">${SVG.coin}</span>${fmt(pad.u.cost)}`;
+        el.innerHTML = `<b>${lb}</b><span class="ic">${SVG.coin}</span>${fmt(pad.u.cost)}`;
         el.classList.toggle('ready', g.run.money >= pad.u.cost - pad.paid);
       } else el.textContent = '모든 시설 완성!';
     }
@@ -168,6 +187,20 @@ export class UI {
       $('#bd-attend').textContent = app.meta.attendAvailable() ? '!' : '';
       $('#bd-dex').classList.toggle('on', !!app.newDex);
       $('#bd-dex').textContent = app.newDex ? 'N' : '';
+      const pk = app.perkAffordable ? app.perkAffordable() : false;
+      $('#bd-perk').classList.toggle('on', pk);
+      $('#bd-perk').textContent = pk ? '!' : '';
+      const any = mb > 0 || ab > 0 || app.meta.attendAvailable() || !!app.newDex || pk;
+      $('#bd-menu').classList.toggle('on', any);
+      // 튜토리얼 중에는 메뉴를 숨겨서 집중
+      const tutOn = p.tut < 6 && p.stage === 0;
+      $('#b-menu').style.display = tutOn ? 'none' : '';
+      if (tutOn) this.toggleMenu(false);
+      // HUD 아래 경계 (월드 라벨이 겹치면 흐리게)
+      const dr = $('#h-demand').getBoundingClientRect();
+      const ar = document.getElementById('app').getBoundingClientRect();
+      this.hudBottom = dr.bottom - ar.top + 4;
+      window.__hudBottom = this.hudBottom;
       // 적재량
       const cap = g.chefCap();
       const n = g.chef.stack.length;
@@ -379,7 +412,7 @@ export class UI {
       let b = this.bubbles.get(c.id);
       if (!b) {
         const el = document.createElement('div');
-        el.className = 'bubble' + (c.vip ? ' vip' : '') + (c.group ? ' group' : '');
+        el.className = 'bubble' + (c.vip ? ' vip' : '') + (c.omakase ? ' omakase' : '') + (c.group ? ' group' : '');
         this.wui.appendChild(el);
         b = { el, key: '' };
         this.bubbles.set(c.id, b);
@@ -388,8 +421,8 @@ export class UI {
       if (b.key !== key) {
         b.key = key;
         let html = '';
-        if (c.vip) {
-          html += `<span class="crown">${SVG.crown}</span><div class="set">`;
+        if (c.vip || c.omakase) {
+          html += c.vip ? `<span class="crown">${SVG.crown}</span><div class="set">` : `<span class="omk">코스</span><div class="set">`;
           c.orders.forEach((m, i) => (html += `<span class="si ${i < c.oi ? 'done' : i === c.oi ? 'cur' : ''}">${menuImg(m)}</span>`));
           html += '</div>';
         } else if (c.state === 'wait') {
@@ -406,7 +439,9 @@ export class UI {
       }
       project(c.x, 1.9, c.z, tmp);
       b.el.style.transform = `translate(${tmp.x + c.seat.out * 16}px, ${tmp.y}px) translate(-50%, -100%)`;
-      const pr = c.state === 'wait' ? Math.max(0, c.pat / c.patMax) : 1;
+      // 기다릴 땐 인내심, 먹을 땐 먹기 게이지
+      const pr = c.state === 'wait' ? Math.max(0, c.pat / c.patMax) : c.state === 'eat' ? 1 - Math.max(0, c.eatT / CFG.cust.eat) : 0;
+      b.el.style.opacity = tmp.y - 44 < (this.hudBottom || 0) ? '0.25' : '';
       if (b.pat) {
         b.pat.style.setProperty('--p', pr.toFixed(3));
         b.el.classList.toggle('late', pr < 0.3 && c.state === 'wait');
@@ -447,6 +482,7 @@ export class UI {
       }
       project(s.x, 1.95, s.z, tmp);
       el.style.transform = `translate(${tmp.x}px, ${tmp.y}px) translate(-50%, -100%)`;
+      el.style.opacity = tmp.y - 26 < (this.hudBottom || 0) ? '0' : '';
       const cooking = s.inp > 0 && s.out < CFG.station.outCap && g.rack.n > 0;
       el.firstChild.style.display = cooking ? '' : 'none';
       el.firstChild.firstChild.style.width = `${(s.t / g.cookTime) * 100}%`;
@@ -572,7 +608,7 @@ export class UI {
       `<h2>일시정지</h2>
       <button class="big-btn" id="p-resume">계속하기</button>
       <div class="settings">
-        ${tg('s-sfx', '효과음', s.sfx)}${tg('s-bgm', '배경음악', s.bgm)}${tg('s-hap', '진동', s.haptic)}${tg('s-sh', '그림자 (끄면 더 빠름)', s.shadows)}
+        ${tg('s-sfx', '효과음', s.sfx)}${tg('s-bgm', '배경음악', s.bgm)}${tg('s-hap', '진동', s.haptic)}${tg('s-sh', '그림자 (끄면 더 빠름)', s.shadows && !this.app.sessionLowQ)}
       </div>
       <div class="row2">
         <button class="btn" id="p-stats">${SVG.chart} 통계</button>
@@ -623,15 +659,16 @@ export class UI {
       ['staff', '직원'],
     ];
     let rows = '';
+    const rec = this.app.recommendUpgrade ? this.app.recommendUpgrade() : null;
     for (const u of UPGRADES.filter((x) => x.tab === tab)) {
       const lvl = run.upg[u.id] || 0;
       const maxed = lvl >= u.max;
       const cost = this.app.upgCost(u);
       const locked = u.needStaff && !hasStaff;
       const pips = Array.from({ length: u.max }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('');
-      rows += `<div class="up-row ${locked ? 'locked' : ''}">
+      rows += `<div class="up-row ${locked ? 'locked' : ''} ${rec === u.id ? 'rec' : ''}">
         <div class="up-ic ic-${u.icon}">${SVG[u.icon] || SVG.up}</div>
-        <div class="up-info"><b>${u.name}</b><small>${locked ? '직원을 먼저 고용하세요' : u.desc}</small><div class="pips">${pips}</div></div>
+        <div class="up-info"><b>${u.name}${rec === u.id ? '<em class="rtag">추천</em>' : ''}</b><small>${locked ? '직원을 먼저 고용하세요' : u.desc}</small><div class="pips">${pips}</div></div>
         <button class="btn buy" data-id="${u.id}" ${maxed || locked || run.money < cost ? 'disabled' : ''}>${maxed ? 'MAX' : `<span class="ic">${SVG.coin}</span>${fmt(cost)}`}</button>
       </div>`;
     }
@@ -718,6 +755,31 @@ export class UI {
         this.openAttend();
       }
     };
+  }
+
+  // ---------------- 영구 강화 + 시즌 ----------------
+  openPerks() {
+    const p = this.app.p;
+    let rows = '';
+    for (const k of PERKS) {
+      const lvl = p.perks[k.id] || 0;
+      const cost = this.app.perkCost(k);
+      const maxed = lvl >= k.max;
+      const pips = Array.from({ length: k.max }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('');
+      rows += `<div class="up-row"><div class="up-ic ic-plate">${SVG.up2}</div><div class="up-info"><b>${k.name}</b><small>${k.desc}</small><div class="pips">${pips}</div></div>
+        <button class="btn buy" data-id="${k.id}" ${maxed || p.pearls < cost ? 'disabled' : ''}>${maxed ? 'MAX' : `<span class="ic">${SVG.pearl}</span>${cost}`}</button></div>`;
+    }
+    const season = p.finished
+      ? `<div class="season"><b>${p.season + 1}시즌 도전</b><small>1호점부터 다시 시작해요. 영구 강화와 코스튬은 유지되고 모든 수익이 x${(1 + p.season * 0.5).toFixed(1)}, 진주 +100</small><button class="big-btn" id="pk-season">새 시즌 시작</button></div>`
+      : `<p class="hint">우주 정거장까지 완성하면 수익 배율이 오른 다음 시즌에 도전할 수 있어요 (현재 ${p.season}시즌)</p>`;
+    const w = this.open(`<h2>영구 강화</h2><p class="sub">진주로 사면 모든 식당에서 계속 유지돼요</p><div class="money-line"><span class="ic">${SVG.pearl}</span><b>${p.pearls}</b></div><div class="up-list">${rows}</div>${season}`, 'perks');
+    w.querySelectorAll('.buy').forEach((b) =>
+      b.addEventListener('click', () => {
+        if (this.app.buyPerk(b.dataset.id)) this.openPerks();
+      })
+    );
+    const sb = w.querySelector('#pk-season');
+    if (sb) sb.onclick = () => this.confirm('새 시즌을 시작할까요? 식당은 1호점부터 다시 시작해요.', () => this.app.startSeason());
   }
 
   // ---------------- 도감 ----------------

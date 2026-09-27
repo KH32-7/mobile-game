@@ -134,7 +134,8 @@ export function updatePops(dt) {
     const k = p.t / p.dur;
     const sc = k < 0.15 ? 0.5 + (k / 0.15) * 0.7 : k < 0.3 ? 1.2 - ((k - 0.15) / 0.15) * 0.2 : 1;
     p.el.style.transform = `translate(${tmp.x}px, ${tmp.y}px) translate(-50%, -50%) scale(${sc})`;
-    p.el.style.opacity = k > 0.75 ? String((1 - k) / 0.25) : '1';
+    const dim = tmp.y < (window.__hudBottom || 0) ? 0.3 : 1;
+    p.el.style.opacity = String((k > 0.75 ? (1 - k) / 0.25 : 1) * dim);
   }
 }
 

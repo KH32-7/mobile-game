@@ -135,6 +135,7 @@ function getBeltTex() {
     },
     true
   );
+  beltTex.userData.shared = true;
   return beltTex;
 }
 

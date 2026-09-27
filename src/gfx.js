@@ -79,14 +79,14 @@ export function resize() {
 
 const tmpV = new THREE.Vector3();
 // 카메라: 보이는 가로폭을 일정하게 유지하는 쿼터뷰
-export function updateCamera(dt, tx, tz, snap = false) {
+export function updateCamera(dt, tx, tz, snap = false, speed = 6) {
   const cam = gfx.camera;
   const vfov = THREE.MathUtils.degToRad(cam.fov);
   const hTan = Math.tan(vfov / 2) * cam.aspect;
   const W = gfx.viewW * gfx.zoom;
   let dist = W / 2 / hTan;
   dist = Math.min(Math.max(dist, 16), 48);
-  const k = snap ? 1 : 1 - Math.exp(-dt * 6);
+  const k = snap ? 1 : 1 - Math.exp(-dt * speed);
   gfx.camTarget.x += (tx - gfx.camTarget.x) * k;
   gfx.camTarget.z += (tz - gfx.camTarget.z) * k;
   gfx.camTarget.y = 0.6;

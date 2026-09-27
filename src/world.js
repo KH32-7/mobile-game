@@ -218,10 +218,12 @@ export class UnlockPad {
     this.lastAfford = null;
     this.draw(0, true);
   }
-  draw(p, afford) {
-    const q = Math.round(p * 60) / 60;
-    if (q === this.lastP && afford === this.lastAfford) return;
-    this.lastP = q;
+  // paid: 지금까지 낸 금액 (정수)
+  draw(paid, afford) {
+    paid = Math.min(this.cost, Math.max(0, Math.round(paid)));
+    const q = paid / this.cost;
+    if (paid === this.lastP && afford === this.lastAfford) return;
+    this.lastP = paid;
     this.lastAfford = afford;
     const ctx = this.ctx;
     const w = 256;
@@ -266,7 +268,7 @@ export class UnlockPad {
     ctx.strokeText(this.label, w / 2, 164);
     ctx.fillText(this.label, w / 2, 164);
     // 비용
-    const remain = Math.ceil(this.cost * (1 - q));
+    const remain = this.cost - paid;
     ctx.font = 'bold 56px system-ui, -apple-system, sans-serif';
     const txt = fmt(remain);
     const tw = ctx.measureText(txt).width;
@@ -384,6 +386,11 @@ function drawGlyph(ctx, g, s) {
   }
 }
 
+UnlockPad.prototype.dispose = function () {
+  this.tex.dispose();
+  this.mesh.material.dispose();
+};
+
 export function fmt(n) {
   n = Math.floor(n);
   if (n < 1000) return String(n);
@@ -458,20 +465,12 @@ export function buildEnvironment(stage, lay, theme) {
   b.add(GEO.box(doorHalf * 2 + 0.6, 0.22, 0.3), theme.wall, 0, 2.6, z1 + wt / 2);
   root.add(b.mesh());
   // 노렌 천 (조금씩 흔들리는 3장)
-  const noren = new THREE.Group();
-  const nmat = new THREE.MeshLambertMaterial({ color: theme.noren, side: THREE.DoubleSide });
-  for (let i = 0; i < 3; i++) {
-    const p = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.9, 1, 3), nmat);
-    p.geometry.translate(0, -0.45, 0);
-    p.position.set(-0.9 + i * 0.9, 2.5, z1 + 0.02);
-    p.castShadow = true;
-    noren.add(p);
-  }
-  // 노렌 문양 (흰 원)
+  // 노렌: 천 3장 + 흰 문양을 한 메시로 (윗변 기준으로 흔들림)
   const nb = new Build();
-  nb.add(GEO.cyl(0.16, 0.16, 0.01, 16), '#ffffff', 0, 2.05, z1 + 0.035, Math.PI / 2);
-  const nm = nb.mesh(matVC, false);
-  noren.add(nm);
+  for (let i = 0; i < 3; i++) nb.add(GEO.box(0.86, 0.9, 0.012), theme.noren, -0.9 + i * 0.9, -0.45, 0);
+  nb.add(GEO.cyl(0.16, 0.16, 0.02, 16), '#ffffff', 0, -0.45, 0.012, Math.PI / 2);
+  const noren = nb.mesh(matVC, true);
+  noren.position.set(0, 2.5, z1 + 0.02);
   root.add(noren);
   root.userData.noren = noren;
 
@@ -699,4 +698,224 @@ export function stoolMesh(x, z, theme) {
   const m = b.mesh();
   m.position.set(x, 0, z);
   return m;
+}
+
+// ---------- 식당별 바닥 소품 (하단 1/3 채우기 + 대표 소품) ----------
+export function buildDecor(stage, lay, theme) {
+  const b = new Build();
+  const glow = new Build();
+  const obs = [];
+  const { x0, x1, z1 } = lay.bounds;
+  const m = lay.m;
+  const th = stage.theme;
+  let zb = -1e9;
+  for (const bl of lay.belts) zb = Math.max(zb, bl.topZ + stage.layout.len1 + bl.r + 0.85);
+  const box = (x, z, hw, hd) => obs.push({ t: 'box', x, z, hw, hd });
+  const fw = z1 - 0.45; // 앞벽 안쪽 줄
+
+  const planter = (x, z, pot, leaf) => {
+    b.add(GEO.cyl(0.3, 0.24, 0.45, 10), pot, x, 0.225, z);
+    b.add(GEO.sph(0.38, 10, 8), leaf, x, 0.72, z);
+    b.add(GEO.sph(0.26, 8, 6), leaf, x + 0.14, 0.98, z + 0.06);
+    box(x, z, 0.32, 0.32);
+  };
+  const bench = (x, z, c) => {
+    b.add(GEO.rbox(1.5, 0.1, 0.46, 0.06), c, x, 0.46, z);
+    b.add(GEO.box(1.5, 0.36, 0.08), c, x, 0.7, z + 0.2);
+    for (const sx of [-0.62, 0.62]) b.add(GEO.box(0.08, 0.42, 0.4), '#4a4a55', x + sx, 0.21, z);
+    box(x, z, 0.78, 0.3);
+  };
+  // 앞벽 양쪽 (문과 대기줄 피해서)
+  const leftX = -(lay.halfW - 0.5);
+  const rightX = lay.halfW - 0.5;
+  const L1 = Math.min(leftX, -2.2);
+  const R1 = Math.max(rightX, 3.0);
+
+  if (th === 'alley') {
+    // 마네키네코, 술통, 대나무 화분, 벤치, 수족관
+    const cx = -3.2;
+    b.add(GEO.rbox(0.5, 0.55, 0.4, 0.14), '#ffffff', cx, 0.3, fw);
+    b.add(GEO.sph(0.24, 10, 8), '#ffffff', cx, 0.78, fw);
+    b.add(GEO.cone(0.08, 0.14, 4), '#ffffff', cx - 0.14, 0.99, fw, 0, 0.8, -0.3);
+    b.add(GEO.cone(0.08, 0.14, 4), '#ffffff', cx + 0.14, 0.99, fw, 0, 0.8, 0.3);
+    b.add(GEO.cap(0.06, 0.24, 6), '#ffffff', cx + 0.22, 0.95, fw + 0.05, 0, 0, -0.3);
+    b.add(GEO.sph(0.05, 6, 5), '#e2394f', cx, 0.58, fw + 0.2);
+    b.add(GEO.cyl(0.12, 0.12, 0.02, 10), '#ffc83d', cx, 0.4, fw + 0.21, Math.PI / 2);
+    box(cx, fw, 0.3, 0.25);
+    for (const [x, s] of [[-4.6, 1], [-5.3, 0.8]]) {
+      b.add(GEO.cyl(0.32 * s, 0.32 * s, 0.6 * s, 12), '#a8743e', x, 0.3 * s, fw);
+      b.add(GEO.cyl(0.33 * s, 0.33 * s, 0.05, 12), '#3a2a22', x, 0.12 * s, fw);
+      b.add(GEO.cyl(0.33 * s, 0.33 * s, 0.05, 12), '#3a2a22', x, 0.48 * s, fw);
+      b.add(GEO.rbox(0.3 * s, 0.2 * s, 0.02, 0.03), '#ffffff', x, 0.32 * s, fw + 0.33 * s);
+      box(x, fw, 0.33 * s, 0.33 * s);
+    }
+    for (const x of [3.4, 5.2]) {
+      b.add(GEO.rbox(0.6, 0.4, 0.6, 0.08), '#5a3a22', x, 0.2, fw);
+      for (let i = 0; i < 4; i++) {
+        const h = 1.2 + i * 0.25;
+        b.add(GEO.cyl(0.04, 0.05, h, 6), '#6fae4a', x - 0.15 + (i % 2) * 0.3, 0.4 + h / 2, fw - 0.12 + Math.floor(i / 2) * 0.24);
+        b.add(GEO.cone(0.14, 0.4, 5), '#4f8e3a', x - 0.15 + (i % 2) * 0.3, 0.4 + h, fw - 0.12 + Math.floor(i / 2) * 0.24);
+      }
+      box(x, fw, 0.32, 0.32);
+    }
+    // 수족관 (벨트 아래 중앙)
+    const ax = lay.belts[0].cx;
+    const az = zb + 2.35;
+    b.add(GEO.rbox(1.6, 0.5, 0.7, 0.06), '#3a2a22', ax, 0.25, az);
+    glow.add(GEO.box(1.46, 0.62, 0.56), '#3aa0d8', ax, 0.82, az);
+    b.add(GEO.box(1.6, 0.06, 0.7), '#3a2a22', ax, 1.15, az);
+    for (let i = 0; i < 4; i++) glow.add(GEO.sph(0.07, 6, 5), ['#ff8a4c', '#ffd23f', '#ff5a7a', '#ffffff'][i], ax - 0.5 + i * 0.32, 0.75 + (i % 2) * 0.15, az + 0.29, 0, 0, 0, 1.6, 0.8, 0.6);
+    box(ax, az, 0.82, 0.37);
+  } else if (th === 'mall') {
+    planter(-3.0, fw, '#ffffff', '#3fae5a');
+    planter(3.4, fw, '#ffffff', '#5fcf6a');
+    bench(-4.8, fw - 0.05, '#58c7b4');
+    // 자판기
+    b.add(GEO.rbox(0.9, 1.7, 0.6, 0.08), '#e8483b', 5.4, 0.85, fw - 0.05);
+    glow.add(GEO.box(0.7, 0.9, 0.02), '#bfe6ff', 5.35, 1.15, fw + 0.26);
+    for (let i = 0; i < 3; i++) b.add(GEO.cyl(0.06, 0.06, 0.2, 8), ['#ffd23f', '#4fb0ff', '#6ee07a'][i], 5.15 + i * 0.2, 1.15, fw + 0.24);
+    box(5.4, fw - 0.05, 0.46, 0.32);
+    // 분수 (중앙)
+    const az = zb + 1.8;
+    b.add(GEO.cyl(0.85, 0.9, 0.35, 20), '#e9e4da', 0, 0.175, az);
+    glow.add(GEO.cyl(0.72, 0.72, 0.04, 20), '#7fd4ff', 0, 0.34, az);
+    b.add(GEO.cyl(0.12, 0.16, 0.7, 10), '#e9e4da', 0, 0.6, az);
+    glow.add(GEO.sph(0.2, 8, 6), '#bfeaff', 0, 1.0, az, 0, 0, 0, 1, 1.4, 1);
+    box(0, az, 0.9, 0.9);
+    // 에스컬레이터
+    const e = lay.escalator;
+    if (e) {
+      const ez = zb - 2.0;
+      e.z = ez + 1.8;
+      b.add(GEO.box(0.9, 0.12, 2.2), '#7a8494', e.x, 0.06, ez);
+      for (let i = 0; i < 7; i++) b.add(GEO.box(0.78, 0.05, 0.22), '#c9ccd6', e.x, 0.14 - i * 0.0, ez - 1.0 + i * 0.3);
+      for (const sx of [-0.47, 0.47]) {
+        b.add(GEO.box(0.06, 0.8, 2.2), '#dfe6f2', e.x + sx, 0.45, ez);
+        glow.add(GEO.box(0.08, 0.06, 2.2), '#58c7b4', e.x + sx, 0.88, ez);
+      }
+      glow.add(GEO.box(0.8, 0.04, 0.3), '#ffd23f', e.x, 0.17, ez + 1.05);
+      box(e.x, ez, 0.5, 1.1);
+    }
+  } else if (th === 'beach') {
+    // 비치 체어, 파라솔, 서핑보드, 티키 횃불, 모래성
+    for (const [x, c] of [[-3.1, '#ff7a3a'], [-4.9, '#4fb0ff']]) {
+      b.add(GEO.box(0.6, 0.06, 1.2), c, x, 0.32, fw - 0.4, -0.15, 0, 0);
+      b.add(GEO.box(0.6, 0.06, 0.6), c, x, 0.55, fw - 1.05, 0.9, 0, 0);
+      for (const sx of [-0.26, 0.26]) b.add(GEO.cyl(0.03, 0.03, 0.34, 5), '#ffffff', x + sx, 0.17, fw - 0.4);
+      box(x, fw - 0.6, 0.34, 0.66);
+    }
+    b.add(GEO.cyl(0.04, 0.04, 2.2, 6), '#ffffff', -4.0, 1.1, fw - 0.2);
+    b.add(GEO.cone(1.3, 0.5, 10), '#ff5a7a', -4.0, 2.2, fw - 0.2);
+    for (const [x, c, r] of [[3.2, '#ffd23f', 0.1], [3.7, '#4fb0ff', -0.1], [4.2, '#ff7a3a', 0.05]]) b.add(GEO.rbox(0.4, 0.08, 1.7, 0.2), c, x, 0.85, fw - 0.1, 1.45, 0, r);
+    box(3.7, fw - 0.1, 0.8, 0.25);
+    for (const x of [5.4, -6.4]) {
+      b.add(GEO.cyl(0.05, 0.07, 1.5, 6), '#8a5a2e', x, 0.75, fw);
+      b.add(GEO.cyl(0.14, 0.1, 0.25, 8), '#5a3a1e', x, 1.55, fw);
+      glow.add(GEO.cone(0.12, 0.35, 6), '#ffb13d', x, 1.85, fw);
+      box(x, fw, 0.15, 0.15);
+    }
+    const az = zb + 1.75;
+    b.add(GEO.cyl(0.9, 1.0, 0.25, 14), '#f3d9a2', 0, 0.12, az);
+    b.add(GEO.cyl(0.35, 0.4, 0.5, 8), '#e9c98a', 0, 0.5, az);
+    for (const a of [0, 1.6, 3.2, 4.8]) b.add(GEO.cyl(0.14, 0.16, 0.45, 6), '#e9c98a', Math.cos(a) * 0.6, 0.45, az + Math.sin(a) * 0.5);
+    b.add(GEO.cone(0.1, 0.25, 4), '#ff5a3c', 0, 0.9, az);
+    box(0, az, 1.0, 1.0);
+  } else if (th === 'ryokan') {
+    // 석등, 분재, 대나무 울타리, 돌 정원
+    for (const x of [-3.0, 3.4]) {
+      b.add(GEO.box(0.5, 0.25, 0.5), '#9a9a8a', x, 0.125, fw);
+      b.add(GEO.cyl(0.08, 0.1, 0.5, 6), '#9a9a8a', x, 0.5, fw);
+      b.add(GEO.box(0.55, 0.08, 0.55), '#8a8a7a', x, 1.1, fw);
+      glow.add(GEO.box(0.34, 0.3, 0.34), '#ffcf7a', x, 0.9, fw);
+      b.add(GEO.cone(0.45, 0.35, 4), '#8a8a7a', x, 1.32, fw, 0, Math.PI / 4, 0);
+      box(x, fw, 0.3, 0.3);
+    }
+    for (const x of [-4.8, 5.2]) {
+      b.add(GEO.rbox(0.8, 0.45, 0.5, 0.06), '#5a3a2a', x, 0.22, fw);
+      b.add(GEO.cyl(0.25, 0.2, 0.18, 10), '#3a4a5a', x, 0.54, fw);
+      b.add(GEO.cyl(0.04, 0.06, 0.4, 5), '#6a4a2a', x, 0.8, fw, 0, 0, 0.3);
+      b.add(GEO.sph(0.3, 8, 6), '#3f7e3a', x - 0.12, 1.02, fw, 0, 0, 0, 1.3, 0.6, 1);
+      b.add(GEO.sph(0.22, 8, 6), '#4f8e3a', x + 0.18, 1.1, fw, 0, 0, 0, 1.2, 0.6, 1);
+      box(x, fw, 0.42, 0.28);
+    }
+    for (let x = x0 + 0.3; x < -1.6; x += 0.22) b.add(GEO.cyl(0.05, 0.05, 1.3, 5), '#8fbf5a', x, 0.65, z1 - 0.12);
+    for (let x = 1.6; x < x1 - 0.2; x += 0.22) b.add(GEO.cyl(0.05, 0.05, 1.3, 5), '#8fbf5a', x, 0.65, z1 - 0.12);
+    const az = zb + 1.8;
+    b.add(GEO.rbox(2.2, 0.06, 1.2, 0.3), '#e8e2d0', 0, 0.03, az);
+    for (const [x, z, s] of [[-0.5, -0.1, 0.3], [0.4, 0.2, 0.22], [0.75, -0.3, 0.15]]) b.add(new THREE.IcosahedronGeometry(s, 0), '#7a7a70', x, s * 0.6, az + z);
+    for (let i = 0; i < 5; i++) b.add(GEO.torus(0.35 + i * 0.12, 0.012, 3, 24, Math.PI), '#c9c2ae', -0.5, 0.065, az - 0.1, -Math.PI / 2, 0, 0);
+    box(0, az, 1.1, 0.6);
+  } else if (th === 'space') {
+    // 우주인 동상, 홀로 단말기, 식물 돔, 화물 상자
+    const ax = -3.2;
+    b.add(GEO.cyl(0.35, 0.4, 0.3, 10), '#5a6488', ax, 0.15, fw);
+    b.add(GEO.cap(0.24, 0.3, 8), '#e8ecf5', ax, 0.75, fw);
+    b.add(GEO.sph(0.24, 10, 8), '#e8ecf5', ax, 1.22, fw);
+    glow.add(GEO.sph(0.16, 8, 6), '#3de0ff', ax, 1.23, fw + 0.12, 0, 0, 0, 1.2, 0.8, 0.5);
+    box(ax, fw, 0.4, 0.4);
+    b.add(GEO.rbox(0.6, 1.0, 0.4, 0.06), '#3a4466', 3.2, 0.5, fw);
+    glow.add(GEO.box(0.5, 0.35, 0.02), '#3de0ff', 3.2, 0.8, fw + 0.21);
+    glow.add(GEO.cone(0.3, 0.6, 12), '#ff3fa4', 3.2, 1.45, fw, Math.PI, 0, 0);
+    box(3.2, fw, 0.32, 0.22);
+    for (const x of [-4.9, 5.0]) {
+      b.add(GEO.cyl(0.4, 0.45, 0.2, 12), '#5a6488', x, 0.1, fw);
+      b.add(GEO.sph(0.35, 10, 8), '#5fcf6a', x, 0.45, fw, 0, 0, 0, 1, 0.8, 1);
+      const dome = new THREE.SphereGeometry(0.42, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+      glow.add(dome, '#8fd8ff', x, 0.2, fw, 0, 0, 0, 1, 1, 1);
+      box(x, fw, 0.45, 0.45);
+    }
+    const az = zb + 1.75;
+    b.add(GEO.cyl(0.7, 0.8, 0.2, 16), '#3a4466', 0, 0.1, az);
+    glow.add(GEO.sph(0.4, 12, 10), '#ff8fb8', 0, 1.0, az);
+    glow.add(GEO.torus(0.62, 0.03, 4, 32), '#3de0ff', 0, 1.0, az, 1.2, 0, 0);
+    box(0, az, 0.8, 0.8);
+  }
+  void L1;
+  void R1;
+  void m;
+  const mesh = b.mesh();
+  const glowMesh = glow.parts.length ? glow.mesh(matGlow, false) : null;
+  return { mesh, glowMesh, obs };
+}
+
+// 벨트 안쪽 섬 장식 (식당 테마별 대표 소품)
+export function islandDeco(bl, themeId, theme) {
+  const d = new Build();
+  const inner = bl.r - 0.5;
+  const L = bl.len;
+  const top = -L / 2 + 0.25;
+  const bot = L / 2 - 0.25;
+  d.add(GEO.rbox(inner * 2 - 0.1, 0.5, L + inner * 1.2, 0.5), themeId === 'space' ? '#3a4466' : themeId === 'mall' ? '#d8d2c6' : '#6a4a3a', 0, 0.25, 0);
+  if (themeId === 'alley') {
+    d.add(GEO.cyl(0.1, 0.1, 0.5, 8), '#ffffff', -0.2, 0.75, top);
+    d.add(GEO.cyl(0.1, 0.1, 0.5, 8), '#6fae4a', 0.2, 0.75, top);
+    d.add(GEO.cyl(0.25, 0.2, 0.3, 10), '#e8e0d0', 0, 0.65, bot);
+    d.add(GEO.sph(0.32, 10, 8), '#ff8fb8', 0, 0.98, bot);
+    d.add(GEO.cyl(0.03, 0.03, 0.9, 5), '#3a2a22', 0, 0.95, 0);
+    d.add(GEO.sph(0.2, 10, 8), theme.lantern, 0, 1.45, 0, 0, 0, 0, 1, 1.25, 1);
+  } else if (themeId === 'mall') {
+    d.add(GEO.cyl(0.25, 0.2, 0.3, 10), '#ffffff', 0, 0.65, top);
+    d.add(GEO.sph(0.35, 10, 8), '#ff8fb8', 0, 1.0, top);
+    d.add(GEO.cyl(0.25, 0.2, 0.3, 10), '#ffffff', 0, 0.65, bot);
+    d.add(GEO.sph(0.35, 10, 8), '#ffd23f', 0, 1.0, bot);
+    d.add(GEO.rbox(0.9, 0.5, 0.1, 0.08), '#58c7b4', 0, 1.1, 0);
+  } else if (themeId === 'beach') {
+    d.add(GEO.cyl(0.06, 0.08, 1.2, 6), '#a0764a', 0, 1.1, 0);
+    for (let i = 0; i < 5; i++) d.add(GEO.box(0.8, 0.04, 0.22), '#3faa4a', Math.cos(i * 1.26) * 0.3, 1.7, Math.sin(i * 1.26) * 0.3, 0, -i * 1.26, -0.4);
+    d.add(GEO.sph(0.18, 8, 6), '#ffb0c8', 0, 0.6, top, 0, 0, 0, 1.3, 0.5, 1);
+    d.add(GEO.cone(0.16, 0.3, 6), '#fff0d0', 0, 0.65, bot);
+  } else if (themeId === 'ryokan') {
+    d.add(GEO.cyl(0.3, 0.3, 0.06, 14), '#3a6a8a', 0, 0.53, top + 0.3);
+    d.add(GEO.cyl(0.04, 0.06, 0.4, 5), '#6a4a2a', 0, 0.7, bot, 0, 0, 0.3);
+    d.add(GEO.sph(0.28, 8, 6), '#3f7e3a', -0.1, 0.95, bot, 0, 0, 0, 1.3, 0.6, 1);
+    d.add(GEO.box(0.3, 0.2, 0.3), '#9a9a8a', 0, 0.6, 0);
+    d.add(GEO.cone(0.28, 0.25, 4), '#8a8a7a', 0, 0.85, 0, 0, Math.PI / 4, 0);
+  } else {
+    d.add(GEO.cyl(0.2, 0.25, 0.2, 10), '#5a6488', 0, 0.6, 0);
+    d.add(GEO.sph(0.26, 10, 8), '#ff8fb8', 0, 1.05, 0);
+    d.add(GEO.torus(0.4, 0.025, 4, 28), '#3de0ff', 0, 1.05, 0, 1.2, 0, 0);
+    d.add(GEO.sph(0.2, 8, 6), '#5fcf6a', 0, 0.7, top);
+    d.add(GEO.sph(0.2, 8, 6), '#5fcf6a', 0, 0.7, bot);
+  }
+  return d.mesh();
 }

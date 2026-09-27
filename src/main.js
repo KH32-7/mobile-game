@@ -7,7 +7,7 @@ import { loadProfile, writeProfile, newRun, today, wipe } from './save.js';
 import { Game } from './game.js';
 import { Meta } from './meta.js';
 import { UI } from './ui.js';
-import { CFG, STAGES, UPGRADES, HATS, APRONS, SKINS, MENUS } from './config.js';
+import { CFG, STAGES, UPGRADES, HATS, APRONS, SKINS, MENUS, PERKS } from './config.js';
 import { updatePops } from './fx.js';
 import { fmt } from './world.js';
 
@@ -67,7 +67,10 @@ const app = {
     this.p.settings[k] = v;
     if (k === 'sfx') audio.setSfx(v);
     if (k === 'bgm') audio.setBgm(v);
-    if (k === 'shadows') setShadows(v);
+    if (k === 'shadows') {
+      setShadows(v);
+      this.sessionLowQ = false;
+    }
     this.ui.setMuteIcon(this.p.settings.sfx || this.p.settings.bgm);
     this.save();
   },
@@ -79,9 +82,61 @@ const app = {
     return Math.max(10, Math.round(base));
   },
 
+  perkCost(k) {
+    return k.base + k.step * (this.p.perks[k.id] || 0);
+  },
+  perkAffordable() {
+    return PERKS.some((k) => (this.p.perks[k.id] || 0) < k.max && this.p.pearls >= this.perkCost(k));
+  },
+  buyPerk(id) {
+    const k = PERKS.find((x) => x.id === id);
+    const lvl = this.p.perks[id] || 0;
+    if (!k || lvl >= k.max || this.p.pearls < this.perkCost(k)) {
+      audio.play('error');
+      return false;
+    }
+    this.p.pearls -= this.perkCost(k);
+    this.p.perks[id] = lvl + 1;
+    this.game.applyUpgrades();
+    audio.play('unlock');
+    this.ui.toast(`${k.name} Lv.${lvl + 1}!`, 'good');
+    this.save();
+    return true;
+  },
+  // 병목을 보고 추천 업그레이드 고르기
+  recommendUpgrade() {
+    const g = this.game;
+    const B = g.bneck || {};
+    const cands = [];
+    if ((B.rack || 0) > 8) cands.push('plates');
+    if ((B.full || 0) > 8) cands.push('cap');
+    if ((B.cook || 0) > 8) cands.push('cook');
+    if ((B.wait || 0) > 8) cands.push('belt');
+    cands.push('speed', 'cap');
+    if (g.staff.length) cands.push('sspeed');
+    for (const id of cands) {
+      const u = UPGRADES.find((x) => x.id === id);
+      if ((g.run.upg[id] || 0) < u.max && (!u.needStaff || g.staff.length)) return id;
+    }
+    return null;
+  },
+  startSeason() {
+    const p = this.p;
+    this.ui.curtain(() => {
+      p.season = (p.season || 1) + 1;
+      p.stage = 0;
+      p.run = newRun();
+      p.finished = false;
+      p.pearls += 100;
+      this.game.loadStage();
+      this.save();
+      setTimeout(() => this.ui.banner(`${p.season}시즌 시작!`, `모든 수익 x${(1 + (p.season - 1) * 0.5).toFixed(1)}`, null), 700);
+    }, `${(p.season || 1) + 1}시즌`);
+  },
+
   upgCost(u) {
     const lvl = this.p.run.upg[u.id] || 0;
-    return Math.round(u.base * Math.pow(u.growth, lvl) * STAGES[this.p.stage].priceMul);
+    return Math.round(u.base * Math.pow(u.growth, lvl) * STAGES[this.p.stage].priceMul * (1 + ((this.p.season || 1) - 1) * 0.5));
   },
 
   buyUpgrade(id) {
@@ -220,7 +275,7 @@ const app = {
   checkOffline(since) {
     const sec = (Date.now() - since) / 1000;
     if (!(sec >= CFG.offline.minSec)) return;
-    const capped = Math.min(sec, CFG.offline.capHours * 3600);
+    const capped = Math.min(sec, CFG.offline.capHours * 3600 + (this.p.perks.offline || 0) * 1800);
     const rate = this.game.idleRate();
     // 자리 비운 보상은 다음 해금 1개 남짓으로 상한 (진행 붕괴 방지)
     const pad = this.game.pads[0];
@@ -258,12 +313,43 @@ const app = {
       this.save();
     }
   },
+  // 생산 루프에서 지금 할 다음 행동 (상자 -> 조리대 -> 완성 접시 -> 벨트)
+  loopTarget() {
+    const g = this.game;
+    const c = g.chef;
+    const P = (o) => o && { x: o.x, z: o.z };
+    if (c.stack.some((i) => i.k === 'dish')) {
+      const b = g.belts.find((x) => x.built && x.free() > 0);
+      if (b) return P(b.feed);
+    }
+    const ing = c.stack.find((i) => i.k === 'ing');
+    if (ing) return P(Object.values(g.stations).find((x) => x.built && x.ing === ing.id)?.padIn);
+    const st = Object.values(g.stations).find((x) => x.built && x.out > 0);
+    if (st) return P(st.padOut);
+    const cook = Object.values(g.stations).find((x) => x.built && x.inp > 0);
+    if (cook) return P(cook.padOut);
+    const cr = Object.values(g.stations).find((x) => x.built && x.crateN > 0);
+    return cr ? P(cr.crate.pad) : null;
+  },
+  tutState() {
+    const g = this.game;
+    const t = this.p.tut;
+    const money = g.seats.find((x) => x.money > 0);
+    const eating = g.seats.find((x) => x.cust && (x.cust.state === 'eat' || x.cust.state === 'fetch'));
+    const pad = g.pads[0];
+    const short = pad ? pad.u.cost - pad.paid - Math.floor(g.run.money) : 0;
+    const onBelt = new Set();
+    for (const b of g.belts) for (const sl of b.slots) if (sl.item && !sl.item.dried) onBelt.add(sl.item.m);
+    const waiting = g.seats.find((x) => x.cust && x.cust.state === 'wait' && onBelt.has(x.cust.orders[x.cust.oi]));
+    return { t, money, eating, pad, short, waiting };
+  },
   tutTarget() {
     const t = this.p.tut;
     const g = this.game;
     if (t < 6 && g.done.size >= 2) this.p.tut = 6;
     if (this.p.tut >= 6 || g.p.stage > 0) return this.hintTarget();
     const st = Object.values(g.stations).find((s) => s.built);
+    const S = this.tutState();
     switch (t) {
       case 0:
         return st && { x: st.crate.pad.x, z: st.crate.pad.z };
@@ -276,18 +362,14 @@ const app = {
       case 3:
         if (!g.chef.stack.some((i) => i.k === 'dish')) return st && { x: st.padOut.x, z: st.padOut.z };
         return { x: g.belts[0].feed.x, z: g.belts[0].feed.z };
-      case 4: {
-        const s = g.seats.find((x) => x.money > 0) || g.seats.find((x) => x.cust);
-        return s ? { x: s.zone.x, z: s.zone.z } : null;
-      }
-      case 5: {
-        const pad = g.pads[0];
-        if (pad && g.run.money + pad.paid < pad.u.cost) {
-          const s = g.seats.find((x) => x.money > 0);
-          if (s) return { x: s.zone.x, z: s.zone.z };
-        }
-        return pad ? { x: pad.x, z: pad.z } : null;
-      }
+      case 4:
+        if (S.money) return { x: S.money.zone.x, z: S.money.zone.z };
+        if (S.eating) return { x: S.eating.zone.x, z: S.eating.zone.z };
+        if (S.waiting) return { x: S.waiting.zone.x, z: S.waiting.zone.z };
+        return this.loopTarget();
+      case 5:
+        if (S.short > 0) return S.money ? { x: S.money.zone.x, z: S.money.zone.z } : this.loopTarget();
+        return S.pad ? { x: S.pad.x, z: S.pad.z } : null;
     }
     return null;
   },
@@ -295,16 +377,25 @@ const app = {
     const t = this.p.tut;
     const g = this.game;
     if (t >= 6 || g.p.stage > 0) return null;
+    const S = this.tutState();
+    if (t === 4) {
+      if (S.money) return '손님이 두고 간 돈을 밟아서 챙겨요';
+      if (S.eating) return '손님이 먹는 중이에요! 다 먹으면 돈을 두고 가요';
+      if (S.waiting) return '손님이 초밥을 집어 갈 거예요. 자리 옆에서 기다려요';
+      return '초밥을 더 만들어 벨트에 올려요';
+    }
+    if (t === 5) {
+      if (S.short > 0 && S.money) return '손님 자리의 돈을 챙겨요';
+      if (S.short > 0) return `초밥을 한 접시 더 팔아 ${S.short}원을 모아요`;
+      return '초록 발판에 서 있으면 새 좌석이 열려요';
+    }
     return [
-      '드래그해서 이동! 부두의 생선 상자를 밟아요',
+      '드래그해서 이동! 노란 생선 상자 발판을 밟아요',
       '조리대 파란 발판에 재료를 넣어요',
-      '완성된 초밥을 노란 발판에서 챙겨요',
-      '벨트 투입구에 올려요! 손님 주문을 봐요',
-      '손님이 두고 간 돈을 밟아서 챙겨요',
-      g.pads[0] && g.run.money + g.pads[0].paid < g.pads[0].u.cost ? '돈을 더 모아 초록 발판에 서 있어요' : '초록 발판에 서 있으면 새 좌석이 열려요',
+      '완성된 초밥을 보라 발판에서 챙겨요',
+      '초록 투입구 발판에서 벨트에 올려요',
     ][t];
   },
-  // 튜토리얼 이후 병목 안내
   // 튜토리얼 이후: 병목이나 멈춰 있을 때 다음 할 일을 화살표로 안내
   hintTarget() {
     const g = this.game;
@@ -461,7 +552,17 @@ function loop(now) {
     updateCamera(dtRaw, L.belts[0].cx + Math.sin(titleT * 0.25) * 2.5, L.topZ + 1 + Math.cos(titleT * 0.2) * 2);
   } else {
     const b = g.lay.bounds;
-    updateCamera(dtRaw, Math.max(b.x0 + 3.2, Math.min(b.x1 - 3.2, g.chef.x)), Math.max(b.z0 + 5.6, Math.min(b.z1 - 3.5, g.chef.z - 0.4)));
+    const cut = g.camCut;
+    if (cut) {
+      // 해금 카메라 컷: 새 시설로 이동 + 줌인, 잠깐 입력 잠금
+      input.locked = true; // 이동만 잠깐 멈춤 (터치 추적은 유지)
+      gfx.zoom += (0.9 - gfx.zoom) * Math.min(1, dtRaw * 8);
+      updateCamera(dtRaw, cut.x, cut.z - 0.3, false, 9);
+    } else {
+      input.locked = false;
+      gfx.zoom += (1 - gfx.zoom) * Math.min(1, dtRaw * 5);
+      updateCamera(dtRaw, Math.max(b.x0 + 3.2, Math.min(b.x1 - 3.2, g.chef.x)), Math.max(b.z0 + 5.6, Math.min(b.z1 - 3.5, g.chef.z - 0.4)), false, g.lastCutEnd && g.time - g.lastCutEnd < 0.8 ? 8 : 6);
+    }
   }
   app.ui.updateHud(dtRaw);
   app.ui.updateWorld();
@@ -512,7 +613,9 @@ function autoQuality() {
     return;
   }
   if (aq.step === 0 && app.p.settings.shadows && !app.p.settings.qLocked) {
-    app.setSetting('shadows', false);
+    // 세션 한정: 저장된 설정은 바꾸지 않음
+    setShadows(false);
+    app.sessionLowQ = true;
     app.ui.toast('기기 성능에 맞춰 그림자를 간단하게 바꿨어요 (설정에서 변경 가능)');
     aq.step = 1;
   } else if (gfx.renderer.getPixelRatio() > 1) {

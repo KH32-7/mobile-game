@@ -106,6 +106,7 @@ export function reset() {
 }
 
 export function readMove() {
+  if (input.locked) return { dx: 0, dy: 0 };
   let dx = input.active ? input.dx * input.mag : 0;
   let dy = input.active ? input.dy * input.mag : 0;
   const k = input.keys;

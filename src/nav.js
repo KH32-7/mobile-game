@@ -119,12 +119,16 @@ export class Nav {
     const done = new Uint8Array(n + 2);
     const nb = (i) => {
       if (i === S) {
-        const out = [];
-        for (let j = 0; j < n; j++) {
-          const q = this.nodes[j];
-          if (this.segClear(ax, az, q.x, q.z, 0.28)) out.push([j, Math.hypot(ax - q.x, az - q.z)]);
+        // 시작점이 장애물 여유 폭 안이면 여유를 줄여서 다시 시도
+        for (const pad of [0.28, 0.05]) {
+          const out = [];
+          for (let j = 0; j < n; j++) {
+            const q = this.nodes[j];
+            if (this.segClear(ax, az, q.x, q.z, pad)) out.push([j, Math.hypot(ax - q.x, az - q.z)]);
+          }
+          if (out.length) return out;
         }
-        return out;
+        return [];
       }
       const p = this.nodes[i];
       const out = this.edges[i].slice();

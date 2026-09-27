@@ -385,6 +385,8 @@ export const SVG = {
   gear: '<svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8.5 5l-2 .4-.6 1.5 1.2 1.7-1.8 1.8-1.7-1.2-1.5.6-.4 2h-2.6l-.4-2-1.5-.6-1.7 1.2-1.8-1.8 1.2-1.7-.6-1.5-2-.4v-2.6l2-.4.6-1.5-1.2-1.7 1.8-1.8 1.7 1.2 1.5-.6.4-2h2.6l.4 2 1.5.6 1.7-1.2 1.8 1.8-1.2 1.7.6 1.5 2 .4z" fill="currentColor"/></svg>',
   arrow: '<svg viewBox="0 0 24 24"><path d="M12 2l8 10h-5v10H9V12H4z" fill="#ffe14d" stroke="#8a5a00" stroke-width="1.6" stroke-linejoin="round"/></svg>',
   hand: '<svg viewBox="0 0 48 48"><path d="M18 6a3 3 0 0 1 6 0v16l2-.5V14a3 3 0 0 1 6 0v9l2 .3V17a3 3 0 0 1 6 0v14q0 11-10 13h-5q-6 0-10-6l-7-10a3 3 0 0 1 4.5-4L18 29z" fill="#fff" stroke="#333" stroke-width="2.2" stroke-linejoin="round"/></svg>',
+  menu: '<svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="2.6" rx="1.3" fill="currentColor"/><rect x="4" y="11" width="16" height="2.6" rx="1.3" fill="currentColor"/><rect x="4" y="16" width="16" height="2.6" rx="1.3" fill="currentColor"/></svg>',
+  up2: '<svg viewBox="0 0 24 24"><path d="M12 3l7 7h-4v5H9v-5H5z" fill="#35c46a" stroke="#167a3a" stroke-width="1.6" stroke-linejoin="round"/><rect x="6" y="17" width="12" height="3.5" rx="1.5" fill="#ffc83d" stroke="#b9770e" stroke-width="1.4"/></svg>',
   lock: '<svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2.5" fill="#8a8f9e"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="#8a8f9e" stroke-width="2.4" fill="none"/></svg>',
   up: '<svg viewBox="0 0 24 24"><path d="M12 4l7 8h-4v8H9v-8H5z" fill="#fff"/></svg>',
   plate: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="13" rx="9" ry="5" fill="#fff" stroke="#667" stroke-width="1.6"/><ellipse cx="12" cy="12.5" rx="5" ry="2.5" fill="#e8eef5"/></svg>',

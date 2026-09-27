@@ -249,7 +249,12 @@ async function main() {
     assert(await page.g(() => __game.game.done.size >= 1), `해금 발판으로 새 시설 해금 (${pad.id})`);
 
     // 메뉴 패널들
-    for (const [sel, name] of [['#b-mission', '09-missions'], ['#b-attend', '10-attend'], ['#b-dex', '11-dex'], ['#b-cos', '12-costume'], ['#b-ach', '13-ach'], ['#b-pause', '14-pause']]) {
+    for (const [sel, name] of [['[data-m="mission"]', '09-missions'], ['[data-m="attend"]', '10-attend'], ['[data-m="dex"]', '11-dex'], ['[data-m="cos"]', '12-costume'], ['[data-m="ach"]', '13-ach'], ['[data-m="perk"]', '13b-perks'], ['#b-pause', '14-pause']]) {
+      if (sel !== '#b-pause') {
+        await page.tapSel('#b-menu');
+        await page.waitForTimeout(300);
+        if (name === '09-missions') await shot(page, '08b-menu');
+      }
       await page.tapSel(sel);
       await page.waitForTimeout(300);
       await shot(page, name);
@@ -389,6 +394,7 @@ async function main() {
         [() => __game.ui.openMissions(), '.modal .claim', 'missions'],
         [() => __game.ui.openAttend(), '#a-claim', 'attend'],
         [() => __game.ui.openPause(), '#p-wipe', 'pause'],
+        [() => __game.ui.openPerks(), '.modal .buy', 'perks'],
         [() => __game.ui.openOffline(1234, 5400, true, () => {}), '#o-1x', 'offline'],
       ]) {
         await p3.evaluate(open);

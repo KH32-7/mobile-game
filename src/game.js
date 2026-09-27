@@ -1,11 +1,14 @@
 // 게임 시뮬레이션: 셰프, 적재, 조리, 벨트, 손님, 직원, 해금
 import { THREE, gfx, Instancer, GEO, Build, col, matVC, updateCamera, canvasTex } from './gfx.js';
-import { CFG, STAGES, MENUS, INGS, UPGRADES, MENU_ORDER, HATS, APRONS } from './config.js';
+import { CFG, STAGES, MENUS, INGS, UPGRADES, MENU_ORDER, HATS, APRONS, PERKS } from './config.js';
 import { buildLayout, seatInfo, COUNTER_OUT, STOOL } from './layout.js';
 import { Belt, buildBeltMesh, animateBeltTex, BELT_H } from './belt.js';
-import { buildEnvironment, facilityMeshes, stoolMesh, makeActionPad, UnlockPad, themeFor, fmt } from './world.js';
+import { buildEnvironment, facilityMeshes, UnlockPad, themeFor, fmt, buildDecor, islandDeco } from './world.js';
 import { plateGeo, toppingGeo, ingGeo, cashGeo, coinGeo, customerParts, makeChar, animChar, setHat, arrowMesh, ITEM_H } from './models.js';
 import { Nav } from './nav.js';
+import { PadSystem } from './pads.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { matGlow } from './gfx.js';
 import { audio } from './audio.js';
 import { burst, ring, puff, updateParticles, clearParticles, popText, updatePops, clearPops } from './fx.js';
 import { readMove } from './input.js';
@@ -18,6 +21,7 @@ const DRIED = new THREE.Color(0.62, 0.56, 0.46);
 const DIRTY = col('#d6cfc0');
 const DRIED_PLATE = col('#9a9a9a');
 const VIP_SHIRT = '#4a2a7a';
+const DARK_PANTS = col('#3a3f55');
 
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
@@ -55,6 +59,12 @@ export class Game {
     gfx.scene.add(this.chefMesh);
     this.arrow = arrowMesh();
     gfx.scene.add(this.arrow);
+    this.padSys = new PadSystem(gfx.scene);
+    this.padBorn = new Map();
+    this.statics = [];
+    this.staticMesh = null;
+    this.camCut = null;
+    this.gimmick = { t: 0, on: 0 };
     this.flights = [];
     this.customers = [];
     this.staff = [];
@@ -87,6 +97,11 @@ export class Game {
     I.add('c_face', cp.face, 60, { shadow: false });
     I.add('c_crown', cp.crown, 8);
     I.add('c_legs', cp.legs, 60);
+    // 직원 전용 파트 (모자, 팔) 와 의자
+    I.add('c_arm', new Build().add(GEO.cap(0.055, 0.2, 6), '#ffffff', 0, -0.12, 0).add(GEO.sph(0.06, 8, 6), '#ffd9b8', 0, -0.27, 0).geometry(), 24);
+    I.add('st_cap', new Build().add(new THREE.SphereGeometry(0.215, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.45), '#ffffff', 0, 0.03, 0).add(GEO.cyl(0.13, 0.13, 0.02, 12), '#ffffff', 0, 0.08, 0.17, 0.25, 0, 0, 1, 1, 0.8).geometry(), 12);
+    I.add('stool_seat', new Build().add(GEO.cyl(0.24, 0.24, 0.1, 14), '#ffffff', 0, 0.52, 0).geometry(), 48);
+    I.add('stool_leg', new Build().add(GEO.cyl(0.05, 0.07, 0.5, 8), '#6a6f80', 0, 0.25, 0).add(GEO.cyl(0.2, 0.22, 0.04, 12), '#6a6f80', 0, 0.02, 0).geometry(), 48);
     I.add('spark', new Build().add(GEO.box(1, 0.35, 0.7), '#ffffff').geometry(), 300, { shadow: false });
     I.add('puff', new Build().add(GEO.sph(0.5, 8, 6), '#ffffff').geometry(), 200, { shadow: false });
     // 저사양 모드용 원형 그림자
@@ -112,20 +127,18 @@ export class Game {
     this.theme = themeFor(stage, p.cos.skin);
     const run = p.run;
     this.run = run;
-    if (this.root) {
-      gfx.scene.remove(this.root);
-      this.root.traverse((o) => {
-        if (o.geometry) o.geometry.dispose();
-      });
-    }
+    if (this.root) this.disposeStage();
     clearParticles();
     clearPops();
     this.hooks.clearWorldUI && this.hooks.clearWorldUI();
     this.flights = [];
     this.customers = [];
-    this.staff.forEach((s) => gfx.scene.remove(s.mesh));
     this.staff = [];
     this.anims = [];
+    this.statics = [];
+    this.padBorn = new Map();
+    this.camCut = null;
+    this.gimmick = { t: 0, on: 0 };
     const root = new THREE.Group();
     this.root = root;
     gfx.scene.add(root);
@@ -138,6 +151,9 @@ export class Game {
     gfx.sun.intensity = theme.sun;
     this.env = buildEnvironment(stage, L, theme);
     root.add(this.env);
+    this.decor = buildDecor(stage, L, theme);
+    root.add(this.decor.mesh);
+    if (this.decor.glowMesh) root.add(this.decor.glowMesh);
     this.fac = facilityMeshes(stage, L, theme);
 
     const done = new Set(run.done);
@@ -180,33 +196,22 @@ export class Game {
         mesh: this.fac.stations[s.menu],
         crateMesh: this.fac.crates[s.menu],
       };
-      if (built) {
-        root.add(this.fac.stations[s.menu], this.fac.crates[s.menu]);
-        this.addActionPad('crate', s.ing, s.crate.pad.x, s.crate.pad.z);
-        this.addActionPad('in', s.ing, s.padIn.x, s.padIn.z, 0.9);
-        this.addActionPad('out', s.menu, s.padOut.x, s.padOut.z, 0.9);
-      }
+      if (built) this.addStatic(this.fac.stations[s.menu], this.fac.crates[s.menu]);
     }
     // 접시 선반 + 설거지대
-    root.add(this.fac.rack);
+    this.addStatic(this.fac.rack);
     this.sink = { ...L.sink, built: has((u) => u.t === 'sink'), q: Math.max(0, run.sinkQ | 0), t: 0 };
-    if (this.sink.built) {
-      root.add(this.fac.sink);
-      this.addActionPad('sink', 'sink', L.sink.pad.x, L.sink.pad.z);
-    }
+    if (this.sink.built) this.addStatic(this.fac.sink);
     this.upgradeBuilt = has((u) => u.t === 'upgrade');
-    if (this.upgradeBuilt) {
-      root.add(this.fac.desk);
-      this.addActionPad('upgrade', 'up', L.upgrade.x, L.upgrade.z, 1.25);
-    }
+    if (this.upgradeBuilt) this.addStatic(this.fac.desk);
     // 벨트별 투입구/수거함
     this.belts.forEach((b, i) => {
       b.feed = L.feeds[i];
       b.trash = L.trashes[i];
       b.trashS = b.nearestS(b.trash.x, b.trash.z);
-      if (b.built) this.addBeltPads(b, i);
+      if (b.built) this.addStatic(this.fac.trash[i]);
     });
-    if (this.lay.lever && this.belts[1]?.built) root.add(this.fac.lever);
+    if (this.lay.lever && this.belts[1]?.built) this.addStatic(this.fac.lever);
 
     // 좌석
     this.seats = [];
@@ -218,7 +223,7 @@ export class Game {
       const sv = run.seats[id] || {};
       const seat = { id, belt, unlocked, cust: null, dirty: Math.max(0, sv.d | 0), money: Math.max(0, +sv.m || 0), stool: null, reserved: false };
       this.placeSeat(seat);
-      if (unlocked) this.addStool(seat);
+      seat.born = -10;
       this.seats.push(seat);
     }
 
@@ -258,12 +263,16 @@ export class Game {
     this.refreshPads(false);
     this.rebuildNav();
     this.rebuildZones();
+    for (const z of this.zones) this.padBorn.set(this.padKey(z), -10);
+    this.rebuildStatic();
     this.spawnT = run.cust === 0 ? CFG.cust.firstDelay : 2;
     this.rushT = run.rushT || 0;
     this.rush = null;
     this.combo = run.combo || 0;
     this.lastComboT = 0;
     updateCamera(0, this.chef.x, this.chef.z - 0.5, true);
+    audio.setStyle(stage.theme);
+    audio.setRush(false);
     this.hooks.stageLoaded && this.hooks.stageLoaded();
   }
 
@@ -289,21 +298,28 @@ export class Game {
     return n;
   }
 
+  perk(id) {
+    return (this.p.perks && this.p.perks[id]) || 0;
+  }
+  seasonMul() {
+    return 1 + ((this.p.season || 1) - 1) * 0.5;
+  }
   applyUpgrades() {
     const u = this.run.upg;
-    this.chefSpeed = CFG.chef.speed + (u.speed || 0) * CFG.chef.speedPerLvl;
+    this.chefSpeed = CFG.chef.speed * (1 + (u.speed || 0) * CFG.chef.speedPerLvl);
     this.cookTime = CFG.station.cookTime * Math.pow(CFG.station.cookPerLvl, u.cook || 0);
     this.beltSpeed = CFG.belt.speed + (u.belt || 0) * CFG.belt.speedPerLvl;
     this.staffSpeed = CFG.staff.speed * (1 + (u.sspeed || 0) * CFG.staff.speedPerLvl);
     this.staffCap = CFG.staff.cap + (u.scap || 0) * CFG.staff.capPerLvl;
   }
   chefCap() {
-    return CFG.chef.cap + (this.run.upg.cap || 0) * CFG.chef.capPerLvl;
+    return CFG.chef.cap + (this.run.upg.cap || 0) * CFG.chef.capPerLvl + this.perk('cap');
   }
 
   buildBeltVisual(b) {
     if (b.group) {
       this.root.remove(b.group);
+      this.statics = this.statics.filter((o) => o !== b.group);
       b.group.traverse((o) => o.geometry && o.geometry.dispose());
     }
     const g = buildBeltMesh(b, this.theme);
@@ -312,36 +328,74 @@ export class Game {
     wrap.position.set(b.cx, 0, cz);
     g.position.set(-b.cx, 0, -cz);
     wrap.add(g);
-    // 안쪽 섬 장식
-    const deco = new Build();
-    const inner = b.r - 0.5;
-    deco.add(GEO.rbox(inner * 2 - 0.1, 0.5, b.len + inner * 1.2, 0.5), '#6a4a3a', 0, 0.25, 0);
-    deco.add(GEO.cyl(0.25, 0.2, 0.3, 10), '#e8e0d0', 0, 0.65, -b.len / 2 + 0.2);
-    deco.add(GEO.sph(0.35, 10, 8), '#4faa5a', 0, 1.0, -b.len / 2 + 0.2);
-    deco.add(GEO.cyl(0.25, 0.2, 0.3, 10), '#e8e0d0', 0, 0.65, b.len / 2 - 0.2);
-    deco.add(GEO.sph(0.32, 10, 8), '#ff8fb8', 0, 0.98, b.len / 2 - 0.2);
-    deco.add(GEO.box(0.1, 0.5, 0.1), '#3a2a22', 0, 0.75, 0);
-    deco.add(GEO.rbox(0.5, 0.36, 0.08, 0.05), '#ffffff', 0, 1.1, 0);
-    const dm = deco.mesh();
-    wrap.add(dm);
+    // 안쪽 섬 장식 (테마별)
+    wrap.add(islandDeco(b, this.stage.theme, this.theme));
     b.group = wrap;
-    this.root.add(wrap);
+    this.addStatic(wrap);
   }
 
-  addBeltPads(b, i) {
-    if (b.padMeshes) b.padMeshes.forEach((m) => this.root.remove(m));
-    const f = makeActionPad('feed', 'feed', b.feed.x, b.feed.z, 1.0);
-    const t = makeActionPad('trash', 'trash', b.trash.x, b.trash.z, 0.95);
-    this.root.add(f, t);
-    this.root.add(this.fac.trash[i]);
-    b.padMeshes = [f, t];
+  // ---------------- 정적 시설 병합 (드로우콜 절약) ----------------
+  addStatic(...objs) {
+    for (const o of objs) {
+      if (!o) continue;
+      if (!o.parent) this.root.add(o);
+      if (!this.statics.includes(o)) this.statics.push(o);
+    }
   }
-
-  addActionPad(type, id, x, z, size = 0.95) {
-    const m = makeActionPad(type, id, x, z, size);
+  rebuildStatic() {
+    const animating = new Set(this.anims.map((a) => a.obj));
+    const geos = [];
+    this.root.updateMatrixWorld(true);
+    for (const o of this.statics) {
+      const anim = animating.has(o);
+      o.traverse((m) => {
+        if (!m.isMesh || m.material !== matVC) return;
+        m.visible = anim;
+        if (!anim) geos.push(m.geometry.clone().applyMatrix4(m.matrixWorld));
+      });
+    }
+    if (this.staticMesh) {
+      this.root.remove(this.staticMesh);
+      this.staticMesh.geometry.dispose();
+      this.staticMesh = null;
+    }
+    if (!geos.length) return;
+    const g = mergeGeometries(geos, false);
+    geos.forEach((x) => x.dispose());
+    const m = new THREE.Mesh(g, matVC);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    this.staticMesh = m;
     this.root.add(m);
-    return m;
   }
+  disposeStage() {
+    gfx.scene.remove(this.root);
+    const seen = new Set();
+    this.root.traverse((o) => {
+      if (o.geometry && !seen.has(o.geometry)) {
+        seen.add(o.geometry);
+        o.geometry.dispose();
+      }
+      const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+      for (const mt of mats) {
+        if (mt === matVC || mt === matGlow || seen.has(mt)) continue;
+        seen.add(mt);
+        if (mt.map && !mt.map.userData.shared) mt.map.dispose();
+        mt.dispose();
+      }
+    });
+    // 풀에 남아 있지 않은 시설 모델(미해금)도 정리
+    if (this.fac) {
+      const all = [...Object.values(this.fac.stations), ...Object.values(this.fac.crates), this.fac.sink, this.fac.rack, this.fac.desk, this.fac.lever, ...this.fac.trash];
+      for (const o of all) if (o && !o.parent) o.traverse((m) => m.geometry && m.geometry.dispose());
+    }
+    for (const p of this.pads || []) p.ui.dispose && p.ui.dispose();
+    this.staticMesh = null;
+  }
+  padKey(z) {
+    return z.type + ':' + Math.round(z.x * 10) + ':' + Math.round(z.z * 10);
+  }
+
 
   placeSeat(seat) {
     const info = seatInfo(seat.id, seat.belt, seat.belt.len);
@@ -352,12 +406,6 @@ export class Game {
     seat.stand = { x: seat.x + out * 0.55, z: seat.z };
   }
 
-  addStool(seat) {
-    if (seat.stool) this.root.remove(seat.stool);
-    seat.stool = stoolMesh(seat.x, seat.z, this.theme);
-    this.root.add(seat.stool);
-    return seat.stool;
-  }
 
   rebuildNav() {
     const L = this.lay;
@@ -375,6 +423,7 @@ export class Game {
       if (b.built) obs.push({ t: 'box', x: L.trashes[i].bin.x, z: L.trashes[i].bin.z, hw: 0.38, hd: 0.38 });
     });
     if (L.lever && this.belts[1]?.built) obs.push({ t: 'box', x: L.lever.model.x, z: L.lever.model.z, hw: 0.28, hd: 0.28 });
+    for (const o of this.decor?.obs || []) obs.push(o);
     if (!this.nav) this.nav = new Nav(L.bounds);
     this.nav.bounds = L.bounds;
     this.nav.setObstacles(obs);
@@ -385,20 +434,21 @@ export class Game {
     const sq = (type, x, z, h, ref) => Z.push({ type, x, z, hw: h, hd: h, ref });
     for (const s of Object.values(this.stations)) {
       if (!s.built) continue;
-      sq('crate', s.crate.pad.x, s.crate.pad.z, 0.5, s);
-      sq('in', s.padIn.x, s.padIn.z, 0.45, s);
-      sq('out', s.padOut.x, s.padOut.z, 0.45, s);
+      sq('crate', s.crate.pad.x, s.crate.pad.z, 0.6, s);
+      sq('in', s.padIn.x, s.padIn.z, 0.6, s);
+      sq('out', s.padOut.x, s.padOut.z, 0.6, s);
     }
-    if (this.sink.built) sq('sink', this.sink.pad.x, this.sink.pad.z, 0.5, this.sink);
+    if (this.sink.built) sq('sink', this.sink.pad.x, this.sink.pad.z, 0.6, this.sink);
     for (const b of this.belts) {
       if (!b.built) continue;
-      sq('feed', b.feed.x, b.feed.z, 0.52, b);
-      sq('trash', b.trash.x, b.trash.z, 0.5, b);
+      sq('feed', b.feed.x, b.feed.z, 0.62, b);
+      sq('trash', b.trash.x, b.trash.z, 0.6, b);
     }
     if (this.upgradeBuilt) sq('upgrade', this.lay.upgrade.x, this.lay.upgrade.z, 0.62, null);
     for (const seat of this.seats) if (seat.unlocked) Z.push({ type: 'seat', x: seat.zone.x, z: seat.zone.z, hw: 0.62, hd: 0.5, ref: seat });
     for (const pad of this.pads) Z.push({ type: 'unlock', x: pad.x, z: pad.z, hw: pad.ui.size * 0.45, hd: pad.ui.size * 0.45, ref: pad });
     this.zones = Z;
+    for (const z of Z) if (!this.padBorn.has(this.padKey(z))) this.padBorn.set(this.padKey(z), this.time);
   }
 
   // 다음 해금 발판 (목록 순서대로 최대 2개 노출)
@@ -419,7 +469,7 @@ export class Game {
       const kind = u.t === 'next' || u.t === 'final' ? 'next' : 'unlock';
       const ui = new UnlockPad(label, icon, u.cost, pos.x, pos.z, kind);
       const pad = { u, x: pos.x, z: pos.z, ui, paid: Math.min(u.cost, this.run.paid[u.id] || 0), payT: 0, coinT: 0 };
-      ui.draw(pad.paid / u.cost, this.run.money > 0);
+      ui.draw(pad.paid, this.run.money > 0);
       this.root.add(ui.mesh);
       this.pads.push(pad);
       if (animate) this.popIn(ui.mesh, 0.25, ui.size);
@@ -500,8 +550,8 @@ export class Game {
           const s = this.seats.find((x) => x.id === id);
           if (!s) continue;
           s.unlocked = true;
+          s.born = this.time;
           this.rack.n += CFG.platesPerSeat;
-          pops.push(this.addStool(s));
         }
         break;
       case 'station': {
@@ -510,32 +560,30 @@ export class Game {
         // 새 조리대는 재료 몇 개를 채운 상태로 시작 (바로 굴러가는 손맛)
         s.inp = 4;
         s.out = 0;
-        this.root.add(s.mesh, s.crateMesh);
+        this.addStatic(s.mesh, s.crateMesh);
         pops.push(s.mesh, s.crateMesh);
-        pops.push(this.addActionPad('crate', s.ing, s.crate.pad.x, s.crate.pad.z));
-        pops.push(this.addActionPad('in', s.ing, s.padIn.x, s.padIn.z, 0.9));
-        pops.push(this.addActionPad('out', s.menu, s.padOut.x, s.padOut.z, 0.9));
         this.hooks.discover && this.hooks.discover(u.menu);
         at = { x: s.x, z: s.z };
         break;
       }
       case 'sink':
         this.sink.built = true;
-        this.root.add(this.fac.sink);
-        pops.push(this.fac.sink, this.addActionPad('sink', 'sink', L.sink.pad.x, L.sink.pad.z));
+        this.addStatic(this.fac.sink);
+        pops.push(this.fac.sink);
         at = { x: L.sink.x, z: L.sink.z };
         break;
       case 'upgrade':
         this.upgradeBuilt = true;
-        this.root.add(this.fac.desk);
-        pops.push(this.fac.desk, this.addActionPad('upgrade', 'up', L.upgrade.x, L.upgrade.z, 1.25));
+        this.addStatic(this.fac.desk);
+        pops.push(this.fac.desk);
         break;
       case 'staff': {
         const s = this.spawnStaff(u.role, [], true);
         s.x = pad.x;
         s.z = pad.z;
-        pops.push(s.mesh);
+        s.born = this.time;
         this.hooks.stat('staff', 1);
+        at = { x: pad.x, z: pad.z };
         break;
       }
       case 'extend': {
@@ -548,25 +596,22 @@ export class Game {
             pops.push(b.group);
           }
         }
-        for (const s of this.seats) {
-          this.placeSeat(s);
-          if (s.unlocked && s.stool) s.stool.position.set(s.x, 0, s.z);
-        }
+        for (const s of this.seats) this.placeSeat(s);
+        at = { x: this.belts[0].cx, z: this.belts[0].topZ + this.belts[0].len / 2 };
         break;
       }
       case 'lever': {
         const b = this.belts[1];
         b.built = true;
         this.buildBeltVisual(b);
-        this.addBeltPads(b, 1);
-        this.root.add(this.fac.lever);
-        pops.push(b.group, this.fac.lever, ...b.padMeshes, this.fac.trash[1]);
+        this.addStatic(this.fac.lever, this.fac.trash[1]);
+        pops.push(b.group, this.fac.lever, this.fac.trash[1]);
         for (const id of u.seats || []) {
           const s = this.seats.find((x) => x.id === id);
           if (s) {
             s.unlocked = true;
+            s.born = this.time;
             this.rack.n += CFG.platesPerSeat;
-            pops.push(this.addStool(s));
           }
         }
         at = { x: b.cx, z: b.topZ + b.len / 2 };
@@ -576,10 +621,14 @@ export class Game {
       case 'final':
         break;
     }
-    pops.forEach((o, i) => this.popIn(o, i * 0.06));
-    burst(at.x, 0.6, at.z, 46, { up: 7, speed: 5 });
-    ring(at.x, at.z, 18, '#ffffff', 0.6, 4);
+    pops.forEach((o, i) => this.popIn(o, 0.3 + i * 0.06));
+    this.rebuildStatic();
+    // 새 시설로 카메라 컷 (0.35초 이동 + 줌인, 0.6초 머문 뒤 복귀)
+    if (u.t !== 'next' && u.t !== 'final') this.camCut = { x: at.x, z: at.z, t: 0, dur: 1.3 };
+    this.unlockFx = { x: at.x, z: at.z, t: 0.3 };
+    burst(pad.x, 0.4, pad.z, 20, { up: 5, speed: 3 });
     gfx.shake = 0.55;
+    audio.duck(0.9);
     audio.play('unlock');
     this.hooks.haptic(40);
     this.hooks.stat('unlocks', 1);
@@ -600,8 +649,7 @@ export class Game {
   }
 
   spawnStaff(role, stack, pop) {
-    const mesh = makeChar({ body: role === 'runner' ? '#4fb0ff' : '#6ee07a', hat: 'cap', cap: role === 'runner' ? '#2f6fd8' : '#2f9e5a', apron: role === 'runner' ? '#dfefff' : '#e8ffe8', hair: pick(HAIRS) });
-    gfx.scene.add(mesh);
+    const mesh = null;
     const idle = this.lay.idle[role];
     const s = {
       role,
@@ -618,6 +666,10 @@ export class Game {
       moving: false,
       walkT: Math.random() * 3,
       mesh,
+      shirt: col(role === 'runner' ? '#4fb0ff' : '#6ee07a'),
+      capC: col(role === 'runner' ? '#2f6fd8' : '#2f9e5a'),
+      skin: col(pick(SKINS_C)),
+      born: -10,
       path: [],
       goal: null,
       task: null,
@@ -639,6 +691,15 @@ export class Game {
     this.updateCustomers(dt);
     this.updateFlights(dt);
     this.updateRush(dt);
+    this.updateGimmick(dt);
+    // 병목 측정 (업그레이드 추천용): 최근 경향을 천천히 잊음
+    const B = (this.bneck = this.bneck || { rack: 0, full: 0, cook: 0, wait: 0 });
+    const decay = Math.exp(-dt / 40);
+    for (const k in B) B[k] *= decay;
+    if (this.rack.n === 0) B.rack += dt;
+    if (this.chef.stack.length >= this.chefCap()) B.full += dt;
+    if (Object.values(this.stations).some((x) => x.built && x.inp > 0 && x.out === 0)) B.cook += dt * 0.5;
+    if (this.customers.some((c) => c.state === 'wait' && c.wait > 15)) B.wait += dt * 0.5;
     this.updateAnims(dt);
     this.updateGuide(dt);
   }
@@ -656,6 +717,27 @@ export class Game {
     c.x += tx * dt;
     c.z += tz * dt;
     this.nav.collide(c, CFG.chef.radius);
+    // 벽/카운터에 정면으로 막히면 옆으로 미끄러지도록 보조 (정면 충돌에서 멈춰 버리는 문제 방지)
+    const want = Math.hypot(tx, tz) * dt;
+    if (want > 1e-4) {
+      const got = Math.hypot(c.x - oldX, c.z - oldZ);
+      if (got < want * 0.25) {
+        let best = null;
+        for (const sgn of [1, -1]) {
+          const a = sgn * 1.1;
+          const rx = tx * Math.cos(a) - tz * Math.sin(a);
+          const rz = tx * Math.sin(a) + tz * Math.cos(a);
+          const q = { x: oldX + rx * dt * 0.8, z: oldZ + rz * dt * 0.8 };
+          this.nav.collide(q, CFG.chef.radius);
+          const d = Math.hypot(q.x - oldX, q.z - oldZ);
+          if (!best || d > best.d) best = { d, q };
+        }
+        if (best && best.d > got + 1e-4) {
+          c.x = best.q.x;
+          c.z = best.q.z;
+        }
+      }
+    }
     if (moving) {
       const target = Math.atan2(mv.dx, mv.dy);
       let d = target - c.ry;
@@ -725,16 +807,57 @@ export class Game {
       }
       return;
     }
+    // 좌석 돈: 지폐가 한 장씩 빨려 들어감
+    if (a.isChef && z.type === 'seat' && z.ref.money > 0) {
+      a.billT = (a.billT || 0) - dt;
+      let g = 0;
+      while (a.billT <= 0 && z.ref.money > 0 && g++ < 4) {
+        a.billT += CFG.billTick;
+        this.takeBill(z.ref, a);
+      }
+      return;
+    }
     a.xferT -= dt;
     let guard = 0;
-    while (a.xferT <= 0 && guard++ < 3) {
+    while (a.xferT <= 0 && guard++ < 4) {
       const ok = this.transfer(a, z);
-      if (ok) a.xferT += CFG.transfer;
-      else {
+      if (ok) {
+        a.lastXfer = this.time;
+        a.xferT += z.type === 'crate' || z.type === 'feed' || z.type === 'out' ? CFG.fastTransfer : CFG.transfer;
+      } else {
         a.xferT = 0.05;
         break;
       }
     }
+  }
+
+  billUnit() {
+    return 5 * this.stage.priceMul * this.seasonMul();
+  }
+  billCount(seat) {
+    if (seat.money <= 0) return 0;
+    return Math.min(30, Math.max(1, Math.ceil(seat.money / this.billUnit() - 0.001)));
+  }
+  takeBill(seat, a) {
+    const n = this.billCount(seat);
+    if (!seat.collecting) {
+      seat.collecting = true;
+      popText(seat.cx, 1.6, seat.cz, '+' + fmt(seat.money), 'pop-money', 1.0);
+      this.hooks.haptic(15);
+    }
+    // 정수 단위로 나눠 받기 (부동소수 오차로 1원이 모자라는 문제 방지)
+    const take = n <= 1 ? seat.money : Math.max(1, Math.floor(seat.money / n));
+    seat.money = Math.max(0, seat.money - take);
+    if (seat.money < 1) {
+      seat.money = 0;
+      seat.collecting = false;
+      this.hooks.tut && this.hooks.tut('money');
+    }
+    this.addMoney(take);
+    const lay = Math.floor((n - 1) / 3);
+    const it = { k: 'cash' };
+    this.fly(it, { x: seat.cx + (((n - 1) % 3) - 1) * 0.16, y: BELT_H + lay * 0.07, z: seat.cz + 0.22 * (seat.side === 'R' ? 1 : -1) }, () => ({ x: a.x, y: 1.1, z: a.z }), () => audio.play('coin'), null, 0.24, 1.0);
+    a.lastXfer = this.time;
   }
 
   room(a) {
@@ -745,10 +868,11 @@ export class Game {
   stackTopPos(a, out = {}) {
     let h = 0;
     for (const it of a.stack) h += (ITEM_H[it.k] || 0.2) * 1.22;
-    const fx = Math.sin(a.ry) * 0.42;
-    const fz = Math.cos(a.ry) * 0.42;
+    const fwd = a.isChef ? 0.42 : 0.36;
+    const fx = Math.sin(a.ry) * fwd;
+    const fz = Math.cos(a.ry) * fwd;
     out.x = a.x + fx + a.lean.x * h * 0.6;
-    out.y = 0.74 + h;
+    out.y = (a.isChef ? 0.74 : 0.6) + h;
     out.z = a.z + fz + a.lean.z * h * 0.6;
     return out;
   }
@@ -801,7 +925,7 @@ export class Game {
       }
       case 'feed': {
         const idx = this.findTop(a.stack, (it) => it.k === 'dish');
-        if (idx < 0) return false;
+        if (idx < 0) return a.isChef ? this.recoverDish(a, r) : false;
         const b = r;
         // 투입구 앞뒤 구간의 빈 슬롯에 바로 올림 (가까운 순)
         let sl = null;
@@ -834,6 +958,7 @@ export class Game {
             sl.res = false;
             sl.item = { m: it.m, laps: 0, dried: false };
             audio.play('clack');
+            this.checkSet(b, sl);
             if (a.isChef) this.hooks.tut && this.hooks.tut('feed');
           },
           null,
@@ -863,10 +988,6 @@ export class Game {
       }
       case 'seat': {
         const seat = r;
-        if (seat.money > 0 && a.isChef) {
-          this.collectMoney(seat, a);
-          return true;
-        }
         const busy = seat.cust && seat.cust.state !== 'leave';
         if (seat.dirty > 0 && !busy && this.room(a) > 0) {
           seat.dirty--;
@@ -876,6 +997,45 @@ export class Game {
         }
         return false;
       }
+    }
+    return false;
+  }
+
+  // 같은 메뉴 3연속으로 올리면 세트 보너스 (그 접시들은 팁 +30%)
+  checkSet(b, sl) {
+    const n = b.slots.length;
+    const at = (k) => b.slots[(sl.i + k + n) % n].item;
+    const m = sl.item.m;
+    for (const [p, q] of [[-2, -1], [-1, 1], [1, 2]]) {
+      const x = at(p);
+      const y = at(q);
+      if (x && y && x.m === m && y.m === m && !x.dried && !y.dried && !(x.bonus && y.bonus && sl.item.bonus)) {
+        x.bonus = y.bonus = sl.item.bonus = true;
+        const pt = b.point(b.slotS(sl));
+        popText(pt.x, 1.8, pt.z, '3연속 세트!<small>팁 +30%</small>', 'pop-combo', 1.2);
+        burst(pt.x, 1.0, pt.z, 14, { colors: ['#ffd23f', '#ffffff'], up: 4, speed: 2 });
+        audio.play('combo', 4);
+        this.hooks.stat('sets', 1);
+        return;
+      }
+    }
+  }
+
+  // 투입구에 빈손으로 서 있으면 아무도 원하지 않는 신선한 접시를 벨트에서 회수
+  recoverDish(a, b) {
+    if (a.moving || a.zoneT < 0.8 || this.room(a) <= 0) return false;
+    const dem = this.demand();
+    for (const sl of b.slots) {
+      const it = sl.item;
+      if (!it || it.dried || sl.res) continue;
+      if (b.dist(b.slotS(sl), b.feedS) > 0.6) continue;
+      if ((dem[it.m] || 0) >= 0) continue; // 벨트에 이미 수요보다 많을 때만
+      sl.item = null;
+      const p = b.point(b.slotS(sl));
+      const d = { k: 'dish', m: it.m };
+      this.fly(d, { x: p.x, y: BELT_H + 0.05, z: p.z }, () => this.stackTopPos(a), () => this.pushStack(a, d), a);
+      this.warn('recover', '남는 접시를 벨트에서 다시 챙겼어요', p.x, p.z);
+      return true;
     }
     return false;
   }
@@ -934,7 +1094,10 @@ export class Game {
     if (c.zoneT < 0.2) return;
     const u = pad.u;
     if (this.run.money <= 0) {
-      if (pad.paid < u.cost) this.warn('nomoney', '돈이 부족해요. 손님 자리의 돈을 챙겨요', pad.x, pad.z);
+      if (pad.paid < u.cost && (this.p.tut || 0) >= 6) {
+        const seatMoney = this.seats.some((x) => x.money > 0);
+        this.warn('nomoney', seatMoney ? '돈이 부족해요. 손님 자리의 돈을 챙겨요' : '돈이 부족해요. 초밥을 더 팔아 돈을 모아요', pad.x, pad.z);
+      }
       return;
     }
     pad.payT += dt;
@@ -960,7 +1123,7 @@ export class Game {
         return;
       }
     }
-    pad.ui.draw(pad.paid / u.cost, true);
+    pad.ui.draw(pad.paid, true);
     this.hooks.money && this.hooks.money(0);
   }
 
@@ -1039,9 +1202,9 @@ export class Game {
     let near = 0;
     for (const b of this.belts) {
       if (!b.built) continue;
-      b.update(dt, this.beltSpeed, (sl) => {
+      b.update(dt, this.beltSpeed * this.waveMul(), (sl) => {
         sl.item.laps++;
-        if (!sl.item.dried && sl.item.laps >= CFG.belt.dryLaps) {
+        if (!sl.item.dried && sl.item.laps >= (this.stage.theme === 'space' ? 5 : CFG.belt.dryLaps)) {
           sl.item.dried = true;
           const p = b.point(b.slotS(sl));
           puff(p.x, 1.0, p.z, '#a89a70', 0.2, 4, 0.8);
@@ -1052,8 +1215,57 @@ export class Game {
       const d = Math.hypot(this.chef.x - b.cx, this.chef.z - (b.topZ + b.len / 2));
       near = Math.max(near, Math.max(0, 1 - d / 9));
     }
-    animateBeltTex(dt, this.beltSpeed);
+    animateBeltTex(dt, this.beltSpeed * this.waveMul());
     audio.beltLevel(near);
+  }
+
+  waveMul() {
+    return this.gimmick.on > 0 && this.stage.theme === 'beach' ? 1.7 : 1;
+  }
+
+  // ---------------- 식당별 기믹 ----------------
+  updateGimmick(dt) {
+    const G = this.gimmick;
+    const th = this.stage.theme;
+    G.t += dt;
+    if (G.on > 0) {
+      G.on -= dt;
+      if (th === 'beach' && Math.random() < dt * 8) {
+        const b = this.belts[Math.floor(Math.random() * this.belts.length)];
+        if (b.built) {
+          const p = b.point(Math.random() * b.L);
+          puff(p.x, BELT_H + 0.1, p.z, '#bff4ff', 0.2, 2, 1.2);
+        }
+      }
+      if (G.on <= 0 && th === 'beach') this.hooks.toast('파도가 잔잔해졌어요');
+    }
+    const w = this.env?.userData.water;
+    if (w) w.position.y = -0.25 + (G.on > 0 && th === 'beach' ? Math.sin(this.time * 3) * 0.12 : Math.sin(this.time * 0.8) * 0.03);
+    if (this.done.size < 1) return;
+    if (th === 'beach' && G.t > 45) {
+      G.t = 0;
+      G.on = 7;
+      this.hooks.banner('큰 파도!', '7초 동안 벨트가 빨라져요', null);
+      audio.play('whoosh');
+      gfx.shake = 0.3;
+    } else if (th === 'mall' && G.t > 50) {
+      const free = this.freeSeats();
+      if (!free.length) return;
+      G.t = 0;
+      const n = Math.min(3, free.length);
+      free.sort(() => Math.random() - 0.5);
+      const esc = this.lay.escalator;
+      for (let i = 0; i < n; i++) {
+        const c = this.spawnCustomer(free[i], {});
+        if (c && esc) {
+          c.x = esc.x + rand(-0.2, 0.2);
+          c.z = esc.z - i * 0.7;
+          c.path = this.nav.path(c.x, c.z, free[i].stand.x, free[i].stand.z);
+        }
+      }
+      this.hooks.banner('에스컬레이터 손님!', `${n}명이 한꺼번에 올라와요`, null);
+      audio.play('pop');
+    }
   }
 
   driedCount(b) {
@@ -1084,7 +1296,7 @@ export class Game {
   }
 
   spawnInterval() {
-    const stars = this.stars();
+    const stars = Math.max(3.5, this.stars());
     const seats = Math.max(2, this.seats.filter((s) => s.unlocked).length);
     // 좌석이 늘수록 손님이 더 자주 옴 (좌석당 평균 회전 주기 기준)
     let iv = (CFG.cust.seatCycle / seats / this.stage.cust) * (1.5 - ((stars - 1) / 4) * 0.8);
@@ -1141,7 +1353,8 @@ export class Game {
     if (seat) seat.reserved = true;
     const L = this.lay;
     let orders;
-    if (opt.vip) {
+    if (!opt.vip && !opt.group && this.stage.theme === 'ryokan' && menus.length >= 2 && this.run.cust > 3 && Math.random() < 0.3) opt.omakase = true;
+    if (opt.vip || opt.omakase) {
       const pool = menus.slice().sort(() => Math.random() - 0.5);
       orders = [0, 1, 2].map((i) => pool[i % pool.length]);
     } else if (opt.group) {
@@ -1165,8 +1378,9 @@ export class Game {
       oi: 0,
       wait: 0,
       waits: [],
-      pat: CFG.cust.patience * (opt.vip ? 1.7 : 1),
-      patMax: CFG.cust.patience * (opt.vip ? 1.7 : 1),
+      pat: CFG.cust.patience * (opt.vip || opt.omakase ? 1.6 : 1) * (1 + this.perk('patience') * 0.08),
+      patMax: CFG.cust.patience * (opt.vip || opt.omakase ? 1.6 : 1) * (1 + this.perk('patience') * 0.08),
+      omakase: !!opt.omakase,
       eatT: 0,
       bill: 0,
       vip: !!opt.vip,
@@ -1266,7 +1480,7 @@ export class Game {
       case 'wait': {
         c.wait += dt;
         const dried = this.driedCount(seat.belt);
-        c.pat -= dt * (1 + dried * 0.25);
+        c.pat -= dt * (1 + dried * 0.1);
         c.sweat = dried > 0;
         // 벨트에서 원하는 접시 집기
         const want = c.orders[c.oi];
@@ -1275,6 +1489,7 @@ export class Game {
           const it = sl.item;
           if (!it || it.dried || it.m !== want || sl.res) continue;
           if (b.dist(b.slotS(sl), seat.s) < CFG.belt.grab) {
+            c.dishBonus = it.bonus ? 1.3 : 1;
             sl.item = null;
             const p = b.point(b.slotS(sl));
             this.grab(c, want, p);
@@ -1290,8 +1505,11 @@ export class Game {
         if (c.eatT <= 0) {
           c.dish = null;
           seat.dirty++;
-          const price = MENUS[c.orders[c.oi]].price * this.stage.priceMul;
-          c.bill += Math.round(price * c.tipMul);
+          const price = MENUS[c.orders[c.oi]].price * this.stage.priceMul * this.seasonMul();
+          // 별점이 낮으면 손님은 계속 오되 팁이 줄어듦 (악순환 방지)
+          const starMul = this.stars() < 3.5 && this.run.cust > 10 ? 0.85 : 1;
+          const tip = 1 + (c.tipMul - 1) + this.perk('tip') * 0.05;
+          c.bill += Math.round(price * tip * starMul * (c.dishBonus || 1));
           this.hooks.stat('plates', 1);
           this.hooks.served && this.hooks.served(c.orders[c.oi]);
           c.oi++;
@@ -1370,6 +1588,11 @@ export class Game {
     } else {
       const avg = c.waits.reduce((a, b) => a + b, 0) / Math.max(1, c.waits.length);
       score = Math.max(0.35, Math.min(1, 1.1 - Math.max(0, avg - 12) / 50 - dried * 0.08));
+      if (c.omakase) {
+        c.bill = Math.round(c.bill * 1.5);
+        popText(seat.x, 2.6, seat.z, '오마카세 완주 x1.5!', 'pop-vip', 1.5);
+        burst(seat.x, 1.4, seat.z, 18, { colors: ['#c9a24a', '#ffffff', '#5a2d7a'] });
+      }
       if (c.vip) {
         c.bill *= 3;
         popText(seat.x, 2.6, seat.z, 'VIP 보너스 x3!', 'pop-vip', 1.6);
@@ -1400,6 +1623,7 @@ export class Game {
       this.rush.t -= dt;
       if (this.rush.t <= 0) {
         this.rush = null;
+        audio.setRush(false);
         this.hooks.stat('rushes', 1);
         this.hooks.rushEnd && this.hooks.rushEnd();
       }
@@ -1426,11 +1650,14 @@ export class Game {
           }
         }
         this.rush = { t: 25, type: 'group', menu: m };
+        audio.setRush(true);
         this.hooks.banner('러시 타임!', `단체 손님 ${n}명: ${MENUS[m].name} x${n * 2}`, m);
         audio.play('rush');
       } else {
         this.spawnCustomer(pick(free), { vip: true });
         this.rush = { t: 20, type: 'vip' };
+        audio.setRush(true);
+        audio.duck(0.8);
         this.hooks.banner('VIP 손님!', '세트 3종을 순서대로 내면 팁 3배', null);
         audio.play('vip');
       }
@@ -1627,6 +1854,30 @@ export class Game {
       if (k >= 1) {
         a.obj.scale.copy(a.base);
         this.anims.splice(i, 1);
+        if (this.statics.includes(a.obj)) this.staticDirty = true;
+      }
+    }
+    if (this.staticDirty && !this.anims.some((a) => this.statics.includes(a.obj))) {
+      this.staticDirty = false;
+      this.rebuildStatic();
+    }
+    // 해금 폭죽: 카메라가 도착할 즈음 새 시설 위치에서
+    if (this.unlockFx) {
+      this.unlockFx.t -= dt;
+      if (this.unlockFx.t <= 0) {
+        const f = this.unlockFx;
+        this.unlockFx = null;
+        burst(f.x, 0.6, f.z, 50, { up: 7, speed: 5 });
+        ring(f.x, f.z, 18, '#ffffff', 0.6, 4);
+        gfx.shake = 0.45;
+        audio.play('pop');
+      }
+    }
+    if (this.camCut) {
+      this.camCut.t += dt;
+      if (this.camCut.t >= this.camCut.dur) {
+        this.camCut = null;
+        this.lastCutEnd = this.time;
       }
     }
   }
@@ -1665,7 +1916,9 @@ export class Game {
         const s = b.slotS(sl);
         b.point(s, tp);
         const ry = tp.a === 0 ? 0 : tp.a === Math.PI ? Math.PI : -tp.a;
-        this.drawDish(sl.item.m, tp.x, BELT_H + 0.02, tp.z, ry + sl.i, 1, sl.item.dried);
+        const fl = this.stage.theme === 'space' ? 0.12 + Math.sin(this.time * 2 + sl.i) * 0.08 : 0;
+        this.drawDish(sl.item.m, tp.x, BELT_H + 0.02 + fl, tp.z, ry + sl.i + (fl ? this.time * 0.6 : 0), 1, sl.item.dried);
+        if (sl.item.bonus && !sl.item.dried) I.put('coin', tp.x, BELT_H + 0.42 + Math.sin(this.time * 4 + sl.i) * 0.05, tp.z, this.time * 3, 0.55);
       }
     }
     // 비행 아이템
@@ -1706,12 +1959,26 @@ export class Game {
       if (!seat.unlocked) continue;
       const fz = seat.side === 'R' ? 1 : -1;
       for (let i = 0; i < Math.min(seat.dirty, 8); i++) I.put('plate', seat.cx, BELT_H + i * 0.07, seat.cz - 0.2 * fz, i, 0.85, DIRTY);
-      if (seat.money > 0) {
-        const unit = 5 * this.stage.priceMul;
-        const n = Math.min(10, Math.max(1, Math.ceil(seat.money / (unit * 1.6))));
-        for (let i = 0; i < n; i++) I.put('cash', seat.cx + (i % 2) * 0.04 * fz, BELT_H + i * 0.075, seat.cz + 0.22 * fz, (i % 3) * 0.2 + 0.2 * fz, 0.9);
+      const n = this.billCount(seat);
+      for (let i = 0; i < n; i++) {
+        // 3줄로 층층이 쌓인 지폐 더미
+        const colI = i % 3;
+        const lay = Math.floor(i / 3);
+        I.put('cash', seat.cx + (colI - 1) * 0.16, BELT_H + lay * 0.07, seat.cz + 0.22 * fz, Math.PI / 2 + ((i * 37) % 7) * 0.05 - 0.15, 0.72);
       }
     }
+    // 의자 (인스턴싱, 해금 시 튀어나오는 팝)
+    const seatCol = col(this.theme.noren);
+    for (const seat of this.seats) {
+      if (!seat.unlocked) continue;
+      const k = Math.min(1, (this.time - seat.born - 0.3) / 0.6);
+      if (k <= 0) continue;
+      const e = ease(k);
+      I.put('stool_seat', seat.x, 0, seat.z, 0, e, seatCol);
+      I.put('stool_leg', seat.x, 0, seat.z, 0, e);
+    }
+    // 직원
+    for (const st of this.staff) this.drawStaff(st);
     // 손님
     for (const c of this.customers) this.drawCustomer(c);
     if (!gfx.renderer.shadowMap.enabled) {
@@ -1722,18 +1989,101 @@ export class Game {
     updateParticles(dt, I);
     I.end();
 
-    // 셰프 + 직원 메시
+    // 셰프
     this.placeChar(this.chef, dt);
-    for (const s of this.staff) this.placeChar(s, dt);
     // 노렌 흔들림
     const nor = this.env?.userData.noren;
-    if (nor) nor.children.forEach((p, i) => (p.rotation.x = Math.sin(this.time * 1.6 + i) * 0.06));
+    if (nor) nor.rotation.x = Math.sin(this.time * 1.6) * 0.05;
+    // 행동 발판 (한 번의 드로우콜)
+    const P = this.padSys;
+    P.begin();
+    const cz = this.chef.zone;
+    for (const z of this.zones) {
+      if (z.type === 'seat' || z.type === 'unlock') continue;
+      const born = this.padBorn.get(this.padKey(z)) ?? -10;
+      const kb = Math.min(1, (this.time - born - 0.3) / 0.6);
+      if (kb <= 0) continue;
+      let size = (z.type === 'upgrade' ? 1.35 : 1.18) * ease(kb);
+      const want = this.padWants(z);
+      let bright = 0.9;
+      if (want) {
+        size *= 1 + Math.sin(this.time * 7) * 0.06;
+        bright = 1.12;
+      }
+      if (cz === z) {
+        size *= 1.06;
+        bright = 1.2;
+      }
+      const id = z.type === 'crate' || z.type === 'in' ? z.ref.ing : z.type === 'out' ? z.ref.menu : z.type;
+      P.put(z.x, z.z, size, z.type, id, bright);
+    }
+    P.end();
+    // 서 있는 동안 원형 게이지 (적재량 기준)
+    const c = this.chef;
+    if (cz && cz.type !== 'unlock' && cz.type !== 'upgrade' && (c.stack.length || c.incoming) && this.time - (c.lastXfer || -9) < 0.6) P.gauge(c.x, c.z, (c.stack.length + c.incoming) / this.chefCap());
+    else P.gauge(0, 0, null);
     // 발판 맥동
     for (const pad of this.pads) {
       const on = this.chef.zone && this.chef.zone.ref === pad;
       const k = pad.ui.size * (on ? 1.06 + Math.sin(this.time * 18) * 0.03 : 1 + Math.sin(this.time * 3) * 0.025);
       if (!this.anims.some((a) => a.obj === pad.ui.mesh)) pad.ui.mesh.scale.set(k, 1, k);
-      if (!on && pad.ui.lastAfford !== this.run.money > 0) pad.ui.draw(pad.paid / pad.u.cost, this.run.money > 0);
+      if (!on && pad.ui.lastAfford !== this.run.money > 0) pad.ui.draw(pad.paid, this.run.money > 0);
+    }
+  }
+
+  // 셰프가 이 발판에서 할 일이 있는지 (맥동 안내용)
+  padWants(z) {
+    const c = this.chef;
+    const room = this.chefCap() - c.stack.length - c.incoming;
+    const r = z.ref;
+    switch (z.type) {
+      case 'crate':
+        return room > 0 && r.crateN > 0 && r.inp + r.out < 6;
+      case 'in':
+        return c.stack.some((i) => i.k === 'ing' && i.id === r.ing) && r.inp < CFG.station.inCap;
+      case 'out':
+        return room > 0 && r.out > 0;
+      case 'feed':
+        return c.stack.some((i) => i.k === 'dish') && r.free() > 0;
+      case 'trash':
+        return room > 0 && this.driedCount(r) > 0;
+      case 'sink':
+        return c.stack.some((i) => i.k === 'dirty');
+      case 'upgrade':
+        return UPGRADES.some((u) => (this.run.upg[u.id] || 0) < u.max && this.run.money >= this.upgCost(u) && (!u.needStaff || this.staff.length));
+    }
+    return false;
+  }
+
+  upgCost(u) {
+    const lvl = this.run.upg[u.id] || 0;
+    return Math.round(u.base * Math.pow(u.growth, lvl) * this.stage.priceMul * this.seasonMul());
+  }
+
+  drawStaff(st) {
+    const I = this.inst;
+    const walking = st.moving;
+    const bounce = walking ? Math.abs(Math.sin(st.walkT * 11)) * 0.07 : 0;
+    const k = Math.min(1, (this.time - st.born - 0.3) / 0.6);
+    if (k <= 0) return;
+    const sc = 1.08 * ease(k);
+    _e.set(0, st.ry, walking ? Math.sin(st.walkT * 11) * 0.05 : 0);
+    _q.setFromEuler(_e);
+    _m.compose(_v.set(st.x, bounce, st.z), _q, _s.set(sc, sc, sc));
+    I.putMatrix('c_body', _m, st.shirt);
+    I.putMatrix('c_legs', _m, DARK_PANTS);
+    _m2.makeTranslation(0, 0.87, 0);
+    const hm = _m4.copy(_m).multiply(_m2);
+    I.putMatrix('c_head', hm, st.skin);
+    I.putMatrix('c_face', hm, null);
+    I.putMatrix('st_cap', hm, st.capC);
+    const carrying = st.stack.length > 0 || st.incoming > 0;
+    const sw = walking ? Math.sin(st.walkT * 11) : 0;
+    for (const side of [-1, 1]) {
+      _e.set(carrying ? -1.35 : side * sw * 0.6, 0, side * (carrying ? -0.1 : -0.18));
+      _q.setFromEuler(_e);
+      _m2.compose(_v.set(side * 0.23, 0.56, 0), _q, _s.set(1, 1, 1));
+      I.putMatrix('c_arm', _m3.copy(_m).multiply(_m2), st.shirt);
     }
   }
 
@@ -1752,8 +2102,10 @@ export class Game {
 
   drawStack(a) {
     let h = 0;
-    const fx = Math.sin(a.ry) * 0.42;
-    const fz = Math.cos(a.ry) * 0.42;
+    const fwd = a.isChef ? 0.42 : 0.36;
+    const fx = Math.sin(a.ry) * fwd;
+    const fz = Math.cos(a.ry) * fwd;
+    const base = a.isChef ? 0.74 : 0.6;
     const n = a.stack.length;
     const sway = a.moving ? Math.sin(a.walkT * 11) * 0.02 : 0;
     const S = 1.22;
@@ -1762,7 +2114,7 @@ export class Game {
       const k = Math.pow(h, 1.25) * 0.55;
       const x = a.x + fx + a.lean.x * k + Math.cos(a.ry) * sway * h;
       const z = a.z + fz + a.lean.z * k - Math.sin(a.ry) * sway * h;
-      this.drawItem(it, x, 0.74 + h, z, a.ry + Math.sin(i * 1.7) * 0.12, S);
+      this.drawItem(it, x, base + h, z, a.ry + Math.sin(i * 1.7) * 0.12, S);
       h += (ITEM_H[it.k] || 0.2) * S;
     }
   }
@@ -1854,8 +2206,14 @@ export class Game {
     run.seats = {};
     for (const s of this.seats) {
       let d = s.dirty;
-      if (s.cust && s.cust.dish) d++;
-      run.seats[s.id] = { d, m: s.money };
+      let m = s.money;
+      const c = s.cust;
+      if (c) {
+        // 앉아 있던 손님은 새로고침하면 사라지므로 먹은 만큼 좌석 돈으로 정산
+        if (c.dish || c.state === 'fetch') d++;
+        m += c.bill || 0;
+      }
+      run.seats[s.id] = { d, m };
     }
     run.combo = this.combo;
   }

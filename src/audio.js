@@ -9,6 +9,8 @@ const enabled = { sfx: true, bgm: true };
 let bgmTimer = null;
 let bgmHeld = false;
 let measuring = false;
+let duckNode = null;
+let rushOn = false;
 let nextNote = 0;
 let step = 0;
 let bar = 0;
@@ -42,13 +44,43 @@ function buildChain(c, dest) {
   mix.connect(lim);
   lim.connect(out);
   out.connect(dest);
+  // 컨볼버 리버브 (절차적 임펄스)
+  const conv = c.createConvolver();
+  const len = Math.floor(c.sampleRate * 1.8);
+  const ir = c.createBuffer(2, len, c.sampleRate);
+  let sd = 99;
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      sd = (sd * 1664525 + 1013904223) >>> 0;
+      d[i] = ((sd / 4294967296) * 2 - 1) * Math.pow(1 - i / len, 2.6);
+    }
+  }
+  conv.buffer = ir;
+  const wetHp = c.createBiquadFilter();
+  wetHp.type = 'highpass';
+  wetHp.frequency.value = 280;
+  conv.connect(wetHp);
+  wetHp.connect(mix);
   const sfx = c.createGain();
   sfx.gain.value = SFX_VOL;
   sfx.connect(mix);
+  const sfxWet = c.createGain();
+  sfxWet.gain.value = 0.07;
+  sfx.connect(sfxWet);
+  sfxWet.connect(conv);
   const bgm = c.createGain();
   bgm.gain.value = BGM_VOL;
-  bgm.connect(mix);
-  return { sfx, bgm, mix };
+  // 덕킹: 해금 팡파레/VIP 때 BGM -6dB
+  const duck = c.createGain();
+  duck.gain.value = 1;
+  bgm.connect(duck);
+  duck.connect(mix);
+  const bgmWet = c.createGain();
+  bgmWet.gain.value = 0.16;
+  duck.connect(bgmWet);
+  bgmWet.connect(conv);
+  return { sfx, bgm, mix, duck };
 }
 
 function makeNoise(c) {
@@ -72,6 +104,7 @@ export const audio = {
       const ch = buildChain(ctx, ctx.destination);
       sfxBus = ch.sfx;
       bgmBus = ch.bgm;
+      duckNode = ch.duck;
       sfxBus.gain.value = enabled.sfx ? SFX_VOL : 0;
       bgmBus.gain.value = enabled.bgm && !bgmHeld ? BGM_VOL : 0;
       noiseBuf = makeNoise(ctx);
@@ -103,6 +136,23 @@ export const audio = {
   applyBgmGain() {
     if (!bgmBus || !ctx) return;
     bgmBus.gain.setTargetAtTime(enabled.bgm && !bgmHeld ? BGM_VOL : 0, ctx.currentTime, 0.08);
+  },
+  duck(sec = 0.8) {
+    if (!duckNode || !ctx) return;
+    const t = ctx.currentTime;
+    duckNode.gain.cancelScheduledValues(t);
+    duckNode.gain.setTargetAtTime(0.5, t, 0.03);
+    duckNode.gain.setTargetAtTime(1, t + sec, 0.18);
+  },
+  setStyle(id) {
+    if (STYLES[id] && style !== STYLES[id]) {
+      style = STYLES[id];
+      bar = 0;
+      step = 0;
+    }
+  },
+  setRush(on) {
+    rushOn = on;
   },
   get on() {
     return enabled.sfx || enabled.bgm;
@@ -271,13 +321,14 @@ function noise(t, dur, { vol = 0.2, type = 'bandpass', freq = 1200, q = 1, bus =
 
 const SFX = {
   step(t, alt) {
+    const pr = 0.97 + rnd() * 0.06; // 피치 +-3%
     // 발걸음: 저역 쿵 + 폰 스피커용 400Hz 대역 톡
-    noise(t, 0.05, { vol: 0.278, type: 'lowpass', freq: alt ? 520 : 440 });
-    tone(t, alt ? 330 : 290, 0.04, { type: 'triangle', vol: 0.087 });
+    noise(t, 0.05, { vol: 0.278, type: 'lowpass', freq: (alt ? 520 : 440) * pr });
+    tone(t, (alt ? 330 : 290) * pr, 0.04, { type: 'triangle', vol: 0.087 });
   },
   pick(t, n) {
     // 적재 틱: 쌓일수록 피치 상승
-    const f = 520 * Math.pow(1.06, Math.min(n, 18));
+    const f = 520 * Math.pow(1.06, Math.min(n, 18)) * (0.97 + rnd() * 0.06);
     tone(t, f, 0.08, { type: 'triangle', vol: 0.3 });
     tone(t + 0.01, f * 2, 0.05, { type: 'sine', vol: 0.1 });
   },
@@ -297,7 +348,7 @@ const SFX = {
     if (t - coinState.t > 0.6) coinState.n = 0;
     coinState.t = t;
     coinState.n = Math.min(coinState.n + 1, 24);
-    const f = 1300 * Math.pow(1.03, coinState.n);
+    const f = 1300 * Math.pow(1.03, coinState.n) * (0.97 + rnd() * 0.06);
     tone(t, f, 0.08, { type: 'square', vol: 0.117, filter: 5000 });
     tone(t + 0.045, f * 1.5, 0.16, { type: 'square', vol: 0.104, filter: 6000 });
     tone(t, 650, 0.05, { type: 'triangle', vol: 0.078 });
@@ -315,6 +366,9 @@ const SFX = {
     tone(t + 0.35, 1568, 0.5, { type: 'sine', vol: 0.072 });
     [262, 330, 392, 523, 659, 784].forEach((f) => tone(t + 0.35, f, 0.6, { type: 'sawtooth', vol: 0.021, filter: 2200 }));
     noise(t + 0.3, 0.4, { vol: 0.048, freq: 6000, q: 0.5 });
+    // 징글 + 코인 폭포
+    [1047, 1319, 1568, 2093].forEach((f, i) => tone(t + 0.62 + i * 0.05, f, 0.18, { type: 'square', vol: 0.03, filter: 5000 }));
+    for (let i = 0; i < 8; i++) tone(t + 0.4 + i * 0.045, 1500 + i * 90 + rnd() * 60, 0.07, { type: 'square', vol: 0.025, filter: 6000 });
   },
   pop(t) {
     tone(t, 300, 0.12, { type: 'sine', vol: 0.3, slide: 3 });
@@ -413,41 +467,57 @@ function startBelt() {
 }
 
 // ---------- BGM ----------
-// 미야코부시 음계 느낌: D Eb G A Bb + 로파이 코드 진행
-const BPM = 78;
-const S16 = 60 / BPM / 4;
-const scale = [293.66, 311.13, 392.0, 440.0, 466.16, 587.33, 622.25, 783.99, 880.0];
-const chords = [
-  [146.83, 220.0, 261.63, 349.23], // Dm7
-  [116.54, 233.08, 293.66, 349.23], // Bb
-  [98.0, 233.08, 293.66, 349.23], // Gm7
-  [110.0, 196.0, 277.18, 329.63], // A7sus 느낌
-];
+// 식당마다 음계/템포/악기가 다른 절차적 BGM. 16마디 = A(8) + B(8) 구성, 러시 때 템포 +15% + 타이코 레이어
+const N = (n) => 440 * Math.pow(2, (n - 69) / 12);
+const STYLES = {
+  // 골목: 미야코부시 음계 로파이 + 코토
+  alley: { bpm: 78, swing: 0.12, scale: [62, 63, 67, 69, 70, 74, 75, 79, 81], A: [[50, 57, 60, 65], [46, 58, 62, 65], [43, 58, 62, 65], [45, 55, 61, 64]], B: [[46, 58, 62, 65], [48, 55, 60, 64], [50, 57, 60, 65], [45, 55, 61, 64]], lead: 'koto', drums: 'lofi', pad: 'saw' },
+  // 쇼핑몰: 밝은 신스 110BPM 메이저 펜타토닉
+  mall: { bpm: 110, swing: 0, scale: [72, 74, 76, 79, 81, 84, 86, 88, 91], A: [[48, 60, 64, 67], [43, 59, 62, 67], [45, 60, 64, 69], [41, 60, 65, 69]], B: [[41, 60, 65, 69], [43, 59, 62, 67], [48, 60, 64, 67], [43, 62, 65, 71]], lead: 'synth', drums: 'four', pad: 'square' },
+  // 바닷가: 우쿨렐레풍 플럭 96BPM
+  beach: { bpm: 96, swing: 0.1, scale: [65, 67, 69, 72, 74, 77, 79, 81, 84], A: [[41, 57, 60, 65], [46, 58, 62, 65], [48, 58, 60, 64], [41, 57, 60, 65]], B: [[50, 57, 62, 65], [46, 58, 62, 65], [48, 55, 60, 64], [48, 58, 60, 64]], lead: 'uke', drums: 'shaker', pad: 'strum' },
+  // 료칸: 히라조시 음계 코토 + 부드러운 북 64BPM
+  ryokan: { bpm: 64, swing: 0, scale: [64, 65, 69, 71, 72, 76, 77, 81, 83], A: [[40, 52, 59, 64], [41, 53, 57, 64], [45, 52, 57, 60], [40, 52, 59, 64]], B: [[45, 57, 60, 64], [41, 53, 57, 65], [47, 54, 59, 62], [40, 52, 59, 64]], lead: 'koto2', drums: 'taiko', pad: 'flute' },
+  // 우주: 아르페지오 + 패드 100BPM 마이너
+  space: { bpm: 100, swing: 0, scale: [69, 72, 74, 76, 79, 81, 84, 86, 88], A: [[45, 57, 60, 64], [41, 57, 60, 65], [43, 55, 59, 62], [40, 55, 59, 64]], B: [[41, 53, 57, 60], [43, 55, 59, 62], [45, 57, 60, 64], [40, 56, 59, 64]], lead: 'arp', drums: 'soft', pad: 'saw' },
+};
+let style = STYLES.alley;
 let melIdx = 4;
+let motif = null;
+
+function s16() {
+  return 60 / (style.bpm * (rushOn ? 1.15 : 1)) / 4;
+}
 
 function scheduleBgm() {
   if (!ctx || measuring) return;
   while (nextNote < ctx.currentTime + 0.25) {
     if (!bgmHeld) playStep(nextNote, step);
-    nextNote += S16 * (step % 2 === 0 ? 1.12 : 0.88); // 스윙
+    nextNote += s16() * (step % 2 === 0 ? 1 + style.swing : 1 - style.swing);
     step++;
     if (step % 16 === 0) bar++;
   }
 }
+const S16 = 60 / 78 / 4;
 
-function pluck(t, f, vol, dur = 0.5) {
+function pluck(t, f, vol, dur = 0.5, kind = 'koto') {
   const o = ctx.createOscillator();
   const o2 = ctx.createOscillator();
   const g = ctx.createGain();
   const fl = ctx.createBiquadFilter();
-  o.type = 'triangle';
+  o.type = kind === 'synth' ? 'square' : 'triangle';
   o2.type = 'sine';
   o.frequency.value = f;
-  o2.frequency.value = f * 2.01;
+  o2.frequency.value = f * (kind === 'uke' ? 3.01 : 2.01);
+  if (kind === 'koto2') {
+    // 코토 누르기(피치 벤드)
+    o.frequency.setValueAtTime(f * 0.97, t);
+    o.frequency.linearRampToValueAtTime(f, t + 0.08);
+  }
   fl.type = 'lowpass';
-  fl.frequency.setValueAtTime(3200, t);
-  fl.frequency.exponentialRampToValueAtTime(600, t + dur);
-  env(g, t, 0.004, vol, dur);
+  fl.frequency.setValueAtTime(kind === 'synth' ? 2600 : 3200, t);
+  fl.frequency.exponentialRampToValueAtTime(kind === 'uke' ? 900 : 600, t + dur);
+  env(g, t, 0.004, kind === 'synth' ? vol * 0.5 : vol, dur);
   o.connect(fl);
   o2.connect(fl);
   fl.connect(g);
@@ -458,47 +528,103 @@ function pluck(t, f, vol, dur = 0.5) {
   o2.stop(t + dur + 0.1);
 }
 
+function kick(t, v = 0.22) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.frequency.setValueAtTime(120, t);
+  o.frequency.exponentialRampToValueAtTime(50, t + 0.12);
+  env(g, t, 0.003, v, 0.14);
+  o.connect(g);
+  g.connect(bgmBus);
+  o.start(t);
+  o.stop(t + 0.25);
+  tone(t, 260, 0.04, { type: 'triangle', vol: 0.14, bus: bgmBus, slide: 0.6 });
+}
+
+function taiko(t, v) {
+  tone(t, 95, 0.3, { type: 'sine', vol: v * 0.8, bus: bgmBus, slide: 0.6 });
+  tone(t, 290, 0.14, { type: 'triangle', vol: v * 0.5, bus: bgmBus, slide: 0.7 });
+  noise(t, 0.06, { vol: v * 0.5, type: 'bandpass', freq: 420, q: 1.2, bus: bgmBus });
+}
+
 function playStep(t, st) {
   const s = st % 16;
-  const ch = chords[bar % 4];
-  // 킥: 저역 + 폰 스피커용 중역 클릭
-  if (s === 0 || s === 10) {
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.frequency.setValueAtTime(120, t);
-    o.frequency.exponentialRampToValueAtTime(50, t + 0.12);
-    env(g, t, 0.003, 0.22, 0.14);
-    o.connect(g);
-    g.connect(bgmBus);
-    o.start(t);
-    o.stop(t + 0.25);
-    tone(t, 260, 0.04, { type: 'triangle', vol: 0.14, bus: bgmBus, slide: 0.6 });
+  const sec = bar % 16 < 8 ? 'A' : 'B';
+  const ch = style[sec][bar % 4].map(N);
+  const S = s16();
+  // 드럼
+  const d = style.drums;
+  if (d === 'lofi') {
+    if (s === 0 || s === 10) kick(t);
+    if (s === 4 || s === 12) noise(t, 0.12, { vol: 0.16, freq: 1800, q: 0.7, bus: bgmBus });
+    if (s % 2 === 0) noise(t, 0.03, { vol: s % 4 === 2 ? 0.07 : 0.045, type: 'highpass', freq: 7000, bus: bgmBus });
+  } else if (d === 'four') {
+    if (s % 4 === 0) kick(t, 0.2);
+    if (s === 4 || s === 12) noise(t, 0.1, { vol: 0.15, freq: 2200, q: 0.8, bus: bgmBus });
+    if (s % 2 === 1) noise(t, 0.03, { vol: 0.06, type: 'highpass', freq: 8000, bus: bgmBus });
+  } else if (d === 'shaker') {
+    if (s === 0 || s === 8) kick(t, 0.18);
+    noise(t, 0.04, { vol: s % 2 ? 0.035 : 0.06, type: 'highpass', freq: 6000, bus: bgmBus });
+    if (s === 6 || s === 14) noise(t, 0.05, { vol: 0.1, freq: 1200, q: 3, bus: bgmBus });
+  } else if (d === 'taiko') {
+    if (s === 0) taiko(t, 0.3);
+    if (s === 10 && bar % 2) taiko(t, 0.18);
+    if (s === 8) noise(t, 0.02, { vol: 0.08, freq: 3000, q: 4, bus: bgmBus });
+  } else if (d === 'soft') {
+    if (s === 0 || s === 8) kick(t, 0.18);
+    if (s % 4 === 2) noise(t, 0.05, { vol: 0.05, type: 'highpass', freq: 6000, bus: bgmBus });
   }
-  // 스네어 (부드러운 림)
-  if (s === 4 || s === 12) noise(t, 0.12, { vol: 0.16, freq: 1800, q: 0.7, bus: bgmBus });
-  // 하이햇
-  if (s % 2 === 0) noise(t, 0.03, { vol: s % 4 === 2 ? 0.07 : 0.045, type: 'highpass', freq: 7000, bus: bgmBus });
-  // 베이스: 기본음 + 2, 3배음 (폰 스피커에서도 들리도록)
+  // 러시 타임: 타이코 레이어
+  if (rushOn && (s === 0 || s === 6 || s === 8 || s === 11)) taiko(t, 0.2);
+  // 베이스 (배음 레이어 포함)
   if (s === 0 || s === 7 || s === 10) {
-    const f = ch[0] / 2;
+    const f = ch[0];
     tone(t, f, 0.35, { type: 'sine', vol: 0.15, bus: bgmBus });
     tone(t, f * 2, 0.3, { type: 'triangle', vol: 0.13, bus: bgmBus });
     tone(t, f * 3, 0.22, { type: 'sine', vol: 0.06, bus: bgmBus });
     tone(t, f * 4, 0.18, { type: 'sine', vol: 0.04, bus: bgmBus });
   }
-  // 패드 (마디 시작)
-  if (s === 0) {
-    for (let i = 1; i < 4; i++) tone(t, ch[i], S16 * 15, { type: 'sawtooth', vol: 0.03, a: 0.3, bus: bgmBus, filter: 1100 });
+  // 패드 / 반주
+  const p = style.pad;
+  if (p === 'strum') {
+    if (s % 4 === 2) for (let i = 1; i < 4; i++) pluck(t + i * 0.012, ch[i], 0.05, 0.25, 'uke');
+  } else if (s === 0) {
+    const type = p === 'square' ? 'square' : p === 'flute' ? 'sine' : 'sawtooth';
+    for (let i = 1; i < 4; i++) tone(t, ch[i], S * 15, { type, vol: p === 'flute' ? 0.05 : 0.03, a: 0.3, bus: bgmBus, filter: p === 'square' ? 1400 : 1100 });
   }
-  // 코토 느낌 멜로디: 랜덤 워크
-  const pattern = [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0];
-  const pBar = bar % 8;
-  if (pattern[s] && (pBar < 6 || s < 8) && rnd() < 0.8) {
-    melIdx += Math.floor(rnd() * 5) - 2;
-    melIdx = Math.max(0, Math.min(scale.length - 1, melIdx));
-    pluck(t, scale[melIdx], 0.13, 0.6);
-    if (rnd() < 0.2) pluck(t + S16, scale[Math.max(0, melIdx - 1)], 0.07, 0.4);
+  // 리드: A 구간은 모티프 반복(3, 7마디 변주), B 구간은 랜덤 워크
+  const sc = style.scale.map(N);
+  if (!motif || motif.style !== style) {
+    motif = { style, notes: [] };
+    let mi = 4;
+    for (let i = 0; i < 16; i++) {
+      mi = Math.max(0, Math.min(sc.length - 1, mi + Math.floor(rnd() * 5) - 2));
+      motif.notes.push([1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0][i] ? mi : -1);
+    }
   }
-  // 바이닐 잡음
-  if (s % 4 === 0 && rnd() < 0.5) noise(t + rnd() * 0.1, 0.01, { vol: 0.04, type: 'highpass', freq: 3000, bus: bgmBus });
+  const kind = style.lead;
+  if (kind === 'arp') {
+    if (s % 2 === 0) {
+      const tones = [ch[1] * 2, ch[2] * 2, ch[3] * 2, ch[2] * 4];
+      pluck(t, tones[(s / 2) % 4], 0.07, 0.18, 'synth');
+    }
+    if (sec === 'B' && (s === 0 || s === 8) && rnd() < 0.7) pluck(t, sc[Math.floor(rnd() * sc.length)], 0.1, 0.8, 'koto');
+    return;
+  }
+  const dur = kind === 'uke' ? 0.28 : kind === 'koto2' ? 1.0 : 0.6;
+  if (sec === 'A') {
+    let n = motif.notes[s];
+    if (n >= 0) {
+      if (bar % 4 === 3 && s >= 8) n = Math.min(sc.length - 1, n + 2);
+      pluck(t, sc[n], 0.13, dur, kind);
+    }
+  } else {
+    const pattern = [1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0];
+    if (pattern[s] && rnd() < 0.75) {
+      melIdx += Math.floor(rnd() * 5) - 2;
+      melIdx = Math.max(0, Math.min(sc.length - 1, melIdx));
+      pluck(t, sc[melIdx], 0.12, dur, kind);
+    }
+  }
+  if (s % 4 === 0 && rnd() < 0.4) noise(t + rnd() * 0.1, 0.01, { vol: 0.04, type: 'highpass', freq: 3000, bus: bgmBus });
 }

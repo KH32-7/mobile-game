@@ -1,16 +1,18 @@
 // 밸런스 수치와 콘텐츠 정의를 한 곳에 모음
 
 export const SAVE_KEY = 'sushi-loop-save';
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export const CFG = {
-  chef: { speed: 3.5, speedPerLvl: 0.32, cap: 5, capPerLvl: 2, radius: 0.34 },
-  transfer: 0.085, // 아이템 1개 옮기는 간격(초)
+  chef: { speed: 3.5, speedPerLvl: 0.12, cap: 8, capPerLvl: 3, radius: 0.34 }, // speedPerLvl 은 배율(+12%)
+  transfer: 0.07, // 아이템 1개 옮기는 간격(초)
+  fastTransfer: 0.045, // 상자/벨트 투입구는 쏟아붓듯 빠르게
+  billTick: 0.03, // 지폐 한 장씩 빨려 들어가는 간격
   crate: { max: 10, regen: 0.75 },
   station: { inCap: 10, outCap: 8, cookTime: 1.5, cookPerLvl: 0.86 },
   sink: { washTime: 0.55 },
   belt: { spacing: 0.92, speed: 0.95, speedPerLvl: 0.2, dryLaps: 3, grab: 0.28 },
-  cust: { patience: 60, eat: 2.4, seatCycle: 28, maxOrders: 3, walk: 2.3, firstDelay: 1.5 },
+  cust: { patience: 90, eat: 2.4, seatCycle: 28, maxOrders: 3, walk: 2.3, firstDelay: 1.5 },
   combo: { fast: 10, tipPer: 0.1, maxMul: 3, slow: 22 },
   rush: { first: 75, min: 95, max: 140 },
   staff: { speed: 2.5, cap: 3, speedPerLvl: 0.14, capPerLvl: 1 },
@@ -52,13 +54,13 @@ export const INGS = {
 
 // 업그레이드 (식당별로 초기화, Pizza Ready 방식)
 export const UPGRADES = [
-  { id: 'speed', name: '이동 속도', icon: 'run', max: 6, base: 25, growth: 1.75, tab: 'chef', desc: '셰프가 더 빨리 걸음' },
-  { id: 'cap', name: '적재량', icon: 'stack', max: 7, base: 30, growth: 1.7, tab: 'chef', desc: '한 번에 +2개 더 운반' },
-  { id: 'cook', name: '조리 속도', icon: 'fire', max: 6, base: 40, growth: 1.8, tab: 'shop', desc: '조리 시간 14% 단축' },
-  { id: 'belt', name: '벨트 속도', icon: 'belt', max: 5, base: 45, growth: 1.8, tab: 'shop', desc: '벨트가 더 빨리 돌아감' },
-  { id: 'plates', name: '접시 추가', icon: 'plate', max: 6, base: 35, growth: 1.65, tab: 'shop', desc: '깨끗한 접시 +4장' },
-  { id: 'sspeed', name: '직원 속도', icon: 'run', max: 5, base: 60, growth: 1.8, tab: 'staff', desc: '직원 이동 속도 +14%', needStaff: true },
-  { id: 'scap', name: '직원 적재량', icon: 'stack', max: 4, base: 70, growth: 1.85, tab: 'staff', desc: '직원이 +1개 더 운반', needStaff: true },
+  { id: 'speed', name: '이동 속도', icon: 'run', max: 6, base: 60, growth: 1.6, tab: 'chef', desc: '셰프 이동 속도 +12%' },
+  { id: 'cap', name: '적재량', icon: 'stack', max: 6, base: 80, growth: 1.6, tab: 'chef', desc: '한 번에 +3개 더 운반' },
+  { id: 'cook', name: '조리 속도', icon: 'fire', max: 6, base: 90, growth: 1.6, tab: 'shop', desc: '조리 시간 14% 단축' },
+  { id: 'belt', name: '벨트 속도', icon: 'belt', max: 5, base: 100, growth: 1.65, tab: 'shop', desc: '벨트가 더 빨리 돌아감' },
+  { id: 'plates', name: '접시 추가', icon: 'plate', max: 6, base: 70, growth: 1.55, tab: 'shop', desc: '깨끗한 접시 +4장' },
+  { id: 'sspeed', name: '직원 속도', icon: 'run', max: 5, base: 120, growth: 1.6, tab: 'staff', desc: '직원 이동 속도 +14%', needStaff: true },
+  { id: 'scap', name: '직원 적재량', icon: 'stack', max: 4, base: 140, growth: 1.65, tab: 'staff', desc: '직원이 +1개 더 운반', needStaff: true },
 ];
 
 // 스테이지(식당). 좌석 id: 벨트-면-번호 (A-R-0 = A벨트 오른쪽 첫 좌석)
@@ -73,7 +75,7 @@ export const STAGES = [
     layout: { r: 1.5, len0: 3, len1: 5, topZ: -3, twoBelts: false, mirror: false, menus: ['salmon', 'tamago', 'tuna'] },
     start: { menus: ['salmon'], seats: ['A-R-0', 'A-R-1'] },
     unlocks: [
-      { id: 's1', t: 'seats', seats: ['A-L-0', 'A-L-1'], cost: 15 },
+      { id: 's1', t: 'seats', seats: ['A-L-0', 'A-L-1'], cost: 10 },
       { id: 'sink', t: 'sink', cost: 30 },
       { id: 'st_tamago', t: 'station', menu: 'tamago', cost: 50 },
       { id: 'upg', t: 'upgrade', cost: 70 },
@@ -81,11 +83,11 @@ export const STAGES = [
       { id: 's2', t: 'seats', seats: ['A-R-2', 'A-L-2'], cost: 130 },
       { id: 'haul1', t: 'staff', role: 'hauler', cost: 170 },
       { id: 'st_tuna', t: 'station', menu: 'tuna', cost: 220 },
-      { id: 'ext', t: 'extend', cost: 280 },
-      { id: 's3', t: 'seats', seats: ['A-R-3', 'A-R-4'], cost: 340 },
-      { id: 's4', t: 'seats', seats: ['A-L-3', 'A-L-4'], cost: 420 },
-      { id: 'run2', t: 'staff', role: 'runner', cost: 520 },
-      { id: 'next', t: 'next', cost: 850 },
+      { id: 'ext', t: 'extend', cost: 210 },
+      { id: 's3', t: 'seats', seats: ['A-R-3', 'A-R-4'], cost: 260 },
+      { id: 's4', t: 'seats', seats: ['A-L-3', 'A-L-4'], cost: 320 },
+      { id: 'run2', t: 'staff', role: 'runner', cost: 420 },
+      { id: 'next', t: 'next', cost: 700 },
     ],
   },
   {
@@ -127,7 +129,7 @@ export const STAGES = [
     priceMul: 11,
     cust: 1.2,
     theme: 'beach',
-    layout: { r: 1.6, len0: 3, len1: 5, topZ: -3, twoBelts: true, mirror: true, menus: ['salmon', 'uni', 'ebi', 'unagi', 'dessert'] },
+    layout: { r: 1.5, len0: 3, len1: 5, topZ: -3, twoBelts: true, mirror: true, gap: 3.7, bOff: 1.6, menus: ['salmon', 'uni', 'ebi', 'unagi', 'dessert'] },
     start: { menus: ['salmon'], seats: ['A-R-0', 'A-R-1'] },
     unlocks: [
       { id: 's1', t: 'seats', seats: ['A-L-0', 'A-L-1'], cost: 120 },
@@ -158,7 +160,7 @@ export const STAGES = [
     priceMul: 28,
     cust: 1.3,
     theme: 'ryokan',
-    layout: { r: 1.7, len0: 3, len1: 5, topZ: -3, twoBelts: true, mirror: false, menus: ['tuna', 'unagi', 'uni', 'ikura', 'dessert'] },
+    layout: { r: 1.8, len0: 2.6, len1: 4.4, topZ: -3, twoBelts: true, mirror: false, gap: 4.3, menus: ['tuna', 'unagi', 'uni', 'ikura', 'dessert'] },
     start: { menus: ['tuna'], seats: ['A-R-0', 'A-R-1'] },
     unlocks: [
       { id: 's1', t: 'seats', seats: ['A-L-0', 'A-L-1'], cost: 300 },
@@ -189,7 +191,7 @@ export const STAGES = [
     priceMul: 70,
     cust: 1.4,
     theme: 'space',
-    layout: { r: 1.7, len0: 3, len1: 5, topZ: -3, twoBelts: true, mirror: true, menus: ['star', 'salmon', 'tuna', 'uni', 'dessert'] },
+    layout: { r: 1.6, len0: 3.4, len1: 5.4, topZ: -3, twoBelts: true, mirror: true, gap: 4.1, bOff: -0.8, menus: ['star', 'salmon', 'tuna', 'uni', 'dessert'] },
     start: { menus: ['star'], seats: ['A-R-0', 'A-R-1'] },
     unlocks: [
       { id: 's1', t: 'seats', seats: ['A-L-0', 'A-L-1'], cost: 800 },
@@ -326,3 +328,19 @@ export const ATTEND = [
   { money: 2 },
   { pearls: 50, hat: 'band' },
 ];
+
+// 진주로 사는 영구 강화 (모든 식당, 2회차에도 유지)
+export const PERKS = [
+  { id: 'tip', name: '단골 인심', desc: '모든 식당 팁 +5%', max: 5, base: 30, step: 25 },
+  { id: 'cap', name: '튼튼한 팔', desc: '시작 적재량 +1', max: 3, base: 40, step: 40 },
+  { id: 'offline', name: '믿음직한 점장', desc: '자리 비운 수익 상한 +30분', max: 4, base: 35, step: 30 },
+  { id: 'patience', name: '따뜻한 차', desc: '손님 인내심 +8%', max: 3, base: 45, step: 35 },
+];
+
+// 식당별 고유 기믹
+export const GIMMICKS = {
+  mall: { name: '에스컬레이터', desc: '주기적으로 에스컬레이터로 손님이 한꺼번에 올라와요' },
+  beach: { name: '파도', desc: '큰 파도가 치면 잠깐 벨트가 빨라져요' },
+  ryokan: { name: '오마카세', desc: '코스 3접시를 순서대로 주문하는 손님이 팁 1.5배' },
+  space: { name: '무중력 궤도', desc: '접시가 둥실둥실 떠다녀서 5바퀴까지 마르지 않아요' },
+};
