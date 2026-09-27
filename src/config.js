@@ -13,10 +13,11 @@ export const CONFIG = {
   PLACE_PTS_PER_CELL: 1, // 배치만 해도 받는 점수
   CHIP_PER_CELL: 5,
   CHIP_PER_LINE: 10,
-  COMBO_GRACE: 3, // 줄을 못 지운 배치가 이 횟수에 도달하면 콤보 끊김
+  COMBO_GRACE: 4,
+  COMBO_MULT: 1, // 콤보 1당 배수 // 줄을 못 지운 배치가 이 횟수에 도달하면 콤보 끊김
 
   // 보석
-  GEM_PIECE_CHANCE: 0.16, // 조각 하나에 보석이 박힐 확률
+  GEM_PIECE_CHANCE: 0.13, // 조각 하나에 보석이 박힐 확률
   GEM_WEIGHTS: { gold: 40, ruby: 30, glass: 15, steel: 15 },
   GEM_GOLD_CHIPS: 25,
   GEM_RUBY_MULT: 3,
@@ -25,7 +26,7 @@ export const CONFIG = {
   GEM_STEEL_XMULT: 1.2,
 
   // 목표 점수 (Balatro 곡선 참고)
-  ANTE_BASE: [320, 780, 1920, 3600, 6000, 9000, 13200, 19200],
+  ANTE_BASE: [280, 1050, 2600, 4800, 7800, 11600, 17000, 24000],
   ENDLESS_GROWTH: 1.9,
   BLIND_MULT: [1, 1.5, 2],
   BLIND_NAMES: ['스몰 블라인드', '빅 블라인드'],
@@ -45,6 +46,8 @@ export const CONFIG = {
 
   // 조각 생성 보정: 놓을 수 있는 조각이 하나도 없을 때 교체할 확률
   PLACEABLE_ASSIST: 0.85,
+  SWAPS: 2, // 라운드당 트레이 교체
+  RESCUE_COST: 10,
 
   DEBUG_TARGET_SCALE: 0.06,
   DEBUG_BONUS_COINS: 10,

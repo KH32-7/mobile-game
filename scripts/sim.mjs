@@ -137,6 +137,9 @@ function shopBot(g) {
   }
 }
 
+let hitLog = 0, roundBest = 0, hitRatioSum = 0, hitRatioN = 0;
+const byAnte = {}; const reasons = {};
+let startHands = null, swaps = 0, rescues = 0, traysUsed = 0;
 let anteSum = 0, wins = 0, ante1Deaths = 0, bigHits = 0, clears = 0, maxCoins = 0, movesPerRound = 0, roundsCnt = 0;
 const hist = {};
 for (let run = 0; run < runs; run++) {
@@ -150,22 +153,38 @@ for (let run = 0; run < runs; run++) {
       const res = g.place(m.i, m.r, m.c);
       if (res && res.cleared) {
         clears++;
+        if (res.total > roundBest) roundBest = res.total;
+        if (process.env.SIM_HITS && g.jokers.length >= 3 && res.total > g.target * 0.8 && hitLog < 25) { hitLog++; const b = res.steps[0]; console.log(`ante ${g.ante} target ${g.target} total ${res.total} lines ${b.lines} base ${b.chips}x${b.mult} final ${Math.round(res.chips)}x${res.mult.toFixed(1)} combo ${b.combo}`, res.steps.filter((x) => x.kind !== 'base').map((x) => (x.kind === 'joker' ? g.jokers[x.idx]?.id : x.gem) + ':' + x.e.t[0] + x.e.v).join(' ')); }
         const base = res.steps[0].chips * res.steps[0].mult;
         if (base > g.target * 0.25) bigHits++;
       }
-      const out = g.resolve();
-      if (out === 'roundClear') { roundsCnt++; movesPerRound += g.placedCount; }
+      if (startHands == null) startHands = g.handsLeft + 1;
+      let out = g.resolve();
+      while (out === 'stuck' || out === 'rescue') {
+        if (out === 'stuck') { g.swapTray(); swaps++; out = g.resolveStuck(); continue; }
+        rescues++;
+        if (g.coins >= 10) g.rescue('coins');
+        else if (g.jokers.length) { let wi = 0; g.jokers.forEach((j, k) => { if (val(j) < val(g.jokers[wi])) wi = k; }); g.rescue('joker', wi); }
+        else { out = g.declineRescue(); break; }
+        out = g.resolveStuck();
+      }
+      if (out === 'roundClear') { roundsCnt++; movesPerRound += g.placedCount; traysUsed += startHands - g.rewards.handsLeft; if (g.jokers.length >= 3) { hitRatioSum += roundBest / g.target; hitRatioN++; } roundBest = 0; const ak = g.clearedAnte + '-' + g.clearedBlind; (byAnte[ak] ||= []).push(startHands - g.rewards.handsLeft); startHands = null; }
     } else if (g.phase === 'shop') {
+      startHands = null;
       maxCoins = Math.max(maxCoins, g.coins);
       if (buyMode >= 1) shopBot(g);
       g.nextRound();
     } else break;
   }
   const won = g.phase === 'victory';
+  if (!won) reasons[g.gameOverReason] = (reasons[g.gameOverReason] || 0) + 1;
   if (won) wins++;
   const reached = won ? 9 : g.ante;
   if (reached === 1) ante1Deaths++;
   anteSum += reached;
   hist[reached] = (hist[reached] || 0) + 1;
 }
-console.log(`buy ${buyMode} place ${placeMode} stake ${stake} runs ${runs}: avg ante ${(anteSum / runs).toFixed(2)} win ${((wins / runs) * 100).toFixed(1)}% ante1 death ${((ante1Deaths / runs) * 100).toFixed(1)}% | base clear > 25% target: ${((bigHits / Math.max(1, clears)) * 100).toFixed(1)}% | moves/round ${(movesPerRound / Math.max(1, roundsCnt)).toFixed(1)} | max coins ${maxCoins}`, JSON.stringify(hist));
+console.log(`buy ${buyMode} place ${placeMode} stake ${stake} runs ${runs}: avg ante ${(anteSum / runs).toFixed(2)} win ${((wins / runs) * 100).toFixed(1)}% ante1 death ${((ante1Deaths / runs) * 100).toFixed(1)}% | base clear > 25% target: ${((bigHits / Math.max(1, clears)) * 100).toFixed(1)}% | moves/round ${(movesPerRound / Math.max(1, roundsCnt)).toFixed(1)} | best hit/target (jokers 3+) ${(hitRatioSum / Math.max(1, hitRatioN) * 100).toFixed(0)}% | trays/round ${(traysUsed / Math.max(1, roundsCnt)).toFixed(2)} | swaps/run ${(swaps / runs).toFixed(1)} rescues/run ${(rescues / runs).toFixed(2)} | max coins ${maxCoins}`, JSON.stringify(hist));
+
+if (process.env.SIM_DETAIL) console.log('death:', JSON.stringify(reasons));
+if (process.env.SIM_DETAIL) console.log(Object.entries(byAnte).sort().map(([k, v]) => `${k}:${(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1)}`).join(' '));

@@ -4,7 +4,7 @@ import { JOKERS, JOKER_BY_ID } from './jokers.js';
 import { RNG } from './rng.js';
 import {
   STARTER_JOKERS, UNLOCK_COST, DECKS, DECK_BY_ID, STAKES, SKINS, SKIN_BY_ID, ACHIEVEMENTS, MISSIONS, MISSION_BY_ID,
-  WEEKLY, WEEKLY_BY_ID, WEEKLY_CHEST, CALENDAR,
+  WEEKLY, WEEKLY_BY_ID, WEEKLY_CHEST, WEEKLY_REWARD, CALENDAR,
 } from './metadata.js';
 import { BOSS_BY_ID } from './bosses.js';
 
@@ -15,7 +15,7 @@ const OLD_KEY = 'blockJoker.v1';
 const STAT_KEYS = [
   'runs', 'wins', 'roundsCleared', 'bossesBeaten', 'totalLines', 'gemsCleared', 'jokersBought', 'bestHit', 'bestRoundScore',
   'maxCombo', 'maxLines', 'bestAnte', 'dailyRuns', 'tokensEarned', 'allClears', 'maxJokers', 'maxCoins', 'bestStreak',
-  'maxLineLv', 'maxVouchers', 'legendsOwned', 'showdowns', 'editions', 'planetsUsed',
+  'maxLineLv', 'maxVouchers', 'legendsOwned', 'showdowns', 'editions', 'planetsUsed', 'showdownKinds',
 ];
 
 function defaults() {
@@ -34,12 +34,13 @@ function defaults() {
     sel: { stake: 1, deck: 'basic', skin: 'neon' },
     achievements: {},
     achClaimed: {},
+    showdownKinds: [],
     daily: { date: '', missions: [], played: false, best: 0, bestAnte: 0 },
     dailyHistory: {}, // { 'YYYY-MM-DD': { ante, hit, won, rule } }
     weekly: { week: '', missions: [], chest: false },
     streak: { last: '', count: 0, claimed: '' },
     settings: { bgm: 0.7, sfx: 0.9, vib: true, speed: 1 },
-    coach: { calc: false, shop: false, bosses: [] },
+    coach: { calc: false, shop: false, tray: false, bosses: [] },
     run: null,
     tutorialDone: false,
     muted: false,
@@ -107,7 +108,7 @@ export function migrate(raw) {
     d.weekly.week = str(raw.weekly.week);
     d.weekly.chest = !!raw.weekly.chest;
     if (Array.isArray(raw.weekly.missions)) {
-      d.weekly.missions = raw.weekly.missions.filter((m) => isObj(m) && WEEKLY_BY_ID[m.id]).map((m) => ({ id: m.id, n: num(m.n, WEEKLY_BY_ID[m.id].n), p: num(m.p), done: !!m.done }));
+      d.weekly.missions = raw.weekly.missions.filter((m) => isObj(m) && WEEKLY_BY_ID[m.id]).map((m) => ({ id: m.id, n: num(m.n, WEEKLY_BY_ID[m.id].n), p: num(m.p), done: !!m.done, claimed: m.claimed !== false && !!m.done }));
     }
   }
   if (isObj(raw.streak)) d.streak = { last: str(raw.streak.last), count: num(raw.streak.count), claimed: str(raw.streak.claimed, raw.version < 3 ? str(raw.streak.last) : '') };
@@ -121,8 +122,10 @@ export function migrate(raw) {
   if (isObj(raw.coach)) {
     d.coach.calc = !!raw.coach.calc;
     d.coach.shop = !!raw.coach.shop;
+    d.coach.tray = !!raw.coach.tray || (!!raw.tutorialDone && raw.coach.tray === undefined);
     d.coach.bosses = Array.isArray(raw.coach.bosses) ? raw.coach.bosses.filter((b) => BOSS_BY_ID[b]) : [];
   }
+  if (Array.isArray(raw.showdownKinds)) d.showdownKinds = raw.showdownKinds.filter((x) => typeof x === 'string');
   if (isObj(raw.run) && (raw.run.v === 1 || raw.run.v === 2)) d.run = raw.run;
   d.tutorialDone = !!raw.tutorialDone;
   if (d.tutorialDone && raw.version < 3) { d.coach.calc = true; d.coach.shop = true; }
@@ -268,7 +271,7 @@ export class Meta {
       if (m.id !== id || m.done) continue;
       const def = WEEKLY_BY_ID[m.id];
       m.p = def.max ? Math.max(m.p, v) : m.p + v;
-      if (m.p >= m.n) { m.p = m.n; m.done = true; this.toast(`주간 미션 완료: ${def.text(m.n)}`, 'ach'); }
+      if (m.p >= m.n) { m.p = m.n; m.done = true; m.claimed = false; this.toast(`주간 미션 완료: ${def.text(m.n)} (미션에서 받기)`, 'ach'); }
     }
   }
 
@@ -282,6 +285,25 @@ export class Meta {
     return r;
   }
 
+  claimWeekly(i) {
+    const m = this.d.weekly.missions[i];
+    if (!m || !m.done || m.claimed) return 0;
+    m.claimed = true;
+    this.d.tokens += WEEKLY_REWARD; this.d.stats.tokensEarned += WEEKLY_REWARD;
+    this.save();
+    return WEEKLY_REWARD;
+  }
+
+  // 받을 수 있는 보상 모두 받기
+  claimAll() {
+    let t = 0;
+    this.d.daily.missions.forEach((m, i) => { t += this.claimMission(i); });
+    this.d.weekly.missions.forEach((m, i) => { t += this.claimWeekly(i); });
+    for (const a of ACHIEVEMENTS) t += this.claimAchievement(a.id);
+    t += this.claimChest();
+    return t;
+  }
+
   claimAchievement(id) {
     const a = ACHIEVEMENTS.find((x) => x.id === id);
     if (!a || !this.d.achievements[id] || this.d.achClaimed[id]) return 0;
@@ -292,7 +314,7 @@ export class Meta {
   }
 
   get claimables() {
-    return this.d.daily.missions.filter((m) => m.done && !m.claimed).length + ACHIEVEMENTS.filter((a) => this.d.achievements[a.id] && !this.d.achClaimed[a.id]).length + (this.chestReady ? 1 : 0);
+    return this.d.daily.missions.filter((m) => m.done && !m.claimed).length + this.d.weekly.missions.filter((m) => m.done && !m.claimed).length + ACHIEVEMENTS.filter((a) => this.d.achievements[a.id] && !this.d.achClaimed[a.id]).length + (this.chestReady ? 1 : 0);
   }
 
   get missionsDone() { return this.d.daily.missions.filter((m) => m.done).length; }
@@ -369,7 +391,7 @@ export class Meta {
     if (game.clearedBlind === 2) {
       s.bossesBeaten++;
       this.missionProgress('boss', 1);
-      if (game.clearedAnte % 8 === 0) s.showdowns++;
+      if (game.clearedAnte % 8 === 0) { s.showdowns++; if (!this.d.showdownKinds.includes(game.lastShowdown)) this.d.showdownKinds.push(game.lastShowdown); s.showdownKinds = this.d.showdownKinds.length; }
     }
     this.missionProgress('rounds', 1);
     this.onAnte(game.phase === 'victory' ? game.clearedAnte : game.ante, game);

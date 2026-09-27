@@ -1,10 +1,10 @@
 // DOM 오버레이 (타이틀, 설정, 상점, 결과, 컬렉션, 미션, 프로필, 툴팁, 토스트, 코치 마크)
 import { CONFIG, COLORS } from './config.js';
-import { JOKERS, JOKER_BY_ID, RARITY_LABEL, RARITY_COLOR, EDITIONS, jokerDesc, fmt } from './jokers.js';
+import { JOKERS, JOKER_BY_ID, RARITY_LABEL, RARITY_COLOR, EDITIONS, jokerDesc, fmt, effectLabel } from './jokers.js';
 import { BOSS_BY_ID } from './bosses.js';
 import { Renderer, FONT, GEM_COLOR } from './render.js';
 import { drawBossIcon } from './art.js';
-import { DECKS, STAKES, SKINS, ACHIEVEMENTS, MISSION_BY_ID, WEEKLY_BY_ID, WEEKLY_CHEST, CALENDAR, DECK_BY_ID } from './metadata.js';
+import { DECKS, STAKES, SKINS, ACHIEVEMENTS, MISSION_BY_ID, WEEKLY_BY_ID, WEEKLY_CHEST, WEEKLY_REWARD, CALENDAR, DECK_BY_ID } from './metadata.js';
 import { HANDS, HAND_KEYS, PLANET_BY_ID, GEM_CARD_BY_ID, PACK_BY_ID, VOUCHER_BY_ID } from './items.js';
 import { DAILY_RULES } from './game.js';
 import { levelInfo, dateKey } from './meta.js';
@@ -43,7 +43,7 @@ export function jokerCanvas(j, w, h, opts = {}) {
   return c;
 }
 
-function silhouetteCanvas(w, h, locked) {
+function silhouetteCanvas(w, h, locked, name = '') {
   const { c, r, padd } = cardCanvas(w, h);
   const g = r.ctx;
   g.translate(padd, padd);
@@ -58,6 +58,11 @@ function silhouetteCanvas(w, h, locked) {
     g.strokeStyle = '#3a2d4f'; g.lineWidth = s * 0.35;
     g.beginPath(); g.arc(cx, cy - s * 0.2, s * 0.65, Math.PI, 0); g.stroke();
   } else g.fillText('?', w / 2, h * 0.45);
+  if (name) {
+    g.fillStyle = locked ? '#8f80b8' : '#b9a8e6';
+    g.font = `900 ${Math.round(h * 0.18)}px ${FONT}`;
+    g.fillText(name[0] + '···', w / 2, h * 0.82);
+  }
   return c;
 }
 
@@ -119,6 +124,24 @@ function itemCanvas(kind, id, w, h) {
 }
 
 const tokenIcon = '<i class="tok"></i>';
+
+// 현재 빌드 기준 대략적인 기여도 (가로 1줄 제거 기준)
+function estimateJoker(j, g) {
+  const d = JOKER_BY_ID[j.id];
+  if (!d.onScore) return d.passive ? '패시브: 규칙을 바꾸는 조커' : '점수 외 효과';
+  const fake = Object.create(g);
+  fake.rng = { chance: () => false, pick: (a) => a[0], int: () => 0, next: () => 0.99 };
+  const ctx = { rows: [3], cols: [], lines: 1, cells: [], cellCount: 8, piece: { size: 4, tags: ['bar'], id: 'i4h' }, hand: 'row', combo: Math.max(2, g.combo + 1), lastInTray: false, firstInTray: false, gemCount: 0, goldCount: 0, hasCorner: false, edgeLines: 0, centerLines: 0, remainingAfter: 16, boardEmptyAfter: false, prevLines: 1, trayClears: 1 };
+  let eff = null;
+  try { eff = d.onScore(fake, { ...j }, ctx); } catch { eff = null; }
+  const hv = g.handValues('row', 1);
+  const base = (40 + hv.c) * hv.m;
+  if (!eff || !eff.length) return `가로 1줄 기준: 조건 미충족 (조건이 맞으면 발동)`;
+  let c = 40 + hv.c, m = hv.m;
+  for (const e of eff) { if (e.t === 'chips') c += e.v; else if (e.t === 'mult') m += e.v; else if (e.t === 'xmult') m *= e.v; }
+  const gain = Math.round(c * m - base);
+  return `가로 1줄 기준 예상: ${eff.map(effectLabel).join(', ')} → 한 방 +${fmt(gain)}점`;
+}
 
 export function bossCanvas(id, size) {
   const { c, r, padd } = cardCanvas(size, size);
@@ -370,7 +393,7 @@ export class UI {
         const unlocked = meta.isJokerUnlocked(j.id);
         const seen = d.discovered.includes(j.id);
         const det = el('div', 'detail row-detail');
-        det.appendChild(unlocked && seen ? jokerCanvas({ id: j.id, v: 0 }, 64, 80) : silhouetteCanvas(64, 80, !unlocked));
+        det.appendChild(unlocked && seen ? jokerCanvas({ id: j.id, v: 0 }, 64, 80) : silhouetteCanvas(64, 80, !unlocked, j.name));
         const info = el('div', 'info');
         info.innerHTML = `<div class="nm">${unlocked && seen ? j.name : unlocked ? '미발견 조커' : j.name} <span class="rar" style="color:${RARITY_COLOR[j.rarity]}">${RARITY_LABEL[j.rarity]}</span></div><div class="ds">${j.desc({ v: 0 }, null)}</div>` +
           (unlocked ? `<div class="hint">${seen ? '발견함' : '해금됨 · 상점에서 만나면 발견'}</div>` : '');
@@ -385,7 +408,7 @@ export class UI {
       for (const j of JOKERS) {
         const unlocked = meta.isJokerUnlocked(j.id);
         const seen = d.discovered.includes(j.id);
-        const c = unlocked && seen ? jokerCanvas({ id: j.id, v: 0 }, 50, 62) : silhouetteCanvas(50, 62, !unlocked);
+        const c = unlocked && seen ? jokerCanvas({ id: j.id, v: 0 }, 50, 62) : silhouetteCanvas(50, 62, !unlocked, j.name);
         const cell = el('div', 'dex-cell' + (this.colSel === j.id ? ' sel' : ''));
         cell.dataset.joker = j.id;
         cell.appendChild(c);
@@ -439,6 +462,7 @@ export class UI {
     mh.appendChild(el('h2', '', '미션'));
     mh.appendChild(el('div', 'coins tk', `${tokenIcon}<span class="tokc">${d.tokens}</span>`));
     box.appendChild(mh);
+    this.claimAllBtn(box, meta, () => this.showMissions(meta));
     const now = new Date();
     const mid = new Date(now); mid.setHours(24, 0, 0, 0);
     const left = Math.max(0, mid - now);
@@ -463,10 +487,22 @@ export class UI {
     box.appendChild(list);
     box.appendChild(el('div', 'label', `주간 미션 <small>3개 완료 시 주간 상자 ${WEEKLY_CHEST} 토큰</small>`));
     const wl = el('div', 'missions');
-    for (const m of d.weekly.missions) {
+    d.weekly.missions.forEach((m, i) => {
       const def = WEEKLY_BY_ID[m.id];
-      wl.appendChild(this.missionRow(def.text(m.n), m.p, m.n, null, m.done));
-    }
+      let claim = null;
+      if (m.done && !m.claimed) {
+        claim = this.btn('받기', 'small gold claim', () => {
+          const r = this.cb.claimMission(i, true);
+          if (!r) return;
+          const cnt = box.querySelector('.tokc');
+          flyTokens(claim, cnt);
+          claim.disabled = true; claim.textContent = `+${r}`;
+          setTimeout(() => { if (cnt) cnt.textContent = d.tokens; }, 600);
+          setTimeout(() => this.showMissions(meta), 900);
+        }, 'claim-w-' + i);
+      }
+      wl.appendChild(this.missionRow(def.text(m.n), m.p, m.n, WEEKLY_REWARD, m.done, claim));
+    });
     box.appendChild(wl);
     const chestBtn = this.btn(d.weekly.chest ? '주간 상자 수령함' : meta.chestReady ? '주간 상자 열기!' : `주간 상자 (${meta.weeklyDone}/3)`, (meta.chestReady ? 'gold chest' : 'off'), () => {
       const r = this.cb.claimChest();
@@ -491,6 +527,51 @@ export class UI {
     box.appendChild(this.backBtn());
     s.appendChild(box);
     this.show('missions');
+  }
+
+  claimAllBtn(box, meta, rerender) {
+    const n = meta.claimables;
+    if (!n) return;
+    const b = this.btn(`모두 받기 (${n})`, 'gold claimall', () => {
+      const r = this.cb.claimAll();
+      if (!r) return;
+      const cnt = box.querySelector('.tokc');
+      flyTokens(b, cnt, 10);
+      b.disabled = true; b.textContent = `+${r} 토큰`;
+      setTimeout(() => { if (cnt) cnt.textContent = meta.d.tokens; }, 600);
+      setTimeout(rerender, 950);
+    }, 'btn-claim-all');
+    box.appendChild(b);
+  }
+
+  // ---------- 막힘 구제 ----------
+  showRescue(g) {
+    const box = el('div', 'panel rescue');
+    box.appendChild(el('h2', 'over', '놓을 곳이 없음!'));
+    box.appendChild(el('p', 'reason', '런당 1번, 막힘 구제로 가장 꽉 찬 가로줄 3개를 즉시 비울 수 있음 (점수 없음)'));
+    const can = g.coins >= CONFIG.RESCUE_COST;
+    box.appendChild(this.btn(`$${CONFIG.RESCUE_COST} 내고 구제`, 'gold' + (can ? '' : ' off'), () => { if (!can) return; this.hideModal(); this.cb.rescue('coins'); }, 'rescue-coins'));
+    if (g.jokers.length) {
+      box.appendChild(el('div', 'label', '또는 조커 1장 희생'));
+      const row = el('div', 'choices');
+      g.jokers.forEach((j, i) => row.appendChild(this.btn(JOKER_BY_ID[j.id].name, 'small', () => { this.hideModal(); this.cb.rescue('joker', i); }, 'rescue-j' + i)));
+      box.appendChild(row);
+    }
+    box.appendChild(this.btn('포기 (게임 오버)', 'red', () => { this.hideModal(); this.cb.rescue('decline'); }, 'rescue-decline'));
+    this.showModal(box);
+  }
+
+  // 첫 라운드 전 안내 카드
+  showTrayCard() {
+    const box = el('div', 'panel traycard');
+    box.appendChild(el('h2', '', '트레이 = 라운드의 수명'));
+    const row = el('div', 'trayrow');
+    for (let i = 0; i < 6; i++) row.appendChild(el('i', i < 5 ? 'on' : ''));
+    box.appendChild(row);
+    box.appendChild(el('p', 'reason', '조각 3개가 트레이 1개. 라운드마다 트레이 6개 안에 목표 점수를 넘기면 클리어.'));
+    box.appendChild(el('p', 'reason', '<b style="color:#ff8fa3">놓을 곳이 없으면 패배.</b> 막히면 아래 <b style="color:#ffe68a">↻ 트레이 교체</b>(라운드마다 2번)로 조각을 바꿀 것.'));
+    box.appendChild(this.btn('시작!', 'big gold', () => { this.hideModal(); this.cb.coachDone('tray'); }, 'tray-ok'));
+    this.showModal(box);
   }
 
   // ---------- 출석 캘린더 ----------
@@ -535,11 +616,12 @@ export class UI {
     ph.appendChild(el('h2', '', `프로필 <small>Lv.${lv.lvl}</small>`));
     ph.appendChild(el('div', 'coins tk', `${tokenIcon}<span class="tokc">${d.tokens}</span>`));
     box.appendChild(ph);
+    this.claimAllBtn(box, meta, () => this.showProfile(meta));
     box.appendChild(el('div', 'xpbar', `<span style="width:${Math.round((lv.cur / lv.need) * 100)}%"></span><em>${lv.cur} / ${lv.need} XP</em>`));
     const t = el('div', 'stats two');
     const rows = [
       ['총 플레이', st.runs], ['승리', st.wins], ['최고 앤티', st.bestAnte || '-'], ['최고 한 방', fmt(st.bestHit)],
-      ['최고 라운드 점수', fmt(st.bestRoundScore)], ['제거한 줄', fmt(st.totalLines)], ['클리어 라운드', st.roundsCleared], ['보스 격파', st.bossesBeaten],
+      ['최고 라운드', fmt(st.bestRoundScore)], ['제거한 줄', fmt(st.totalLines)], ['클리어 라운드', st.roundsCleared], ['보스 격파', st.bossesBeaten],
       ['보석 제거', st.gemsCleared], ['조커 구매', st.jokersBought], ['최대 콤보', st.maxCombo], ['데일리 런', st.dailyRuns],
       ['누적 토큰', st.tokensEarned], ['최장 출석', st.bestStreak + '일'],
     ];
@@ -595,14 +677,16 @@ export class UI {
     g.fillStyle = '#0d3b2a'; g.fillRect(0, 0, W, H);
     const cell = 16;
     if (page === 0) {
-      const bx = 20, by = 10;
-      for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++) { g.fillStyle = (x + y) % 2 ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.4)'; g.fillRect(bx + x * cell + 1, by + y * cell + 1, cell - 2, cell - 2); }
-      for (let x = 0; x < 5; x++) r.drawBlock(x % 3, bx + x * cell, by + 4 * cell, cell);
-      g.fillStyle = 'rgba(255,255,255,0.45)'; g.fillRect(bx, by + 4 * cell, 6 * cell, cell);
-      r.drawBlock(3, bx + 5 * cell, by + 2 * cell, cell, 0.4); r.drawBlock(3, bx + 5 * cell, by + 3 * cell, cell, 0.4); r.drawBlock(3, bx + 5 * cell, by + 4 * cell, cell, 0.4);
-      for (let k = 0; k < 3; k++) r.drawBlock(3, 170 + 12, 20 + k * cell, cell);
-      g.fillStyle = '#fff'; g.beginPath(); g.arc(190, 88, 12, 0, Math.PI * 2); g.fill();
-      g.strokeStyle = '#ffd23f'; g.lineWidth = 3; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(170, 60); g.quadraticCurveTo(140, 20, 125, 40); g.stroke(); g.setLineDash([]);
+      // 8x8 보드
+      const c8 = 14.5, bx = 10, by = 7;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { g.fillStyle = (x + y) % 2 ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.4)'; g.fillRect(bx + x * c8 + 1, by + y * c8 + 1, c8 - 2, c8 - 2); }
+      for (let x = 0; x < 7; x++) r.drawBlock(x % 3, bx + x * c8, by + 6 * c8, c8);
+      [[5, 2], [5, 3], [6, 3], [0, 5], [1, 5], [7, 7], [6, 7]].forEach(([x, y], k) => r.drawBlock(k % 5, bx + x * c8, by + y * c8, c8));
+      g.fillStyle = 'rgba(255,255,255,0.45)'; g.fillRect(bx, by + 6 * c8, 8 * c8, c8);
+      r.drawBlock(4, bx + 7 * c8, by + 4 * c8, c8, 0.4); r.drawBlock(4, bx + 7 * c8, by + 5 * c8, c8, 0.4); r.drawBlock(4, bx + 7 * c8, by + 6 * c8, c8, 0.4);
+      for (let k = 0; k < 3; k++) r.drawBlock(4, 196, 18 + k * cell, cell);
+      g.fillStyle = '#fff'; g.beginPath(); g.arc(204, 96, 12, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#ffd23f'; g.lineWidth = 3; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(186, 60); g.quadraticCurveTo(160, 20, 136, 62); g.stroke(); g.setLineDash([]);
     } else if (page === 1) {
       const box = (x, col, t) => { g.fillStyle = col; g.fillRect(x, 40, 90, 44); g.fillStyle = '#fff'; g.font = `900 22px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, x + 45, 62); };
       box(12, '#1a7fe0', '50 칩'); box(158, '#e0304f', 'x 3');
@@ -687,6 +771,10 @@ export class UI {
         <p><b class="c">칩</b>: 지운 칸 수 x 5 + 줄 종류 보너스</p>
         <p><b class="m">배수</b>: 줄 종류(가로, 세로, 더블, 멀티, 십자) + 콤보</p>
         <p>한 번에 여러 줄, 연달아 지우면 배수가 쑥쑥 오름. 조커와 보석이 여기에 더하고 곱함.</p>`;
+      if (rects.vals) {
+        const v = rects.vals;
+        html = `<div class="coach-vals"><span class="cv c">${fmt(v.chips)}</span><b>X</b><span class="cv m">${Number.isInteger(v.mult) ? v.mult : v.mult.toFixed(1)}</span><b>=</b><span class="cv t">${fmt(v.total)}</span></div><div class="dim">방금 ${HANDS[v.hand].name} 제거 점수</div>` + html;
+      }
       const tipBox = el('div', 'coach-box', html);
       tipBox.style.top = r.y + r.h + 18 + 'px';
       c.appendChild(tipBox);
@@ -782,7 +870,8 @@ export class UI {
     if (rw) {
       box.appendChild(el('h2', 'clear', '라운드 클리어!'));
       const parts = [`블라인드 $${rw.base}`];
-      if (rw.hands) parts.push(`남은 트레이 ${rw.handsLeft} x $${CONFIG.COIN_PER_HAND}`);
+      if (rw.handsLeft) parts.push(`남은 트레이 ${rw.handsLeft} x $${CONFIG.COIN_PER_HAND}`);
+      if (rw.swapsLeft) parts.push(`남은 교체 ${rw.swapsLeft} x $1`);
       if (rw.interest) parts.push(`이자 $${rw.interest}`);
       if (rw.jokerCoins) parts.push(`조커 $${rw.jokerCoins}`);
       box.appendChild(el('div', 'reward', parts.join(' · ') + ` <b>+$${rw.total}</b>`));
@@ -815,7 +904,11 @@ export class UI {
       const d = JOKER_BY_ID[o.id];
       const can = g.coins >= o.price && (!full || o.ed === 'neg');
       const t = this.tile(jokerCanvas({ id: o.id, v: 0, ed: o.ed }, 58, 74), o.price, can, o.sold, () => {
-        this.itemPopover(`${d.name} <span class="rar" style="color:${RARITY_COLOR[d.rarity]}">${RARITY_LABEL[d.rarity]}</span>`, o.ed ? `<span style="color:${EDITIONS[o.ed].color}">${EDITIONS[o.ed].name} 에디션: ${EDITIONS[o.ed].desc}</span>` : '', d.desc({ v: 0 }, g), `구매 $${o.price}`, can, () => this.cb.buyJoker(i));
+        const art = el('div', 'bigart');
+        art.appendChild(jokerCanvas({ id: o.id, v: 0, ed: o.ed }, 96, 122));
+        art.appendChild(el('div', 'est', estimateJoker(o, g)));
+        const lab = full && o.ed !== 'neg' ? '슬롯 가득: 판매 후 구매' : g.coins < o.price ? `코인 부족 ($${o.price})` : `구매 $${o.price}`;
+        this.itemPopover(`${d.name} <span class="rar" style="color:${RARITY_COLOR[d.rarity]}">${RARITY_LABEL[d.rarity]}</span>`, o.ed ? `<span style="color:${EDITIONS[o.ed].color}">${EDITIONS[o.ed].name} 에디션: ${EDITIONS[o.ed].desc}</span>` : '', d.desc({ v: 0 }, g), lab, can, () => this.cb.buyJoker(i), art);
       }, 'jt', o.isNew ? 'NEW' : '');
       t.dataset.offer = i;
       t.dataset.joker = o.id;
@@ -824,14 +917,15 @@ export class UI {
     box.appendChild(jr);
 
     box.appendChild(el('div', 'label', '카드 · 팩 · 바우처'));
-    const cr = el('div', 'tiles');
+    const cr = el('div', 'tiles hscroll');
     sh.cards.forEach((o, i) => {
       const can = g.coins >= o.price;
       let title, desc;
       if (o.kind === 'planet') {
         const p = PLANET_BY_ID[o.id]; const h = HANDS[p.hand]; const lv = g.lineLv[p.hand];
         title = `${p.name} · ${h.name} 강화`;
-        desc = `${h.name} Lv.${lv} → Lv.${lv + (g.hasVoucher('v_telescope') ? 2 : 1)} (레벨당 +${h.lc} 칩, +${h.lm} 배수)`;
+        const up = g.hasVoucher('v_telescope') ? 2 : 1;
+        desc = `${h.name} Lv.${lv} → ${lv + up}: +${h.lc * up} 칩 +${h.lm * up} 배수`;
       } else { const p = GEM_CARD_BY_ID[o.id]; title = p.name; desc = p.desc; }
       const t = this.tile(itemCanvas(o.kind, o.id, 58, 74), o.price, can, o.sold, () => this.itemPopover(title, o.kind === 'planet' ? '줄 강화 카드' : '보석 부여 카드', desc, `사용 $${o.price}`, can, () => this.cb.buyCard(i)), 'ct');
       t.dataset.card = i;
@@ -958,7 +1052,8 @@ export class UI {
       } else if (c.kind === 'planet') {
         const pl = PLANET_BY_ID[c.id]; const h = HANDS[pl.hand];
         card.appendChild(itemCanvas('planet', c.id, 72, 92));
-        title = `${pl.name}`; desc = `${h.name} Lv.${g.lineLv[pl.hand]} → ${g.lineLv[pl.hand] + (g.hasVoucher('v_telescope') ? 2 : 1)}`;
+        const up = g.hasVoucher('v_telescope') ? 2 : 1;
+        title = `${pl.name}`; desc = `${h.name} Lv.${g.lineLv[pl.hand]} → ${g.lineLv[pl.hand] + up}: +${h.lc * up} 칩 +${h.lm * up} 배수`;
       } else {
         const gc = GEM_CARD_BY_ID[c.id];
         card.appendChild(itemCanvas('gem', c.id, 72, 92));
@@ -1000,7 +1095,12 @@ export class UI {
     const box = el('div', 'panel');
     box.appendChild(el('h2', 'over', '게임 오버'));
     const reason = g.gameOverReason === 'stuck' ? '놓을 곳이 없음' : '트레이를 모두 사용함';
-    box.appendChild(el('div', 'reason', `${reason} · ${fmt(g.roundScore)} / ${fmt(g.target)}`));
+    const short = Math.max(0, g.target - g.roundScore);
+    box.appendChild(el('div', 'short', `<b>${fmt(short)}점 부족</b> · ${fmt(g.roundScore)} / ${fmt(g.target)}`));
+    const tips = g.gameOverReason === 'stuck'
+      ? ['보드 가운데를 비워두면 큰 조각도 들어감', '놓을 곳이 없으면 아래 트레이 교체 버튼부터', '3x3, 1x5 조각 자리를 항상 남겨둘 것']
+      : ['트레이는 라운드의 수명. 2줄 이상 동시 제거를 노릴 것', '상점의 줄 강화 카드로 자주 지우는 줄 종류를 키울 것', '더하기 조커를 왼쪽, 곱하기 조커를 오른쪽에'];
+    box.appendChild(el('div', 'reason', `${reason} · 팁: ${tips[(g.placedCount || 0) % tips.length]}`));
     box.appendChild(el('div', '', this.summaryHtml(sum)));
     if (g.opts.daily) box.appendChild(this.shareCard(g, false));
     const t = el('div', 'stats');

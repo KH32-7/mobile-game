@@ -55,6 +55,7 @@ export class Game {
     this.totalLines = 0;
     this.runStats = emptyStats();
     this.lastBoss = null;
+    this.rescueUsed = false;
     this.lastShopIds = [];
     this.voucherOffer = null;
     this.voucherAnte = 0;
@@ -112,8 +113,11 @@ export class Game {
   handLevel(k) { return this.lineLv[k] + (this.hasPassive('architect') ? 2 : 0); }
   handValues(k, lines = 1) {
     const h = HANDS[k], lv = this.handLevel(k);
-    let c = h.c + h.lc * (lv - 1), m = h.m + h.lm * (lv - 1);
-    if (k === 'multi') m += Math.max(0, lines - 3);
+    let eff = lv;
+    // 더블/멀티는 가로/세로 레벨 중 높은 쪽을 일부 공유
+    if (k === 'double' || k === 'multi') eff += Math.floor((Math.max(this.handLevel('row'), this.handLevel('col')) - 1) / 2);
+    let c = h.c + h.lc * (eff - 1), m = h.m + h.lm * (eff - 1);
+    if (k === 'multi') m += 0.5 * Math.max(0, lines - 3);
     return { c, m, lv };
   }
 
@@ -124,7 +128,7 @@ export class Game {
       ante: this.ante, blind: this.blind, coins: this.coins,
       jokers: this.jokers.map((j) => ({ id: j.id, v: j.v || 0, price: j.price, ed: j.ed || null })),
       vouchers: this.vouchers, lineLv: this.lineLv, pendingGems: this.pendingGems,
-      endless: this.endless, runBestHit: this.runBestHit, totalLines: this.totalLines, runStats: this.runStats,
+      rescueUsed: !!this.rescueUsed, endless: this.endless, runBestHit: this.runBestHit, totalLines: this.totalLines, runStats: this.runStats,
       lastBoss: this.lastBoss, boss: this.boss, lastShopIds: this.lastShopIds,
       voucherOffer: this.voucherOffer, voucherAnte: this.voucherAnte,
     };
@@ -134,7 +138,7 @@ export class Game {
       Object.assign(s, {
         board: this.board, tray: this.tray.map(packPiece), target: this.target, roundScore: this.roundScore,
         combo: this.combo, missStreak: this.missStreak, placedCount: this.placedCount, handsLeft: this.handsLeft,
-        trayClears: this.trayClears, lastClearLines: this.lastClearLines, trayFull: this.trayFull,
+        trayClears: this.trayClears, lastClearLines: this.lastClearLines, trayFull: this.trayFull, swapsLeft: this.swapsLeft,
         disabled: this.jokers.map((j) => !!j.disabled),
       });
     }
@@ -153,6 +157,7 @@ export class Game {
     this.vouchers = Array.isArray(s.vouchers) ? s.vouchers.slice() : [];
     this.lineLv = Object.fromEntries(HAND_KEYS.map((k) => [k, (s.lineLv && s.lineLv[k]) || 1]));
     this.pendingGems = Array.isArray(s.pendingGems) ? s.pendingGems.slice() : [];
+    this.rescueUsed = !!s.rescueUsed;
     this.endless = !!s.endless; this.runBestHit = s.runBestHit || 0; this.totalLines = s.totalLines || 0;
     this.runStats = { ...emptyStats(), ...(s.runStats || {}) };
     this.lastBoss = s.lastBoss; this.boss = BOSS_BY_ID[s.boss] ? s.boss : 'lock';
@@ -180,6 +185,7 @@ export class Game {
       this.target = s.target; this.roundScore = s.roundScore; this.combo = s.combo || 0; this.missStreak = s.missStreak || 0;
       this.placedCount = s.placedCount || 0; this.handsLeft = s.handsLeft || 0; this.trayClears = s.trayClears || 0;
       this.lastClearLines = s.lastClearLines || 0; this.trayFull = !!s.trayFull;
+      this.swapsLeft = s.swapsLeft ?? CONFIG.SWAPS;
       (s.disabled || []).forEach((d, i) => { if (this.jokers[i]) this.jokers[i].disabled = d; });
       this.gameOverReason = null;
     } else {
@@ -216,6 +222,8 @@ export class Game {
     this.missStreak = 0;
     this.placedCount = 0;
     this.trayClears = 0;
+    this.swapsLeft = this.maxSwaps;
+    this.roundStartHands = null;
     this.lastClearLines = 0;
     this.handsLeft = CONFIG.HANDS + this.handsBonus + (this.hasVoucher('v_tray') ? 1 : 0) - (this.curse === 'poor' ? 1 : 0) - (this.opts.stake >= 4 && this.blind === 2 && this.ante >= 2 ? 1 : 0);
     this.gameOverReason = null;
@@ -290,7 +298,7 @@ export class Game {
     }
     // 약한 보정: 놓을 수 있는 조각이 하나도 없으면 높은 확률로 하나를 교체
     const visible = curse === 'fog' ? [0, 1] : [0, 1, 2];
-    if (!pieces.some((p) => this.fitsAnywhere(p.shape)) && this.rng.chance(CONFIG.PLACEABLE_ASSIST)) {
+    if (!pieces.some((p) => this.fitsAnywhere(p.shape)) && this.rng.chance(this.ante === 1 && this.blind < 2 ? 1 : CONFIG.PLACEABLE_ASSIST)) {
       const giant = curse === 'giant';
       const pool = this.rng.shuffle(SHAPES.filter((s) => !(giant && s.size <= 2)).slice());
       const fit = pool.find((s) => this.fitsAnywhere(s));
@@ -357,7 +365,7 @@ export class Game {
     const hv = this.handValues(hand, lines);
     const combo = this.curse === 'nocombo' ? 0 : this.combo;
     const chips = cells * CONFIG.CHIP_PER_CELL + hv.c;
-    const mult = hv.m + combo;
+    const mult = hv.m + combo * CONFIG.COMBO_MULT;
     return { hand, lv: hv.lv, chips, mult, total: chips * mult, rows, cols };
   }
 
@@ -421,7 +429,7 @@ export class Game {
     const hv = this.handValues(hand, lines);
     const comboBefore = curse === 'nocombo' ? 0 : this.combo;
     let chips = chipCells * CONFIG.CHIP_PER_CELL + Math.round(hv.c * (okLines / lines));
-    let mult = hv.m + comboBefore;
+    let mult = hv.m + comboBefore * CONFIG.COMBO_MULT;
     const steps = res.steps;
     steps.push({ kind: 'base', chips, mult, lines, combo: comboBefore, hand, lv: hv.lv });
 
@@ -525,6 +533,46 @@ export class Game {
     return res;
   }
 
+  get maxSwaps() { return CONFIG.SWAPS + (this.hasVoucher('v_swap') ? 1 : 0) + this.jokers.filter((j) => !j.disabled && j.id === 'recycler').length; }
+
+  // 트레이 교체: 현재 조각을 버리고 새 3조각 (트레이 수는 소모하지 않음)
+  swapTray() {
+    if (this.phase !== 'play' || this.swapsLeft <= 0) return false;
+    this.swapsLeft--;
+    this.handsLeft++;
+    this.drawTray();
+    this.jokers.forEach((j) => { if (!j.disabled && JOKER_BY_ID[j.id].onSwap) JOKER_BY_ID[j.id].onSwap(this, j); });
+    this.revealIfStuck();
+    return true;
+  }
+
+  // 막힘 구제 (런당 1회): 조커 1장 희생 또는 코인 지불, 가장 꽉 찬 가로줄 3개 제거
+  rescue(how, ji) {
+    if (this.rescueUsed || this.phase !== 'play') return false;
+    if (how === 'coins') { if (this.coins < CONFIG.RESCUE_COST) return false; this.coins -= CONFIG.RESCUE_COST; }
+    else if (how === 'joker') { if (!this.jokers[ji]) return false; this.jokers.splice(ji, 1); }
+    else return false;
+    this.rescueUsed = true;
+    const rows = [];
+    for (let r = 0; r < N; r++) { let n = 0; for (let c = 0; c < N; c++) { const cl = this.board[idx(r, c)]; if (cl && !cl.stone) n++; } rows.push([r, n]); }
+    rows.sort((a, b) => b[1] - a[1]);
+    this.rescuedRows = rows.slice(0, 3).map((x) => x[0]);
+    for (const r of this.rescuedRows) for (let c = 0; c < N; c++) { const cl = this.board[idx(r, c)]; if (cl && !cl.stone) this.board[idx(r, c)] = null; }
+    this.revealIfStuck();
+    return true;
+  }
+
+  declineRescue() { this.rescueUsed = true; return this.tryPhoenix('stuck'); }
+
+  // 막힌 상태에서 교체/구제가 모두 불가하면 게임 오버
+  resolveStuck() {
+    this.revealIfStuck();
+    if (this.anyPlaceable()) return 'continue';
+    if (this.swapsLeft > 0) return 'stuck';
+    if (!this.rescueUsed) return 'rescue';
+    return this.tryPhoenix('stuck');
+  }
+
   // 배치 직후 상태 결정 (연출과 무관하게 즉시)
   resolve() {
     if (this.roundScore >= this.target) {
@@ -534,13 +582,10 @@ export class Game {
     if (this.tray.every((p) => !p)) {
       if (this.handsLeft <= 0) return this.tryPhoenix('hands');
       this.drawTray();
-      this.revealIfStuck();
-      if (!this.anyPlaceable()) return this.tryPhoenix('stuck');
-      return 'newTray';
+      const st = this.resolveStuck();
+      return st === 'continue' ? 'newTray' : st;
     }
-    this.revealIfStuck();
-    if (!this.anyPlaceable()) return this.tryPhoenix('stuck');
-    return 'continue';
+    return this.resolveStuck();
   }
 
   tryPhoenix(reason) {
@@ -564,18 +609,20 @@ export class Game {
 
   finishRound() {
     const base = this.opts.stake >= 2 && this.blind === 0 ? 0 : CONFIG.BLIND_REWARD[this.blind];
-    const hands = this.handsLeft * CONFIG.COIN_PER_HAND;
+    const hands = this.handsLeft * CONFIG.COIN_PER_HAND + (this.swapsLeft || 0);
     const interest = this.opts.stake >= 5 ? 0 : Math.min(this.interestCap, Math.floor(this.coins / CONFIG.INTEREST_STEP));
     let jokerCoins = 0;
     for (const j of this.jokers) { const d = JOKER_BY_ID[j.id]; if (d.onRoundEnd && !j.disabled) jokerCoins += d.onRoundEnd(this, j) || 0; }
     const total = base + hands + interest + jokerCoins;
     this.coins += total;
     this.jokers.forEach((j) => { j.disabled = false; });
-    this.rewards = { base, hands, handsLeft: this.handsLeft, interest, jokerCoins, total };
+    this.rewards = { base, hands, handsLeft: this.handsLeft, swapsLeft: this.swapsLeft || 0, interest, jokerCoins, total };
+    this.tray = [null, null, null];
     this.wasFinal = !this.endless && this.blind === 2 && this.ante === CONFIG.FINAL_ANTE;
     this.phase = this.wasFinal ? 'victory' : 'shop';
     this.clearedAnte = this.ante;
     this.clearedBlind = this.blind;
+    if (this.blind === 2 && this.isShowdown()) this.lastShowdown = this.boss;
     this.runStats.rounds++;
     if (this.blind === 2) this.runStats.bosses++;
     this.advance();

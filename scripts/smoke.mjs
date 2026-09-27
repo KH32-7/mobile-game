@@ -1,3 +1,4 @@
+import os from 'node:os';
 // 스모크 테스트: vite preview 를 띄우고 모바일 뷰포트에서 실제 터치 입력으로 플레이
 // 타이틀 -> 플레이 -> 라운드 클리어 -> 상점(조커/카드/팩/바우처) -> 다음 라운드 -> ... -> 게임 오버, 메타 진행, 사운드 오프라인 렌더
 import { spawn } from 'node:child_process';
@@ -47,7 +48,7 @@ const vis = async (page, sel) => (await page.locator(sel).count()) > 0 && page.l
 async function clearOverlays(page) {
   for (let k = 0; k < 4; k++) {
     let hit = false;
-    for (const sel of ['#btn-claim', '#coach-ok', '#boss-ok', '#btn-cal-close']) {
+    for (const sel of ['#btn-claim', '#coach-ok', '#boss-ok', '#btn-cal-close', '#tray-ok']) {
       if (await vis(page, sel)) { await page.locator(sel).first().tap(); await page.waitForTimeout(sel === '#btn-claim' ? 1100 : 250); hit = true; }
     }
     if (!hit) return;
@@ -141,7 +142,18 @@ async function main() {
       await page.waitForTimeout(600);
       let s = await state(page);
       check(s.phase === 'play' && !s.ui, '게임 시작');
+      check(await vis(page, '#tray-ok'), '첫 라운드 전 트레이 안내 카드');
+      await page.screenshot({ path: 'shots/05-tray-card.png' });
+      await page.locator('#tray-ok').tap(); await page.waitForTimeout(200);
       await page.evaluate(() => { window.__bj.game.target = 400; });
+      // 트레이 교체
+      {
+        const sb = await page.evaluate(() => window.__bj.layout().swapBtn);
+        const before = await page.evaluate(() => ({ s: window.__bj.game.swapsLeft, h: window.__bj.game.handsLeft }));
+        await page.touchscreen.tap(sb.x + sb.w / 2, sb.y + sb.h / 2); await page.waitForTimeout(250);
+        const after = await page.evaluate(() => ({ s: window.__bj.game.swapsLeft, h: window.__bj.game.handsLeft }));
+        check(after.s === before.s - 1 && after.h === before.h, '트레이 교체 (교체 1회 소모, 트레이 수 유지)');
+      }
       await page.screenshot({ path: 'shots/05-play-tutorial.png' });
       await page.waitForTimeout(1200);
       {
@@ -251,6 +263,23 @@ async function main() {
       await clearOverlays(page);
       if ((await state(page)).ui === 'shop') { await page.locator('#btn-next').tap(); await page.waitForTimeout(600); }
       await clearOverlays(page);
+      // 막힘 구제
+      if ((await state(page)).phase === 'play') {
+        await page.evaluate(() => {
+          const g = window.__bj.game;
+          g.swapsLeft = 0; g.rescueUsed = false; g.coins += 20;
+          for (let k = 0; k < 64; k++) g.board[k] = (k % 8 === 3 && Math.floor(k / 8) % 2 === 0) ? null : { color: 1 };
+          g.tray = g.tray.map((p) => p && { ...p, shape: { id: 'o3', cells: [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2], [2, 0], [2, 1], [2, 2]], w: 3, h: 3, size: 9, tags: ['big'] } });
+          return window.__bj.stuckCheck();
+        });
+        await page.waitForTimeout(700);
+        await page.screenshot({ path: 'shots/15-rescue.png' });
+        check(await vis(page, '#rescue-coins'), '막힘 구제 모달 (교체 소진 시)');
+        await page.locator('#rescue-coins').tap(); await page.waitForTimeout(400);
+        check((await page.evaluate(() => window.__bj.game.rescueUsed && window.__bj.game.board.filter(Boolean).length < 64 - 8)), '구제: 가장 꽉 찬 가로줄 3개 제거');
+        await page.waitForTimeout(1200);
+        await page.evaluate(() => { const g = window.__bj.game; g.board.fill(null); g.swapsLeft = 2; });
+      }
       const st = await state(page);
       if (st.phase === 'play' && !st.ui) {
         const P = await page.evaluate(() => window.__bj.layout().pause);
@@ -413,6 +442,12 @@ async function main() {
       await page.locator('#btn-back >> visible=true').tap();
       await page.locator('#btn-profile').tap(); await page.waitForTimeout(150);
       await page.screenshot({ path: 'shots/23-profile.png' });
+      if (await vis(page, '#btn-claim-all')) {
+        const tb0 = await page.evaluate(() => window.__bj.meta.d.tokens);
+        await page.screenshot({ path: 'shots/23-profile-claimall.png' });
+        await page.locator('#btn-claim-all').tap(); await page.waitForTimeout(1200);
+        check((await page.evaluate(() => window.__bj.meta.d.tokens)) > tb0 && (await page.evaluate(() => window.__bj.meta.claimables)) === 0, '모두 받기로 업적/미션 보상 일괄 수령');
+      }
       const claimBtn = page.locator('[id^="claim-a-"]').first();
       if (await claimBtn.count()) {
         const tb = await page.evaluate(() => window.__bj.meta.d.tokens);
@@ -420,7 +455,7 @@ async function main() {
         await page.screenshot({ path: 'shots/23-profile-claim.png' });
         await page.waitForTimeout(900);
         check((await page.evaluate(() => window.__bj.meta.d.tokens)) > tb, '업적 보상 수동 수령 (받기)');
-      } else check(false, '받을 업적 없음');
+      }
       await page.locator('#btn-back >> visible=true').tap();
       await page.locator('#btn-settings').tap(); await page.waitForTimeout(150);
       await page.screenshot({ path: 'shots/24-settings.png' });
@@ -432,17 +467,18 @@ async function main() {
       await page.locator('#btn-back').tap();
       const audio = await page.evaluate(async () => {
         const out = {};
-        for (const [n, a] of [['place', [4]], ['clear', [2, 1]], ['joker', [1]], ['combo', [2]], ['mult', [2]], ['chips', [2]], ['pickup', []], ['tick', [5]], ['xmult', []], ['allClear', []], ['bgm', []]]) {
-          out[n] = await window.__bjAudio.measure(n, a, n === 'bgm' ? 5 : 1.6);
-        }
+        const argsFor = { place: [4], clear: [2, 1], tick: [5], chips: [2], mult: [2], joker: [1], combo: [2], coins: [3] };
+        for (const n of [...window.__bjAudio.sfxNames(), 'bgm']) out[n] = await window.__bjAudio.measure(n, argsFor[n] || [], n === 'bgm' ? 5 : 1.8);
         return out;
       });
-      const fmtA = (k) => `${k} 피크 ${audio[k].peakDb.toFixed(1)} / RMS ${audio[k].rmsDb.toFixed(1)}dB`;
-      console.log('  사운드:', Object.keys(audio).map(fmtA).join(', '), `| BGM 150Hz 이하 ${(audio.bgm.lowRatio * 100).toFixed(0)}%`);
+      console.log('  사운드 표 (이름: RMS dB / 피크 dB / 150Hz 이하 %)');
+      for (const [k, v] of Object.entries(audio)) console.log(`    ${k.padEnd(10)} ${v.rmsDb.toFixed(1).padStart(6)} ${v.peakDb.toFixed(1).padStart(6)} ${String(Math.round(v.lowRatio * 100)).padStart(4)}%`);
+      const small = ['pickup', 'tick', 'chips', 'mult', 'click', 'coins', 'invalid', 'newTray', 'card'];
       check(Object.values(audio).every((v) => v.peakDb <= -2.9), '모든 효과음/BGM 피크 -3dBFS 이하');
-      check(['place', 'clear', 'joker', 'combo'].every((k) => audio[k].rmsDb >= -25 && audio[k].rmsDb <= -19.5), '주요 효과음 RMS -24~-20dB 대역');
-      check(['pickup', 'tick', 'chips', 'mult'].every((k) => audio[k].peakDb >= -9), '작은 효과음(집기/틱/칩/배수) 충분히 들림 (피크 -9dB 이상)');
-      check(audio.bgm.lowRatio <= 0.6, 'BGM 150Hz 이하 에너지 60% 이하');
+      check(Object.entries(audio).filter(([k]) => k !== 'bgm' && !small.includes(k)).every(([, v]) => v.rmsDb >= -25 && v.rmsDb <= -19.5), '주요 효과음 RMS -25~-20dB');
+      check(small.every((k) => audio[k].rmsDb >= -28.5 && audio[k].rmsDb <= -23), '작은 효과음 RMS -28~-24dB');
+      check(audio.place.lowRatio <= 0.4 && Object.values(audio).every((v) => v.lowRatio <= 0.45), '착지음 150Hz 이하 40% 이하, 전 효과음 45% 이하');
+      check(audio.bgm.rmsDb >= -23 && audio.bgm.rmsDb <= -18 && audio.bgm.lowRatio <= 0.6, 'BGM 버스 RMS -20dB 전후, 150Hz 이하 60% 이하');
       await page.evaluate(() => { localStorage.removeItem('blockJoker.meta'); localStorage.setItem('blockJoker.v1', JSON.stringify({ bestAnte: 4, bestHit: 1234, wins: 1, tutorialDone: true })); });
       await page.reload(); await page.waitForTimeout(500);
       const mig = await page.evaluate(() => ({ v: window.__bj.meta.d.version, a: window.__bj.meta.d.stats.bestAnte, h: window.__bj.meta.d.stats.bestHit }));
@@ -455,6 +491,34 @@ async function main() {
       await page.reload(); await page.waitForTimeout(500);
       await clearOverlays(page);
       check(await vis(page, '#btn-start'), '깨진 JSON 에서도 타이틀 정상');
+    }
+
+    // ---------- 성능: 4배 CPU 스로틀에서 드롭 ----------
+    {
+      console.log('[성능] 4배 스로틀 드롭');
+      const { page, cdp } = await newPage(browser, 390, 844, '?debug&seed=perf');
+      await page.evaluate(() => { const m = window.__bj.meta.d; m.coach.calc = m.coach.tray = m.coach.shop = true; m.tutorialDone = true; });
+      await startGame(page);
+      await page.waitForTimeout(1500);
+      await page.evaluate(() => {
+        window.__bj.game.target = 1e7; window.__bjPerf = []; window.__lt = []; window.__bjFrames = 0;
+        new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ type: 'longtask' });
+      });
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      let drops = 0;
+      for (let n = 0; n < 10; n++) { if (!(await playMove(page, cdp))) break; drops++; await page.waitForTimeout(500); }
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      const pf = await page.evaluate(() => ({ perf: window.__bjPerf, lt: window.__lt, n: window.__bjFrames }));
+      const place = pf.perf.filter((e) => e[0] === 'place').map((e) => e[1]);
+      const frames = pf.perf.filter((e) => typeof e[0] === 'number').map((e) => e[0] + e[1]);
+      console.log(`  드롭 ${drops}회, 드롭 처리 JS ms: ${place.join(',')} / 느린 프레임 JS 최대 ${Math.max(0, ...frames)}ms / 브라우저 롱태스크(래스터 포함, 기기 부하 영향) ${pf.lt.length}건 최대 ${Math.max(0, ...pf.lt)}ms`);
+      console.log('  느린 프레임 상위:', JSON.stringify(pf.perf.filter((e) => typeof e[0] === 'number').sort((x, y) => (y[0] + y[1]) - (x[0] + x[1])).slice(0, 6)));
+      // 공유 머신에서는 다른 프로세스 선점으로 임의 프레임이 튈 수 있어 p90 으로 판정하고 최대값과 부하는 로그로 남김
+      const pct = (arr, q) => { const v = [...arr].sort((x, y) => x - y); return v.length ? v[Math.min(v.length - 1, Math.floor(v.length * q))] : 0; };
+      const over = frames.filter((x) => x >= 50).length;
+      console.log(`  호스트 부하 loadavg ${os.loadavg().map((x) => x.toFixed(1)).join(' ')} / 드롭 JS p90 ${pct(place, 0.9)}ms / 전체 ${pf.n}프레임 중 JS 50ms 이상 ${over}개`);
+      check(drops >= 5 && place.length >= 5 && pct(place, 0.9) < 50, '4배 스로틀: 드롭 처리 JS p90 50ms 미만');
+      check(pf.n > 60 && over / pf.n < 0.05, '4배 스로틀: 프레임 JS(update+draw) 50ms 이상 비율 5% 미만');
     }
 
     // ---------- 다른 해상도 ----------

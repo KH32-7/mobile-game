@@ -4,9 +4,9 @@
 export const HANDS = {
   row: { name: '가로줄', c: 10, m: 1, lc: 10, lm: 1 },
   col: { name: '세로줄', c: 10, m: 1, lc: 10, lm: 1 },
-  double: { name: '더블', c: 25, m: 2, lc: 15, lm: 1 },
-  multi: { name: '멀티', c: 40, m: 3, lc: 20, lm: 2 },
-  cross: { name: '십자', c: 35, m: 3, lc: 20, lm: 2 },
+  double: { name: '더블', c: 25, m: 1.5, lc: 15, lm: 1 },
+  multi: { name: '멀티', c: 40, m: 2, lc: 20, lm: 1.5 },
+  cross: { name: '십자', c: 35, m: 2, lc: 20, lm: 1.5 },
 };
 export const HAND_KEYS = Object.keys(HANDS);
 
@@ -48,6 +48,7 @@ export const VOUCHERS = [
   { id: 'v_vault', name: '금고 열쇠', desc: '이자 상한 +$5' },
   { id: 'v_grip', name: '콤보 그립', desc: '콤보 유예 +1 배치' },
   { id: 'v_telescope', name: '망원경', desc: '줄 강화 카드가 레벨을 2씩 올림' },
+  { id: 'v_swap', name: '재활용 센터', desc: '라운드마다 트레이 교체 +1' },
 ];
 export const VOUCHER_BY_ID = Object.fromEntries(VOUCHERS.map((v) => [v.id, v]));
 export const PLANET_BY_ID = Object.fromEntries(PLANETS.map((p) => [p.id, p]));

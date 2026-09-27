@@ -57,11 +57,13 @@ const safeProbe = document.createElement('div');
 safeProbe.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0;';
 document.body.appendChild(safeProbe);
 
+// 적응형 해상도: 프레임이 계속 무거우면 DPR을 낮춤 (최대 2)
+let dprCap = 2;
 function resize() {
   const vw = window.innerWidth, vh = window.innerHeight;
   const cs = getComputedStyle(safeProbe);
   const safe = { top: parseFloat(cs.paddingTop) || 0, bottom: parseFloat(cs.paddingBottom) || 0 };
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const dpr = Math.min(dprCap, 2, window.devicePixelRatio || 1);
   L = computeLayout(vw, vh, safe);
   renderer.resize(vw, vh, dpr, L);
 }
@@ -173,7 +175,20 @@ const ui = new UI({
     if (game.buySpecial(arg)) { sfx.buy(); sfx.levelUp(); vibrate(20); meta.onBuy(game, { kind: o.id === 's_clone' ? 'joker' : 'special' }); saveShop(); ui.showShop(game); }
     else { sfx.invalid(); ui.toast(game.coins < o.price ? '코인이 부족함' : '조건이 맞지 않음'); }
   },
-  claimMission: (i) => { const r = meta.claimMission(i); if (r) { sfx.coins(6); vibrate([15, 20, 15]); } return r; },
+  rescue: (how, idx) => {
+    if (how === 'decline') { game.declineRescue(); app.stuck = false; endNow(); return; }
+    if (!game.rescue(how, idx)) { sfx.invalid(); ui.toast('구제할 수 없음'); return; }
+    sfx.allClear(); vibrate([30, 30, 60]); app.fx.flash = 0.8;
+    const cell = L.cell;
+    for (const r of game.rescuedRows || []) { app.beams.push({ row: r, t: 0, life: 0.3, color: '#3ddc97' }); for (let c = 0; c < 8; c++) app.fx.burst(L.board.x + (c + 0.5) * cell, L.board.y + (r + 0.5) * cell, 2, 3, 200, cell * 0.25); }
+    app.comboWord = { text: '구제!', sub: '가로줄 3개 제거', color: '#3ddc97', t: 0, life: 1.2, size: 44 };
+    refreshFit();
+    const out = game.resolveStuck();
+    handleStuck(out);
+    if (out === 'over') endNow(); else savePlayNow();
+  },
+  claimMission: (i, w) => { const r = w ? meta.claimWeekly(i) : meta.claimMission(i); if (r) { sfx.coins(6); vibrate([15, 20, 15]); } return r; },
+  claimAll: () => { const r = meta.claimAll(); if (r) { sfx.coins(6); sfx.levelUp(); vibrate([15, 20, 15, 20, 30]); } return r; },
   claimAchievement: (id) => { const r = meta.claimAchievement(id); if (r) { sfx.coins(6); vibrate([15, 20, 15]); } return r; },
   sell: (i) => { if (game.sell(i)) { sfx.sell(); app.coinPulse = 1; saveShop(); ui.showShop(game); } },
   sellInRun: (i) => {
@@ -188,6 +203,7 @@ const ui = new UI({
   endless: () => { sfx.click(); game.continueEndless(); saveShop(); ui.showShop(game); setBgmMode('shop', game.ante); },
   coachDone: (id) => {
     if (id === 'calc') rec.coach.calc = true;
+    else if (id === 'tray') rec.coach.tray = true;
     else if (id === 'shop') rec.coach.shop = true;
     else if (id.startsWith('boss:')) { const b = id.slice(5); if (!rec.coach.bosses.includes(b)) rec.coach.bosses.push(b); }
     meta.save();
@@ -212,7 +228,15 @@ const ui = new UI({
 });
 
 function saveShop() { meta.saveRun(game.snapshot('shop')); }
-function savePlay() { if (game.phase === 'play') meta.saveRun(game.snapshot('play')); }
+// 저장은 드롭 프레임을 막지 않도록 유휴 시간에 (마지막 요청만)
+let saveQueued = false;
+const idle = window.requestIdleCallback ? (fn) => window.requestIdleCallback(fn, { timeout: 400 }) : (fn) => setTimeout(fn, 30);
+function savePlay() {
+  if (saveQueued) return;
+  saveQueued = true;
+  idle(() => { saveQueued = false; if (game.phase === 'play' && app.inRun) meta.saveRun(game.snapshot('play')); });
+}
+function savePlayNow() { if (game.phase === 'play') meta.saveRun(game.snapshot('play')); }
 
 function resetRunVisuals() {
   app.fx.clear();
@@ -250,6 +274,8 @@ function setHud() {
 
 function beginRound() {
   setHud();
+  app.stuck = false;
+  app.coinsShown = game.coins;
   app.shownScore = game.roundScore || 0; app.scoreHold = 0;
   app.seq = null; app.queue = []; app.drag = null; app.pendingEnd = null;
   app.calc.active = false; app.calc.merge = 0; app.calc.labelAlpha = 0;
@@ -272,6 +298,7 @@ function beginRound() {
     banner(game.blindName, `목표 ${fmt(game.target)}`, game.blind === 1 ? '#ffb627' : '#36c9ff', 1.4);
     sfx.newTray();
   }
+  if (!rec.coach.tray && game.ante === 1 && game.blind === 0) later(0.1, () => ui.showTrayCard());
   // 처음 만나는 보스는 저주 설명 카드
   if (game.blind === 2 && !rec.coach.bosses.includes(game.boss)) {
     later(app.showdown ? 2.4 : 0.3, () => ui.showBossCard(game));
@@ -302,6 +329,10 @@ function continueRun() {
     refreshFit();
     setBgmMode(app.showdown ? 'showdown' : game.blind === 2 ? 'boss' : 'normal', game.ante);
     banner('이어하기', `${game.blindName} · ${fmt(game.roundScore)} / ${fmt(game.target)}`, '#9fe8c8', 1.2);
+    app.coinsShown = game.coins;
+    const st = game.resolveStuck();
+    handleStuck(st);
+    if (st === 'over') endNow();
     return;
   }
   beginRound();
@@ -355,6 +386,7 @@ function doPlace(i, r, c) {
     sfx.phoenix(); app.fx.flash = 1; app.fx.shake(10, 0.5);
     for (let k = 0; k < 30; k++) app.fx.burst(L.board.x + Math.random() * L.board.w, L.board.y + L.board.h, k % 2 ? 6 : 1, 2, 420, cell * 0.3);
   }
+  handleStuck(outcome);
   if (outcome === 'roundClear' || outcome === 'over') app.pendingEnd = { type: outcome };
   else savePlay();
   if (outcome === 'roundClear') {
@@ -373,12 +405,36 @@ function doPlace(i, r, c) {
   return true;
 }
 
+// 막힘: 교체 가능하면 교체 버튼 강조, 아니면 구제 모달
+function handleStuck(outcome) {
+  app.stuck = outcome === 'stuck';
+  if (outcome === 'stuck') { later(0.2, () => { sfx.invalid(); ui.toast('놓을 곳이 없음! 아래 트레이 교체 버튼을 누를 것'); }); vibrate([30, 40, 30]); }
+  if (outcome === 'rescue') later(0.4, () => ui.showRescue(game));
+}
+
+function doSwap() {
+  if (!game.swapTray()) { rejectInput(); return; }
+  sfx.newTray(); sfx.card(); vibrate(15);
+  app.trayAnim = [0, -0.08, -0.16];
+  refreshFit();
+  const out = game.resolveStuck();
+  handleStuck(out);
+  if (out === 'over') endNow();
+  savePlay();
+}
+
+function endNow() {
+  app.pendingEnd = { type: 'over', newBest: { ante: game.ante > runStart.ante, hit: game.runBestHit > runStart.hit } };
+  app.pendingEnd.sum = meta.onRunEnd(game, false);
+  maybeEnd();
+}
+
 function clearFx(res) {
   const cell = L.cell;
   for (const cl of res.cleared.cells) {
     app.clearing.push({ r: cl.r, c: cl.c, color: cl.color, t: 0, life: 0.26 });
     const x = L.board.x + (cl.c + 0.5) * cell, y = L.board.y + (cl.r + 0.5) * cell;
-    later(0.2, () => app.fx.burst(x, y, cl.color, 6, 280, cell * 0.32));
+    later(0.2, () => app.fx.burst(x, y, cl.color, 4, 280, cell * 0.32));
     if (cl.broken) { app.fx.burst(x, y, 3, 12, 340, cell * 0.22); app.fx.ring(x, y, '#9ff0ff', cell); later(0.1, () => sfx.glass()); }
   }
   const lines = res.cleared.rows.length + res.cleared.cols.length;
@@ -446,6 +502,7 @@ function runStep(step, i) {
     app.gemFlash = { r: step.r, c: step.c, gem: step.gem };
     if (e.t === 'xmult') sfx.xmult(); else if (e.t === 'chips') sfx.chips(i); else sfx.mult(i);
   } else if (step.kind === 'joker') {
+    app.activeJoker = step.idx;
     addBubble(step.idx, (step.ed ? '에디션 ' : '') + effectLabel(e), e.t === 'chips' ? '#1a7fe0' : e.t === 'coins' ? '#c98a00' : e.t === 'xmult' ? '#c0102f' : '#e0304f');
     if (e.t === 'xmult') { sfx.xmult(); app.fx.shake(5, 0.15); } else sfx.joker(i);
     if (e.t === 'coins') { app.coinPulse = 1; sfx.coins(e.v); }
@@ -521,11 +578,13 @@ function updateSeq(rawDt) {
 
 function finishSeq() {
   const k = app.calc;
+  app.activeJoker = null;
+  const lastRes = app.seq && app.seq.res;
   k.active = false; k.merge = 0; k.fade = 1;
   app.gemFlash = null;
   app.seq = null;
   if (!rec.coach.calc && !app.queue.length) {
-    later(0.1, () => { if (!rec.coach.calc) ui.showCoach('calc', { calc: L.calc, score: L.score }); });
+    later(0.1, () => { if (!rec.coach.calc) ui.showCoach('calc', { calc: L.calc, score: L.score, vals: lastRes ? { chips: lastRes.chips, mult: lastRes.mult, total: lastRes.total, hand: lastRes.hand } : null }); });
   }
   nextSeq();
 }
@@ -624,6 +683,7 @@ canvas.addEventListener('pointerdown', (e) => {
     if (inRect(p, L.jokerRect(i, n))) { sfx.click(); ui.showJokerTip(game.jokers[i], game, i); return; }
   }
   if (inRect(p, app.hit.blind)) { sfx.click(); ui.showBossTip(game); return; }
+  if (inRect(p, L.swapBtn)) { if (!app.drag) doSwap(); return; }
   if (app.drag) return;
   for (let i = 0; i < 3; i++) {
     if (!inRect(p, L.traySlot(i))) continue;
@@ -660,7 +720,9 @@ function endDrag(e) {
   app.drag = null;
   if (e.type === 'pointercancel') { app.trayAnim[d.idx] = 0.6; return; }
   if (d.valid && game.phase === 'play' && !app.pendingEnd) {
+    const tp = performance.now();
     doPlace(d.idx, d.row, d.col);
+    if (DEBUG) (window.__bjPerf ||= []).push(['place', Math.round(performance.now() - tp)]);
   } else {
     app.trayAnim[d.idx] = 0.6;
     // 보드 위에서 놓았는데 못 놓는 자리면 거절 피드백
@@ -704,6 +766,21 @@ function update(dt) {
   const tw = 1 - Math.exp(-dt / 0.035);
   if (k.chipsShown != null) k.chipsShown += (k.chips - k.chipsShown) * tw;
   if (k.multShown != null) k.multShown += (k.mult - k.multShown) * tw;
+  // 코인 HUD: 점수 연출이 끝난 뒤에 카운트업
+  if (app.coinsShown == null) app.coinsShown = game.coins;
+  const holdCoins = app.seq || app.queue.length || (app.pendingEnd && app.pendingEnd.type === 'roundClear');
+  if (!holdCoins && Math.round(app.coinsShown) !== game.coins) {
+    const diff = game.coins - app.coinsShown;
+    if (!app.coinAnim && diff > 0.5) {
+      app.coinAnim = true;
+      sfx.coins(Math.min(6, Math.ceil(diff)));
+      app.fx.pop(L.hud.x + L.hud.w - 38, L.hud.y + 54, '+$' + Math.round(diff), '#ffe68a', 16, 0.9, -40);
+      for (let q = 0; q < 6; q++) app.fx.burst(L.hud.x + L.hud.w - 58, L.hud.y + 24, 1, 1, 160, 5);
+      app.coinPulse = 1;
+    }
+    app.coinsShown += Math.sign(diff) * Math.max(dt * 20, Math.abs(diff) * Math.min(1, dt * 5));
+    if (Math.abs(game.coins - app.coinsShown) < 0.5) { app.coinsShown = game.coins; app.coinAnim = false; }
+  }
   if (app.boardGlow) { app.boardGlow.t += dt; if (app.boardGlow.t > 0.3) app.boardGlow = null; }
   if (app.feltWave) { app.feltWave.t += dt; if (app.feltWave.t > 0.7) app.feltWave = null; }
   k.chipsPulse = Math.max(0, k.chipsPulse - dt * 4);
@@ -731,15 +808,28 @@ function update(dt) {
 }
 
 let last = performance.now();
+let slowFrames = 0, fastFrames = 0;
+function adaptResolution(rawDt) {
+  if (document.hidden) return;
+  if (rawDt > 0.034) { slowFrames++; fastFrames = 0; } else if (rawDt < 0.02) { fastFrames++; slowFrames = Math.max(0, slowFrames - 1); }
+  const maxDpr = Math.min(2, window.devicePixelRatio || 1);
+  if (slowFrames > 45 && dprCap > 1) { dprCap = Math.max(1, dprCap - 0.5); slowFrames = 0; resize(); }
+  else if (fastFrames > 600 && dprCap < maxDpr) { dprCap = Math.min(maxDpr, dprCap + 0.5); fastFrames = 0; resize(); }
+}
 function frame(now) {
+  const rawDt = (now - last) / 1000;
+  if (app.inRun) adaptResolution(rawDt);
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   time += dt;
+  const t0 = performance.now();
   if (!app.paused) {
     if (app.fx.stop > 0) { app.fx.stop -= dt; app.fx.update(0); }
     else update(dt);
   }
+  const t1 = performance.now();
   renderer.draw(app, time);
+  if (DEBUG) { const t2 = performance.now(); window.__bjFrames = (window.__bjFrames || 0) + 1; if (t2 - t0 > 8) (window.__bjPerf ||= []).push([Math.round(t1 - t0), Math.round(t2 - t1), app.drag ? 'drag' : app.seq ? 'seq' : '-', app.fx.parts.length]); }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -750,9 +840,10 @@ toTitle();
 if (DEBUG) {
   window.__bjJokers = JOKERS.map((j) => j.id);
   window.__bj = {
-    game, app, meta, ui,
+    game, app, meta, ui, renderer,
     layout: () => L,
     toTitleForTest() { toTitle(); },
+    stuckCheck() { const o = game.resolveStuck(); handleStuck(o); if (o === 'over') endNow(); return o; },
     jumpTo(ante, blind) {
       game.ante = ante; game.blind = blind; game.pickBoss(); game.startRound();
       ui.hideAll(); beginRound();

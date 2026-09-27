@@ -2,7 +2,7 @@
 
 export const STARTER_JOKERS = [
   'rower', 'vert', 'minimal', 'gambler', 'snowball', 'twins', 'miner', 'vault', 'barfan', 'closer', 'piggy', 'corner',
-  'redchip', 'bluechip',
+  'redchip', 'bluechip', 'horizon', 'vertigo', 'comboamp', 'recycler',
 ];
 export const UNLOCK_COST = { common: 15, uncommon: 25, rare: 40, legendary: 70 };
 
@@ -53,17 +53,17 @@ export const ACHIEVEMENTS = [
   { id: 'allclear', name: '깨끗한 테이블', desc: '보드를 완전히 비우기', reward: 10, check: (s) => s.allClears >= 1 },
   { id: 'fullhand', name: '풀 하우스', desc: '조커 슬롯을 가득 채우기', reward: 5, check: (s) => s.maxJokers >= 5 },
   { id: 'rich50', name: '두둑한 지갑', desc: '한 번에 $60 보유', reward: 10, check: (s) => s.maxCoins >= 60 },
-  { id: 'gems50', name: '보석 수집가', desc: '보석 칸 누적 100개 제거', reward: 10, check: (s) => s.gemsCleared >= 100 },
-  { id: 'lines500', name: '줄 청소부', desc: '누적 500줄 제거', reward: 15, check: (s) => s.totalLines >= 500 },
-  { id: 'boss5', name: '보스 사냥꾼', desc: '보스 누적 5회 격파', reward: 10, check: (s) => s.bossesBeaten >= 5 },
+  { id: 'gems50', name: '보석 수집가', desc: '보석 칸 누적 150개 제거', reward: 10, check: (s) => s.gemsCleared >= 150 },
+  { id: 'lines500', name: '줄 청소부', desc: '누적 1,200줄 제거', reward: 15, check: (s) => s.totalLines >= 1200 },
+  { id: 'boss5', name: '보스 사냥꾼', desc: '보스 누적 12회 격파', reward: 12, check: (s) => s.bossesBeaten >= 12 },
   { id: 'daily1', name: '오늘의 도전', desc: '데일리 런 플레이', reward: 5, check: (s) => s.dailyRuns >= 1 },
   { id: 'dex10', name: '조커 도감가', desc: '조커 25종 발견', reward: 10, check: (s, c) => c.discovered >= 25 },
   { id: 'streak7', name: '단골 손님', desc: '7일 연속 출석', reward: 15, check: (s) => s.bestStreak >= 7 },
   { id: 'stake2', name: '레드 카펫', desc: '레드 난이도 이상에서 승리', reward: 20, check: (s, c) => c.maxStakeWon >= 2 },
   { id: 'planet5', name: '별을 읽는 자', desc: '줄 강화 레벨 5 달성', reward: 10, check: (s) => s.maxLineLv >= 5 },
-  { id: 'voucher3', name: '쿠폰 수집가', desc: '한 런에서 바우처 3장', reward: 10, check: (s) => s.maxVouchers >= 3 },
+  { id: 'voucher3', name: '쿠폰 수집가', desc: '한 런에서 바우처 5장', reward: 12, check: (s) => s.maxVouchers >= 5 },
   { id: 'legend', name: '전설과의 만남', desc: '전설 조커 보유', reward: 15, check: (s) => s.legendsOwned >= 1 },
-  { id: 'showdown', name: '쇼다운', desc: '앤티 8 쇼다운 보스 격파', reward: 25, check: (s) => s.showdowns >= 1 },
+  { id: 'showdown', name: '쇼다운 정복', desc: '쇼다운 보스 3종 모두 격파', reward: 30, check: (s) => s.showdownKinds >= 3 },
   { id: 'edition', name: '반짝반짝', desc: '에디션 조커 구매', reward: 5, check: (s) => s.editions >= 1 },
 ];
 
@@ -91,5 +91,6 @@ export const WEEKLY = [
   { id: 'hit', text: (n) => `한 방에 ${n.toLocaleString('en-US')}점 이상`, n: 20000, max: true },
 ];
 export const WEEKLY_CHEST = 60;
+export const WEEKLY_REWARD = 8;
 export const WEEKLY_BY_ID = Object.fromEntries(WEEKLY.map((m) => [m.id, m]));
 export const MISSION_BY_ID = Object.fromEntries(MISSIONS.map((m) => [m.id, m]));

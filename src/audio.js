@@ -50,7 +50,7 @@ function buildGraph(c) {
   sfxBus = c.createGain(); sfxBus.gain.value = 1.0 * vol.sfx; sfxBus.connect(master);
   const sfxSend = c.createGain(); sfxSend.gain.value = 0.35; sfxBus.connect(sfxSend).connect(revIn);
   bgmFilter = c.createBiquadFilter(); bgmFilter.type = 'lowpass'; bgmFilter.frequency.value = 9000;
-  bgmBus = c.createGain(); bgmBus.gain.value = 0.14 * vol.bgm; bgmBus.connect(bgmFilter).connect(master);
+  bgmBus = c.createGain(); bgmBus.gain.value = 0.26 * vol.bgm; bgmBus.connect(bgmFilter).connect(master);
   const bgmSend = c.createGain(); bgmSend.gain.value = 0.25; bgmFilter.connect(bgmSend).connect(revIn);
   // 디스토션 (xmult 슬램용)
   shaper = c.createWaveShaper();
@@ -66,7 +66,7 @@ function buildGraph(c) {
 function applyVolumes() {
   if (!ctx) return;
   sfxBus.gain.setTargetAtTime(1.0 * vol.sfx, ctx.currentTime, 0.02);
-  bgmBus.gain.setTargetAtTime(0.14 * vol.bgm * (ducked ? 0.45 : 1), ctx.currentTime, 0.08);
+  bgmBus.gain.setTargetAtTime(0.26 * vol.bgm * (ducked ? 0.45 : 1), ctx.currentTime, 0.08);
 }
 
 // 점수 연출 중 BGM 덕킹
@@ -89,10 +89,10 @@ export function resumeAudio() { if (ctx && ctx.state === 'suspended') ctx.resume
 
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
-function tone({ freq, type = 'sine', t = 0, dur = 0.15, vol: v = 0.3, attack = 0.005, slideTo = null, bus = sfxBus, filter = null, detune = 0, dist = false, exact = false }) {
+function tone({ freq, type = 'sine', t = 0, dur = 0.15, vol: v = 0.3, attack = 0.005, slideTo = null, bus = curBus || sfxBus, filter = null, detune = 0, dist = false, exact = false }) {
   if (!ctx) return;
   const now = ctx.currentTime + Math.max(0, t);
-  if (bus === sfxBus && !exact) {
+  if (bus !== bgmBus && !exact) {
     // 효과음 피치/볼륨 랜덤화 (반복 피로 감소)
     const k = Math.pow(2, (Math.random() - 0.5) * 0.04);
     freq *= k; if (slideTo) slideTo *= k;
@@ -119,10 +119,10 @@ function tone({ freq, type = 'sine', t = 0, dur = 0.15, vol: v = 0.3, attack = 0
   o.start(now); o.stop(now + dur + 0.03);
 }
 
-function noise({ t = 0, dur = 0.1, vol: v = 0.2, freq = 3000, type = 'highpass', bus = sfxBus, to = null, q = 0.7 }) {
+function noise({ t = 0, dur = 0.1, vol: v = 0.2, freq = 3000, type = 'highpass', bus = curBus || sfxBus, to = null, q = 0.7 }) {
   if (!ctx) return;
   const now = ctx.currentTime + Math.max(0, t);
-  if (bus === sfxBus) v *= 0.9 + Math.random() * 0.2;
+  if (bus !== bgmBus) v *= 0.9 + Math.random() * 0.2;
   const s = ctx.createBufferSource();
   s.buffer = noiseBuf;
   const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
@@ -141,97 +141,113 @@ function metal(t, base, v, dur) {
 
 const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28];
 
-export const sfx = {
-  pickup() { tone({ freq: 520, type: 'triangle', dur: 0.08, vol: 1.8, slideTo: 760 }); tone({ freq: 1040, type: 'sine', dur: 0.05, vol: 0.6, slideTo: 1520 }); noise({ dur: 0.03, vol: 0.75, freq: 5000 }); },
-  // 착지음: 저음 쿵 + 나무 공명 + 짧은 클릭
+// 원본 효과음 정의 (음량은 대략값, 최종 음량은 계측 기반 NORM 표로 정규화)
+const RAW = {
+  pickup() { tone({ freq: 900, type: 'triangle', dur: 0.06, vol: 0.4, slideTo: 1300 }); noise({ dur: 0.02, vol: 0.3, freq: 3500, type: 'bandpass', q: 2 }); },
+  // 착지음: 1.5~3kHz 클릭 트랜지언트 + 600~900Hz 나무 공명(주 레이어) + 약한 저역
   place(size = 4) {
-    const f = 130 - size * 5;
-    tone({ freq: f, type: 'sine', dur: 0.16, vol: 2.16, slideTo: 48, attack: 0.002 });
-    // 250~800Hz 배음: 삼각파 2배음 + 짧은 나무 타격
-    tone({ freq: f * 2.6, type: 'triangle', dur: 0.09, vol: 1.62, slideTo: f * 1.8 });
-    tone({ freq: 480 - size * 10, type: 'triangle', dur: 0.05, vol: 0.99 });
-    noise({ dur: 0.045, vol: 1.8, freq: 620, type: 'bandpass', q: 3 });
-    noise({ dur: 0.03, vol: 0.9, freq: 1800, type: 'bandpass', q: 1.5 });
+    noise({ dur: 0.008, vol: 0.9, freq: 2200, type: 'bandpass', q: 1.2 });
+    tone({ freq: 2600 - size * 60, type: 'square', dur: 0.01, vol: 0.2, filter: { freq: 3500 } });
+    tone({ freq: 760 - size * 20, type: 'triangle', dur: 0.09, vol: 0.55, slideTo: 640 - size * 15 });
+    tone({ freq: (760 - size * 20) * 1.5, type: 'sine', dur: 0.05, vol: 0.2 });
+    noise({ dur: 0.06, vol: 0.5, freq: 800, type: 'bandpass', q: 4 });
+    tone({ freq: 140, type: 'sine', dur: 0.08, vol: 0.18, slideTo: 70 });
   },
-  invalid() { tone({ freq: 140, type: 'square', dur: 0.14, vol: 0.09, filter: { freq: 600 } }); tone({ freq: 110, type: 'square', dur: 0.14, vol: 0.07, t: 0.07, filter: { freq: 500 } }); },
-  // 줄 제거: 크래시 + 벨 코드 + 서브 붐, 줄 수에 따라 피치 상승
+  invalid() { tone({ freq: 320, type: 'square', dur: 0.12, vol: 0.2, filter: { freq: 1500 } }); tone({ freq: 250, type: 'square', dur: 0.14, vol: 0.18, t: 0.07, filter: { freq: 1400 } }); },
+  // 줄 제거: 크래시 + 밴드패스 스윕 + 벨 코드 + 킥, 줄 수에 따라 피치 상승
   clear(lines = 1, combo = 0) {
-    const base = 60 + Math.min(lines - 1, 4) * 3 + Math.min(combo, 8);
+    const base = 64 + Math.min(lines - 1, 4) * 3 + Math.min(combo, 8);
     const n = 3 + Math.min(lines, 4);
     for (let i = 0; i < n; i++) {
-      tone({ freq: mtof(base + PENTA[i]), type: 'triangle', t: i * 0.04, dur: 0.28, vol: 0.044 });
-      tone({ freq: mtof(base + 12 + PENTA[i]), type: 'sine', t: i * 0.04, dur: 0.22, vol: 0.018 });
+      tone({ freq: mtof(base + PENTA[i]), type: 'triangle', t: i * 0.04, dur: 0.28, vol: 0.18 });
+      tone({ freq: mtof(base + 12 + PENTA[i]), type: 'sine', t: i * 0.04, dur: 0.2, vol: 0.08 });
     }
-    // 크래시: 노이즈 버스트 + 밴드패스 스윕 + 저역 킥
-    noise({ dur: 0.45 + lines * 0.08, vol: 0.05 + lines * 0.04, freq: 9000, to: 2500 });
-    noise({ dur: 0.35, vol: 0.054, freq: 500, type: 'bandpass', q: 4, to: 5000 + lines * 800 });
-    noise({ dur: 0.12, vol: 0.062, freq: 1200, type: 'bandpass', q: 0.8 });
-    tone({ freq: 150, type: 'sine', dur: 0.22, vol: 0.124 + lines * 0.05, slideTo: 42, attack: 0.001 });
-    tone({ freq: 70, type: 'sine', dur: 0.35, vol: 0.074 + lines * 0.05, slideTo: 36 });
+    noise({ dur: 0.4 + lines * 0.06, vol: 0.3, freq: 7000, to: 2500 });
+    noise({ dur: 0.3, vol: 0.3, freq: 600, type: 'bandpass', q: 4, to: 5000 + lines * 800 });
+    tone({ freq: 160, type: 'sine', dur: 0.14, vol: 0.3, slideTo: 60, attack: 0.001 });
   },
   // 칩 틱: 피치가 상승하는 짧은 클릭
   tick(i = 0) {
-    tone({ freq: mtof(72 + Math.min(i, 30)), type: 'square', dur: 0.04, vol: 1.8, filter: { freq: 3500 }, exact: true });
-    tone({ freq: mtof(84 + Math.min(i, 30)), type: 'sine', dur: 0.03, vol: 1.2, exact: true });
-    noise({ dur: 0.015, vol: 2.0, freq: 4000 + i * 200, type: 'bandpass', q: 2 });
+    tone({ freq: mtof(79 + Math.min(i, 30)), type: 'square', dur: 0.03, vol: 0.3, filter: { freq: 4000 }, exact: true });
+    noise({ dur: 0.01, vol: 0.4, freq: 4000 + i * 200, type: 'bandpass', q: 2 });
   },
-  chips(i = 0) { tone({ freq: mtof(67 + (i % 12)), type: 'triangle', dur: 0.12, vol: 1.875 }); tone({ freq: mtof(79 + (i % 12)), type: 'sine', dur: 0.08, vol: 0.75 }); noise({ dur: 0.03, vol: 0.7, freq: 7000 }); },
-  mult(i = 0) { tone({ freq: mtof(74 + (i % 12)), type: 'triangle', dur: 0.14, vol: 2.25 }); tone({ freq: mtof(86 + (i % 12)), type: 'sine', dur: 0.1, vol: 0.7 }); noise({ dur: 0.04, vol: 0.5, freq: 3000, type: 'bandpass' }); },
+  chips(i = 0) { tone({ freq: mtof(79 + (i % 12)), type: 'triangle', dur: 0.1, vol: 0.4 }); noise({ dur: 0.02, vol: 0.25, freq: 6000 }); },
+  mult(i = 0) { tone({ freq: mtof(84 + (i % 12)), type: 'triangle', dur: 0.12, vol: 0.45 }); tone({ freq: mtof(91 + (i % 12)), type: 'sine', dur: 0.08, vol: 0.15 }); },
   joker(i = 0) {
-    const f = mtof(79 + (i % 5) * 2);
-    tone({ freq: f, type: 'sine', dur: 0.35, vol: 0.36 });
-    tone({ freq: f * 2.76, type: 'sine', dur: 0.15, vol: 0.1 });
-    noise({ dur: 0.05, vol: 0.12, freq: 6000 });
+    const f = mtof(81 + (i % 5) * 2);
+    tone({ freq: f, type: 'sine', dur: 0.3, vol: 0.4 });
+    tone({ freq: f * 2.76, type: 'sine', dur: 0.12, vol: 0.12 });
+    noise({ dur: 0.04, vol: 0.2, freq: 6000 });
   },
-  // x배수: 금속 슬램
+  // x배수: 금속 모달 합성 + 디스토션
   xmult() {
-    metal(0, 180, 0.28, 0.6);
-    metal(0, 181.7, 0.12, 0.5);
-    tone({ freq: 110, type: 'sawtooth', dur: 0.3, vol: 0.069, slideTo: 60, dist: true, filter: { freq: 1800 } });
-    noise({ dur: 0.18, vol: 0.116, freq: 2500, type: 'bandpass', q: 0.6 });
-    tone({ freq: 90, type: 'sine', dur: 0.35, vol: 0.154, slideTo: 40 });
-    tone({ freq: 330, type: 'sawtooth', dur: 0.22, vol: 0.023, slideTo: 990, filter: { freq: 2500 } });
+    metal(0, 360, 0.35, 0.6);
+    metal(0, 363, 0.15, 0.5);
+    tone({ freq: 220, type: 'sawtooth', dur: 0.25, vol: 0.2, slideTo: 120, dist: true, filter: { freq: 2500 } });
+    noise({ dur: 0.15, vol: 0.3, freq: 2500, type: 'bandpass', q: 0.8 });
+    tone({ freq: 120, type: 'sine', dur: 0.2, vol: 0.2, slideTo: 60 });
   },
-  glass() { noise({ dur: 0.35, vol: 0.28, freq: 6000 }); [2400, 3100, 4200].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.2, vol: 0.05, t: i * 0.03 })); },
+  glass() { noise({ dur: 0.3, vol: 0.4, freq: 6000 }); [2400, 3100, 4200].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.2, vol: 0.12, t: i * 0.03 })); },
   total(big = false) {
-    tone({ freq: mtof(72), type: 'triangle', dur: 0.35, vol: 0.2 });
-    tone({ freq: mtof(79), type: 'triangle', dur: 0.35, vol: 0.15, t: 0.06 });
-    tone({ freq: mtof(84), type: 'triangle', dur: 0.4, vol: 0.12, t: 0.12 });
-    if (big) { metal(0.05, 220, 0.2, 0.8); tone({ freq: 55, type: 'sine', dur: 0.6, vol: 0.4, slideTo: 30 }); }
+    [72, 79, 84].forEach((n, i) => tone({ freq: mtof(n), type: 'triangle', dur: 0.35, vol: 0.25, t: i * 0.06 }));
+    if (big) { metal(0.05, 440, 0.25, 0.8); tone({ freq: 110, type: 'sine', dur: 0.4, vol: 0.25, slideTo: 55 }); }
   },
-  // 콤보 문구: 단계별 상승 아르페지오
   combo(level = 1) {
-    const base = 67 + level * 3;
-    [0, 4, 7, 12, 16].slice(0, 2 + level).forEach((n, i) => tone({ freq: mtof(base + n), type: 'square', t: i * 0.05, dur: 0.18, vol: 0.046, filter: { freq: 3500 } }));
-    tone({ freq: mtof(base + 24), type: 'sine', t: 0.05 * (2 + level), dur: 0.5, vol: 0.078 });
-    noise({ dur: 0.4, vol: 0.052, freq: 8000, to: 12000 });
+    const base = 69 + level * 3;
+    [0, 4, 7, 12, 16].slice(0, 2 + level).forEach((n, i) => tone({ freq: mtof(base + n), type: 'square', t: i * 0.05, dur: 0.16, vol: 0.18, filter: { freq: 4500 } }));
+    tone({ freq: mtof(base + 24), type: 'sine', t: 0.05 * (2 + level), dur: 0.45, vol: 0.25 });
+    noise({ dur: 0.35, vol: 0.2, freq: 8000, to: 12000 });
   },
   allClear() {
-    [0, 4, 7, 11, 14, 19, 24].forEach((n, i) => { tone({ freq: mtof(60 + n), type: 'triangle', t: i * 0.06, dur: 0.6, vol: 0.01 }); tone({ freq: mtof(72 + n), type: 'sine', t: i * 0.06, dur: 0.5, vol: 0.003 }); });
-    noise({ dur: 1.2, vol: 0.011, freq: 3000, to: 12000 });
-    tone({ freq: 50, type: 'sine', dur: 0.9, vol: 0.027, slideTo: 30 });
-    metal(0.42, 260, 0.2, 1.2);
+    [0, 4, 7, 11, 14, 19, 24].forEach((n, i) => { tone({ freq: mtof(64 + n), type: 'triangle', t: i * 0.06, dur: 0.55, vol: 0.22 }); tone({ freq: mtof(76 + n), type: 'sine', t: i * 0.06, dur: 0.45, vol: 0.08 }); });
+    noise({ dur: 1.0, vol: 0.25, freq: 3000, to: 12000 });
+    tone({ freq: 110, type: 'sine', dur: 0.6, vol: 0.3, slideTo: 55 });
+    metal(0.42, 520, 0.25, 1.0);
   },
-  buy() { tone({ freq: 988, type: 'square', dur: 0.08, vol: 0.1, filter: { freq: 4000 } }); tone({ freq: 1319, type: 'square', dur: 0.25, vol: 0.1, t: 0.07, filter: { freq: 4000 } }); noise({ dur: 0.05, vol: 0.06, freq: 8000, t: 0.07 }); },
-  sell() { tone({ freq: 1319, type: 'square', dur: 0.08, vol: 0.08, filter: { freq: 4000 } }); tone({ freq: 880, type: 'square', dur: 0.2, vol: 0.08, t: 0.07, filter: { freq: 4000 } }); },
-  card() { noise({ dur: 0.12, vol: 0.12, freq: 3000, type: 'bandpass', to: 6000 }); tone({ freq: 660, type: 'sine', dur: 0.2, vol: 0.08, slideTo: 1320 }); },
-  levelUp() { [0, 7, 12, 19].forEach((n, i) => tone({ freq: mtof(72 + n), type: 'triangle', t: i * 0.07, dur: 0.35, vol: 0.14 })); },
-  packOpen() { noise({ dur: 0.35, vol: 0.18, freq: 1500, type: 'bandpass', to: 7000 }); [0, 5, 9, 14].forEach((n, i) => tone({ freq: mtof(76 + n), type: 'sine', t: 0.15 + i * 0.05, dur: 0.3, vol: 0.1 })); },
-  click() { tone({ freq: 800, type: 'sine', dur: 0.05, vol: 0.12 }); },
-  roundClear() { [0, 4, 7, 12, 16].forEach((n, i) => tone({ freq: mtof(67 + n), type: 'triangle', t: i * 0.08, dur: 0.4, vol: 0.2 })); metal(0.35, 330, 0.12, 0.8); },
-  boss() { tone({ freq: 110, type: 'sawtooth', dur: 0.8, vol: 0.2, slideTo: 55, filter: { freq: 800 } }); noise({ dur: 0.6, vol: 0.12, freq: 400, type: 'lowpass' }); tone({ freq: 55, type: 'sine', dur: 1, vol: 0.4 }); },
+  buy() { tone({ freq: 988, type: 'square', dur: 0.08, vol: 0.25, filter: { freq: 4000 } }); tone({ freq: 1319, type: 'square', dur: 0.22, vol: 0.25, t: 0.07, filter: { freq: 4000 } }); noise({ dur: 0.05, vol: 0.2, freq: 8000, t: 0.07 }); },
+  sell() { tone({ freq: 1319, type: 'square', dur: 0.08, vol: 0.22, filter: { freq: 4000 } }); tone({ freq: 880, type: 'square', dur: 0.2, vol: 0.22, t: 0.07, filter: { freq: 4000 } }); },
+  card() { noise({ dur: 0.12, vol: 0.35, freq: 3000, type: 'bandpass', to: 6000 }); tone({ freq: 660, type: 'sine', dur: 0.2, vol: 0.25, slideTo: 1320 }); },
+  levelUp() { [0, 7, 12, 19].forEach((n, i) => tone({ freq: mtof(72 + n), type: 'triangle', t: i * 0.07, dur: 0.32, vol: 0.3 })); },
+  packOpen() { noise({ dur: 0.35, vol: 0.35, freq: 1500, type: 'bandpass', to: 7000 }); [0, 5, 9, 14].forEach((n, i) => tone({ freq: mtof(76 + n), type: 'sine', t: 0.15 + i * 0.05, dur: 0.28, vol: 0.25 })); },
+  click() { tone({ freq: 1200, type: 'sine', dur: 0.04, vol: 0.4 }); noise({ dur: 0.01, vol: 0.2, freq: 3000, type: 'bandpass' }); },
+  roundClear() { [0, 4, 7, 12, 16].forEach((n, i) => tone({ freq: mtof(67 + n), type: 'triangle', t: i * 0.08, dur: 0.4, vol: 0.3 })); metal(0.35, 660, 0.2, 0.8); },
+  // 보스: 저역 드론 + 중고역 불협 금관 + 금속 타격
+  boss() {
+    tone({ freq: 110, type: 'sawtooth', dur: 0.8, vol: 0.15, slideTo: 82, filter: { freq: 1200 } });
+    [0, 1, 6].forEach((n, i) => tone({ freq: mtof(69 + n), type: 'sawtooth', dur: 0.9, vol: 0.12, t: 0.05, filter: { freq: 2400 }, detune: i * 6 }));
+    metal(0, 300, 0.3, 1.0);
+    noise({ dur: 0.5, vol: 0.2, freq: 1500, type: 'bandpass', q: 1, to: 600 });
+  },
   showdown() {
-    for (let i = 0; i < 4; i++) { tone({ freq: 60, type: 'sine', t: i * 0.35, dur: 0.4, vol: 0.55, slideTo: 35 }); noise({ t: i * 0.35, dur: 0.2, vol: 0.2, freq: 300, type: 'lowpass' }); }
-    [0, 1, 6].forEach((n, i) => tone({ freq: mtof(48 + n), type: 'sawtooth', t: 1.2, dur: 1.2, vol: 0.08, filter: { freq: 1400 }, detune: i * 5 }));
+    for (let i = 0; i < 4; i++) { tone({ freq: 150, type: 'sine', t: i * 0.35, dur: 0.25, vol: 0.2, slideTo: 90 }); noise({ t: i * 0.35, dur: 0.12, vol: 0.3, freq: 1800, type: 'bandpass' }); }
+    [0, 1, 6].forEach((n, i) => tone({ freq: mtof(60 + n), type: 'sawtooth', t: 1.2, dur: 1.1, vol: 0.12, filter: { freq: 2600 }, detune: i * 5 }));
   },
-  coins(n = 1) { for (let i = 0; i < Math.min(6, n); i++) tone({ freq: 1500 + i * 120, type: 'square', t: i * 0.05, dur: 0.06, vol: 0.05, filter: { freq: 5000 } }); },
+  coins(n = 1) { for (let i = 0; i < Math.min(6, n); i++) tone({ freq: 1500 + i * 120, type: 'square', t: i * 0.05, dur: 0.06, vol: 0.2, filter: { freq: 5000 } }); },
+  // 게임 오버: 하강 선율(중고역) + 흐트러지는 노이즈
   gameOver() {
-    [0, -3, -6, -12].forEach((n, i) => tone({ freq: mtof(60 + n), type: 'sawtooth', t: i * 0.22, dur: 0.4, vol: 0.12, filter: { freq: 1200 } }));
-    tone({ freq: 60, type: 'sine', t: 0.7, dur: 0.8, vol: 0.4, slideTo: 30 });
+    [0, -3, -6, -12].forEach((n, i) => tone({ freq: mtof(72 + n), type: 'sawtooth', t: i * 0.22, dur: 0.4, vol: 0.2, filter: { freq: 2400 } }));
+    noise({ t: 0.66, dur: 0.8, vol: 0.25, freq: 3000, type: 'bandpass', to: 400 });
+    tone({ freq: 120, type: 'sine', t: 0.7, dur: 0.6, vol: 0.15, slideTo: 60 });
   },
-  newTray() { tone({ freq: 600, type: 'sine', dur: 0.08, vol: 0.1 }); tone({ freq: 900, type: 'sine', dur: 0.08, vol: 0.08, t: 0.05 }); noise({ dur: 0.1, vol: 0.05, freq: 3000, type: 'bandpass', to: 6000 }); },
-  phoenix() { noise({ dur: 1, vol: 0.25, freq: 400, type: 'bandpass', to: 6000 }); [0, 7, 12, 19, 24].forEach((n, i) => tone({ freq: mtof(62 + n), type: 'sawtooth', t: 0.2 + i * 0.08, dur: 0.5, vol: 0.07, filter: { freq: 3000 } })); },
+  newTray() { tone({ freq: 800, type: 'sine', dur: 0.07, vol: 0.3 }); tone({ freq: 1200, type: 'sine', dur: 0.07, vol: 0.25, t: 0.05 }); noise({ dur: 0.1, vol: 0.2, freq: 3000, type: 'bandpass', to: 6000 }); },
+  phoenix() { noise({ dur: 1, vol: 0.35, freq: 600, type: 'bandpass', to: 6000 }); [0, 7, 12, 19, 24].forEach((n, i) => tone({ freq: mtof(64 + n), type: 'sawtooth', t: 0.2 + i * 0.08, dur: 0.45, vol: 0.15, filter: { freq: 3500 } })); },
 };
+
+// 계측 기반 정규화 게인 (scripts/smoke.mjs 사운드 표 참고, 주요 -22dB / 작은 효과음 -26dB 목표)
+const NORM = {"pickup": 7.872, "place": 9.551, "invalid": 0.496, "clear": 0.302, "tick": 12, "chips": 3.515, "mult": 2.736, "joker": 0.98, "xmult": 0.428, "glass": 0.944, "total": 0.378, "combo": 0.258, "allClear": 0.128, "buy": 0.598, "sell": 0.695, "card": 1.462, "levelUp": 0.238, "packOpen": 0.214, "click": 9.507, "roundClear": 0.169, "boss": 0.228, "showdown": 0.242, "coins": 0.498, "gameOver": 0.346, "newTray": 1.005, "phoenix": 0.361};
+
+let curBus = null;
+export const sfx = {};
+for (const [k, fn] of Object.entries(RAW)) {
+  sfx[k] = (...args) => {
+    if (!ctx) return;
+    const g = ctx.createGain();
+    g.gain.value = NORM[k] ?? 1;
+    g.connect(sfxBus);
+    curBus = g;
+    try { fn(...args); } finally { curBus = null; }
+  };
+}
 
 // ---------- BGM ----------
 const SONGS = {
@@ -300,8 +316,14 @@ function scheduleStep(s, time) {
   }
   // 패드 (앤티 5 이상)
   if (intensity >= 3 && e === 0) ch.notes.forEach((n) => tone({ freq: mtof(n + 12), type: 'sine', t, dur: (60 / song.bpm) * 4, vol: 0.018, attack: 0.4, bus: B }));
-  // 드럼
-  noise({ t, dur: e % 2 ? 0.05 : 0.09, vol: e % 2 ? 0.045 : 0.075, freq: 7000, bus: B });
+  // 1~2kHz 플럭 (코드 톤, 엇박)
+  if (e % 2 === 1 || (mode === 'shop' && e % 2 === 0)) {
+    const pn = ch.notes[(s + bar) % ch.notes.length] + 24;
+    tone({ freq: mtof(pn), type: 'triangle', t, dur: 0.12, vol: 0.09, bus: B, filter: { freq: 3000 } });
+  }
+  // 드럼: 3~8kHz 하이햇 + 셰이커
+  noise({ t, dur: e % 2 ? 0.04 : 0.07, vol: e % 2 ? 0.12 : 0.18, freq: 6500, type: 'bandpass', q: 1.2, bus: B });
+  noise({ t: t + 60 / SONGS[mode].bpm / 4, dur: 0.035, vol: 0.07, freq: 4200, type: 'bandpass', q: 2, bus: B });
   if (e === 2 || e === 6) noise({ t, dur: 0.18, vol: 0.06, freq: 1800, type: 'bandpass', bus: B });
   if ((song.kick && e % 2 === 0) || (intensity >= 3 && e === 0)) { tone({ freq: 90, type: 'sine', t, dur: 0.14, vol: 0.22, slideTo: 45, bus: B }); noise({ t, dur: 0.02, vol: 0.08, freq: 2500, type: 'bandpass', bus: B }); }
   if (song.tom && (e === 7 || (e === 5 && bar % 2))) tone({ freq: 140, type: 'sine', t, dur: 0.2, vol: 0.25, slideTo: 80, bus: B });

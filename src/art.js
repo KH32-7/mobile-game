@@ -63,6 +63,7 @@ export const ART = {
   vertigo: { ch: 'jester', hat: 'bells2', mood: 'shock', prop: 'colbar', pat: 'stripesV', acc: 'glasses' },
   zealot: { ch: 'monk', mood: 'crazy', prop: 'gems', pat: 'diamonds' },
   sprinter: { ch: 'knight', mood: 'crazy', prop: 'rocket', pat: 'speed' },
+  recycler: { ch: 'robot', mood: 'happy', prop: 'waves2', pat: 'spiral' },
   jesterking: { ch: 'jester', hat: 'kingcrown', mood: 'grin', prop: 'scepter', pat: 'rays', acc: 'beard' },
   infinity: { ch: 'cosmic', mood: 'calm', prop: 'infinity', pat: 'spiral' },
   midas: { ch: 'king', mood: 'smirk', prop: 'goldhand', pat: 'rays', acc: 'beard' },

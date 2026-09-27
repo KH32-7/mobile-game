@@ -35,7 +35,8 @@ export function computeLayout(vw, vh, safe) {
   const jokH = Math.round(Math.min(Math.max(cardW * 1.05, 54), 80));
   const calcH = 50;
   const stripH = 16;
-  const fixed = hudH + scoreH + jokH + stripH + calcH + 2;
+  const barH = 44;
+  const fixed = hudH + scoreH + jokH + stripH + calcH + 2 + barH;
   const avail = bottom - top - fixed - 16;
   const trayK = 2.7 / 8; // 트레이 높이 = 보드 * trayK + 8
   let board = Math.min(gw - pad * 2, (avail - 8) / (1 + trayK));
@@ -57,9 +58,12 @@ export function computeLayout(vw, vh, safe) {
   const rest = bottom - (y + board + trayH);
   y += Math.max(0, rest * 0.35);
   L.board = { x: Math.round(gx + (gw - board) / 2), y: Math.round(y), w: board, h: board }; y += board + Math.max(gap, rest * 0.3) + 4;
-  y = Math.min(y, bottom - trayH);
+  y = Math.min(y, bottom - trayH - barH);
   L.tray = { x: gx + pad, y, w: gw - pad * 2, h: trayH };
-  L.pause = { x: L.hud.x, y: L.hud.y + 2, w: 44, h: 44 };
+  // 하단 바: 트레이 교체(왼쪽), 일시정지(오른쪽) - 한 손 엄지 도달 영역
+  L.bar = { x: gx + pad, y: y + trayH, w: gw - pad * 2, h: barH };
+  L.pause = { x: L.bar.x + L.bar.w - 48, y: L.bar.y, w: 48, h: 44 };
+  L.swapBtn = { x: L.bar.x, y: L.bar.y, w: Math.min(190, L.bar.w * 0.55), h: 44 };
   L.traySlot = (i) => ({ x: L.tray.x + (L.tray.w / 3) * i, y: L.tray.y, w: L.tray.w / 3, h: L.tray.h });
   L.trayScale = Math.min(cell * 0.6, (L.tray.w / 3 - 14) / 5, (trayH - 10) / 3.2);
   L.jokerRect = (i, n = 5) => {
@@ -83,7 +87,26 @@ export class Renderer {
 
   setTheme(skin) {
     this.theme = skin || SKINS[0];
-    if (this.L) this.buildBg(this.L.vw, this.L.vh);
+    if (this.L) { this.buildBg(this.L.vw, this.L.vh); this.bgShown = null; }
+  }
+
+  // 드롭 순간에 스프라이트를 처음 만들지 않도록 미리 생성
+  prewarm() {
+    const L = this.L;
+    if (!L || typeof document === 'undefined') return;
+    for (let c = -1; c < COLORS.length; c++) { this.block(c, L.cell); this.block(c, L.trayScale); }
+    const saved = this.ctx;
+    for (const gm of ['gold', 'ruby', 'glass', 'steel']) { this.drawGem(gm, -100, -100, L.cell, 0); this.drawGem(gm, -100, -100, L.trayScale, 0); }
+    this.ctx = saved;
+  }
+
+  paintBg(which) {
+    if (!this.bgCv || this.bgShown === which) return;
+    const g = this.bgCv.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, this.bgCv.width, this.bgCv.height);
+    g.drawImage(which === 'plain' ? this.bgPlain : this.bg, 0, 0);
+    this.bgShown = which;
   }
 
   resize(vw, vh, dpr, L) {
@@ -92,9 +115,18 @@ export class Renderer {
     this.cv.height = Math.round(vh * dpr);
     this.cv.style.width = vw + 'px';
     this.cv.style.height = vh + 'px';
+    // 정적 배경은 별도 캔버스에 한 번만 그림 (매 프레임 전체 화면 복사 제거)
+    this.bgCv = this.bgCv || (typeof document !== 'undefined' && document.getElementById('bgcv'));
+    if (this.bgCv) {
+      this.bgCv.width = this.cv.width; this.bgCv.height = this.cv.height;
+      this.bgCv.style.width = vw + 'px'; this.bgCv.style.height = vh + 'px';
+      this.bgShown = null;
+    }
     this.L = L;
     this.blockCache.clear();
+    if (this.gemCache) this.gemCache.clear();
     this.buildBg(vw, vh);
+    this.prewarm();
   }
 
   buildBg(vw, vh) {
@@ -126,7 +158,7 @@ export class Renderer {
     g.globalAlpha = 1;
     // 펠트 테이블 (보드 + 트레이 영역)
     if (table) {
-    const fx = L.gx + 4, fy = Math.max(L.calc.y + L.calc.h + 3, L.board.y - 10), fw = L.gw - 8, fh = Math.min(vh - 4, L.tray.y + L.tray.h + 8) - fy;
+    const fx = L.gx + 4, fy = Math.max(L.calc.y + L.calc.h + 3, L.board.y - 10), fw = L.gw - 8, fh = Math.min(vh - 2, L.bar.y + L.bar.h + 4) - fy;
     g.save();
     rr(g, fx, fy, fw, fh, 22);
     const fg = g.createRadialGradient(vw / 2, fy + fh * 0.4, 10, vw / 2, fy + fh * 0.4, fh);
@@ -147,6 +179,26 @@ export class Renderer {
     // 트레이 구분선
     g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 1;
     g.beginPath(); g.moveTo(L.tray.x + 10, L.tray.y - 4); g.lineTo(L.tray.x + L.tray.w - 10, L.tray.y - 4); g.stroke();
+    // 보드 틀 + 빈칸 (정적)
+    const b = L.board, cell = L.cell;
+    rr(g, b.x - 6, b.y - 6, b.w + 12, b.h + 12, 12);
+    g.fillStyle = 'rgba(0,0,0,0.45)'; g.fill();
+    g.strokeStyle = 'rgba(120,255,200,0.25)'; g.lineWidth = 1.5; g.stroke();
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const x = b.x + c * cell, y = b.y + r * cell;
+      rr(g, x + 1.5, y + 1.5, cell - 3, cell - 3, cell * 0.14);
+      g.fillStyle = (r + c) % 2 ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.38)'; g.fill();
+      g.strokeStyle = 'rgba(255,255,255,0.05)'; g.lineWidth = 1; g.stroke();
+    }
+    // 트레이 슬롯 자리
+    for (let i = 0; i < 3; i++) {
+      const slot = L.traySlot(i);
+      const cx = slot.x + slot.w / 2, cy = slot.y + slot.h / 2;
+      const r2 = Math.min(slot.w, slot.h) * 0.36;
+      g.beginPath(); g.arc(cx, cy, r2, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(0,0,0,0.14)'; g.fill();
+      g.setLineDash([5, 6]); g.strokeStyle = 'rgba(255,215,120,0.2)'; g.lineWidth = 2; g.stroke(); g.setLineDash([]);
+    }
     }
     // 스캔라인
     g.fillStyle = 'rgba(0,0,0,0.10)';
@@ -207,21 +259,45 @@ export class Renderer {
   }
 
   drawBlock(colorIdx, x, y, size, alpha = 1) {
-    const img = this.block(colorIdx, size);
+    // 스프라이트는 보드 칸 / 트레이 칸 두 크기만 캐시하고 나머지는 스케일해서 그림 (애니메이션 중 캐시 폭증 방지)
+    let base = size;
+    if (this.L) { base = size <= this.L.trayScale * 1.15 ? this.L.trayScale : this.L.cell; if (size > base * 1.3) base = size; }
+    const img = this.block(colorIdx, base);
     const ctx = this.ctx;
     if (alpha !== 1) ctx.globalAlpha = alpha;
     ctx.drawImage(img, x, y, size, size);
     if (alpha !== 1) ctx.globalAlpha = 1;
   }
 
+  // 보석은 캐시한 스프라이트로 그리고 펄스만 스케일
   drawGem(type, cx, cy, size, t = 0) {
+    if (!this.gemCache) this.gemCache = new Map();
+    const key = type + '|' + Math.round(size) + '|' + this.dpr;
+    let img = this.gemCache.get(key);
+    if (!img) {
+      const S = Math.ceil(size);
+      img = document.createElement('canvas');
+      img.width = Math.round(S * this.dpr); img.height = Math.round(S * this.dpr);
+      const saved = this.ctx;
+      this.ctx = img.getContext('2d');
+      this.ctx.scale(this.dpr, this.dpr);
+      this.drawGemRaw(type, S / 2, S / 2, size, 0, true);
+      this.ctx = saved;
+      this.gemCache.set(key, img);
+    }
+    const pulse = 1 + Math.sin(t * 4 + cx * 0.1) * 0.06;
+    const d = size * pulse;
+    this.ctx.drawImage(img, cx - d / 2, cy - d / 2, d, d);
+  }
+
+  drawGemRaw(type, cx, cy, size, t = 0, still = false) {
     const ctx = this.ctx;
     const s = size * 0.3;
-    const pulse = 1 + Math.sin(t * 4 + cx * 0.1) * 0.06;
+    const pulse = still ? 1 : 1 + Math.sin(t * 4 + cx * 0.1) * 0.06;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(pulse, pulse);
-    ctx.shadowColor = GEM_COLOR[type]; ctx.shadowBlur = size * 0.3;
+    ctx.shadowColor = GEM_COLOR[type]; ctx.shadowBlur = size * 0.2;
     ctx.beginPath();
     if (type === 'gold') {
       for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + Math.PI / 6; ctx.lineTo(Math.cos(a) * s, Math.sin(a) * s); }
@@ -261,7 +337,7 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.font = `${weight} ${size}px ${FONT}`;
     ctx.textAlign = align; ctx.textBaseline = base;
-    if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = size * 0.6; }
+    if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = Math.min(10, size * 0.3); }
     if (stroke) { ctx.lineJoin = 'round'; ctx.strokeStyle = stroke; ctx.lineWidth = sw; ctx.strokeText(str, x, y, maxW); }
     ctx.fillStyle = color; ctx.fillText(str, x, y, maxW);
     if (glow) ctx.shadowBlur = 0;
@@ -271,8 +347,13 @@ export class Renderer {
   draw(app, time) {
     const { ctx, L } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    if (!app.inRun) { ctx.drawImage(this.bgPlain, 0, 0, L.vw, L.vh); this.drawTitleDeco(app, time); return; }
-    ctx.drawImage(this.bg, 0, 0, L.vw, L.vh);
+    ctx.clearRect(0, 0, L.vw, L.vh);
+    if (!app.inRun) {
+      if (this.bgCv) this.paintBg('plain'); else ctx.drawImage(this.bgPlain, 0, 0, L.vw, L.vh);
+      this.drawTitleDeco(app, time);
+      return;
+    }
+    if (this.bgCv) this.paintBg('table'); else ctx.drawImage(this.bg, 0, 0, L.vw, L.vh);
     if (app.showdown) {
       const pulse = 0.25 + Math.sin(time * 2.2) * 0.08;
       const vg = ctx.createRadialGradient(L.vw / 2, L.vh / 2, L.vw * 0.2, L.vw / 2, L.vh / 2, Math.max(L.vw, L.vh) * 0.7);
@@ -295,6 +376,7 @@ export class Renderer {
     this.drawCalc(app, time);
     this.drawBoard(app, time);
     this.drawTray(app, time);
+    this.drawBar(app, time);
     this.drawBeams(app);
     this.drawFx(app, time);
     this.drawComboWord(app);
@@ -325,7 +407,6 @@ export class Renderer {
         g.addColorStop(Math.max(0.001, hpos - 0.05), `rgba(255,255,255,${0.9 * (1 - t)})`);
         g.addColorStop(Math.min(1, hpos + 0.001), 'rgba(255,255,255,0)');
         ctx.fillStyle = g;
-        ctx.shadowColor = bm.color; ctx.shadowBlur = 18;
         ctx.fillRect(x0, y + cell * 0.2, len, cell * 0.6);
         ctx.globalAlpha = (1 - t) * 0.5; ctx.fillStyle = bm.color; ctx.fillRect(x0, y + cell * 0.45, len, cell * 0.1);
       } else {
@@ -338,7 +419,6 @@ export class Renderer {
         g.addColorStop(Math.max(0.001, hpos - 0.05), `rgba(255,255,255,${0.9 * (1 - t)})`);
         g.addColorStop(Math.min(1, hpos + 0.001), 'rgba(255,255,255,0)');
         ctx.fillStyle = g;
-        ctx.shadowColor = bm.color; ctx.shadowBlur = 18;
         ctx.fillRect(x + cell * 0.2, y0, cell * 0.6, len);
         ctx.globalAlpha = (1 - t) * 0.5; ctx.fillStyle = bm.color; ctx.fillRect(x + cell * 0.45, y0, cell * 0.1, len);
       }
@@ -358,9 +438,30 @@ export class Renderer {
     ctx.translate(L.board.x + L.board.w / 2, L.board.y + L.board.h * 0.42 - t * 20);
     ctx.rotate(-0.06);
     ctx.scale(sc, sc);
-    this.text(w.text, 0, 0, { size: w.size || 44, color: w.color, weight: 900, align: 'center', stroke: 'rgba(20,0,40,0.9)', sw: 8, glow: w.color, maxW: L.board.w });
-    if (w.sub) this.text(w.sub, 0, (w.size || 44) * 0.75, { size: 17, color: '#fff', weight: 900, align: 'center', stroke: 'rgba(20,0,40,0.9)', sw: 5 });
+    // 큰 글로우 텍스트는 한 번만 오프스크린에 그려 두고 매 프레임 이미지로 그림 (롱태스크 방지)
+    if (w._spr === undefined) w._spr = this.comboSprite(w, L.board.w);
+    if (w._spr) ctx.drawImage(w._spr.cv, -w._spr.ox, -w._spr.oy, w._spr.w, w._spr.h);
     ctx.restore();
+  }
+
+  comboSprite(w, maxW) {
+    const size = w.size || 44;
+    const W = Math.ceil(maxW + 40), H = Math.ceil(size * 1.9 + (w.sub ? 30 : 0));
+    const k = Math.min(2, this.dpr);
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil(W * k); cv.height = Math.ceil(H * k);
+    const g = cv.getContext('2d');
+    if (!g) return null;
+    g.scale(k, k);
+    const saved = this.ctx; this.ctx = g;
+    const ox = W / 2, oy = size * 0.95;
+    g.globalAlpha = 0.3;
+    this.text(w.text, ox, oy, { size, color: w.color, weight: 900, align: 'center', stroke: w.color, sw: 16, maxW });
+    g.globalAlpha = 1;
+    this.text(w.text, ox, oy, { size, color: w.color, weight: 900, align: 'center', stroke: 'rgba(20,0,40,0.9)', sw: 8, maxW });
+    if (w.sub) this.text(w.sub, ox, oy + size * 0.75, { size: 17, color: '#fff', weight: 900, align: 'center', stroke: 'rgba(20,0,40,0.9)', sw: 5 });
+    this.ctx = saved;
+    return { cv, ox, oy, w: W, h: H };
   }
 
   drawIntro(app, time) {
@@ -400,7 +501,7 @@ export class Renderer {
       const s = 26 + (i % 4) * 8;
       const x = ((i * 97.3 + time * (12 + (i % 3) * 6)) % (L.vw + 80)) - 40;
       const y = (i * 61.7) % L.vh + Math.sin(time + i) * 10;
-      this.drawBlock(i % COLORS.length, x, y, s, 0.35);
+      this.drawBlock(i % COLORS.length, x, y, s, 0.14);
     }
   }
 
@@ -408,15 +509,9 @@ export class Renderer {
     const { ctx, L } = this;
     const g = app.game;
     const h = L.hud;
-    // 일시정지 버튼
-    const p = L.pause;
-    rr(ctx, p.x, p.y, p.w, p.h, 12);
-    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(p.x + 16, p.y + 14, 4, 16); ctx.fillRect(p.x + 24, p.y + 14, 4, 16);
+
     // 앤티 / 블라인드 (라운드 시작 시점 정보)
-    const bx = p.x + p.w + 10;
+    const bx = h.x + 4;
     const hd = app.hud || { ante: g.ante, blind: g.blind, name: g.blindName, color: g.blind === 2 ? g.bossDef.color : null, endless: g.endless };
     this.text(`앤티 ${hd.ante}${hd.endless ? '' : ' / ' + CONFIG.FINAL_ANTE}`, bx, h.y + 15, { size: 13, color: '#c9b8ff', weight: 700 });
     const boss = hd.blind === 2;
@@ -432,7 +527,7 @@ export class Renderer {
     this.drawCoin(cx - 58, h.y + 24, 10);
     const coinPulse = app.coinPulse > 0 ? 1 + app.coinPulse * 0.4 : 1;
     ctx.save(); ctx.translate(cx - 26, h.y + 24); ctx.scale(coinPulse, coinPulse);
-    this.text(String(g.coins), 0, 1, { size: 18, color: '#ffe68a', weight: 900, align: 'center' });
+    this.text(String(Math.round(app.coinsShown ?? g.coins)), 0, 1, { size: 18, color: '#ffe68a', weight: 900, align: 'center' });
     ctx.restore();
 
     // 점수 바
@@ -445,7 +540,8 @@ export class Renderer {
     if (app.shownScore >= g.target) {
       const pulse = 0.6 + Math.sin(time * 8) * 0.4;
       rr(ctx, s.x - 1, s.y - 1, s.w + 2, s.h + 2, 13);
-      ctx.strokeStyle = `rgba(255,210,63,${pulse})`; ctx.lineWidth = 3; ctx.shadowColor = '#ffd23f'; ctx.shadowBlur = 18 * pulse; ctx.stroke(); ctx.shadowBlur = 0;
+      ctx.strokeStyle = `rgba(255,210,63,${pulse * 0.25})`; ctx.lineWidth = 9; ctx.stroke();
+      ctx.strokeStyle = `rgba(255,210,63,${pulse})`; ctx.lineWidth = 3; ctx.stroke();
     }
     rr(ctx, s.x + 8, s.y + s.h - 12, bw, 6, 3);
     ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fill();
@@ -453,7 +549,7 @@ export class Renderer {
       rr(ctx, s.x + 8, s.y + s.h - 12, Math.max(6, bw * prog), 6, 3);
       const pg = ctx.createLinearGradient(s.x, 0, s.x + bw, 0);
       pg.addColorStop(0, '#36c9ff'); pg.addColorStop(1, '#ff4d6d');
-      ctx.fillStyle = pg; ctx.shadowColor = '#ff4d6d'; ctx.shadowBlur = 8; ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = pg; ctx.fill();
       if (prog >= 0.5) {
         // 불꽃
         const fx = s.x + 8 + bw * prog, fy = s.y + s.h - 9;
@@ -561,7 +657,7 @@ export class Renderer {
     if (rot) ctx.rotate(rot);
     ctx.scale(scale, scale);
     ctx.translate(-w / 2, -h / 2);
-    if (!disabled) { ctx.shadowColor = d.rarity === 'legendary' ? '#c86bff' : 'rgba(0,0,0,0.5)'; ctx.shadowBlur = d.rarity === 'legendary' ? 12 : 6; ctx.shadowOffsetY = 2; }
+    if (!disabled && d.rarity === 'legendary') { ctx.shadowColor = '#c86bff'; ctx.shadowBlur = 10; }
     ctx.drawImage(j.ed === 'neg' && !disabled ? this.negSprite(j.id, w, h) : this.jokerSprite(j.id, w, h), 0, 0, w, h);
     ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     // 에디션 반짝임
@@ -622,7 +718,10 @@ export class Renderer {
       const lift = bt < 0.3 ? -Math.sin((bt / 0.3) * Math.PI) * 8 : 0;
       const rot = bt < 0.4 ? Math.sin(bt * 45) * 0.105 * (1 - bt / 0.4) : Math.sin(time * 1.3 + i) * 0.015;
       const dragOff = app.jokerDrag && app.jokerDrag.idx === i ? app.jokerDrag.dx : 0;
+      const dim = app.seq && app.activeJoker != null && app.activeJoker !== i;
+      if (dim) ctx.globalAlpha = 0.5;
       this.drawJokerCard(j, r.x + dragOff, r.y + lift + (dragOff ? -6 : 0), r.w, r.h, { scale: dragOff ? 1.08 : sc, disabled: j.disabled, time, rot });
+      ctx.globalAlpha = 1;
     }
     if (!g.jokers.length && app.game.ante === 1 && app.game.blind === 0) {
       this.text('조커 슬롯 · 상점에서 구매', L.jokers.x + L.jokers.w / 2, L.jokers.y + L.jokers.h / 2, { size: 12, color: 'rgba(255,255,255,0.35)', weight: 700, align: 'center' });
@@ -640,7 +739,9 @@ export class Renderer {
     const cp = 1 + k.chipsPulse * 0.12, mp = 1 + k.multPulse * 0.12;
     const pv = !k.active && app.drag && app.drag.valid && app.drag.preview;
     const chipTxt = k.active ? fmt(Math.round(k.chipsShown ?? k.chips)) : pv ? fmt(pv.chips) : '칩';
-    const multTxt = k.active ? fmt(Math.round((k.multShown ?? k.mult) * 10) / 10) : pv ? fmt(pv.mult) : '배수';
+    // 배수 표시 정책: 최종 배수가 정수면 정수로 굴리고, 아니면 소수 1자리 고정
+    const mv = k.multShown ?? k.mult;
+    const multTxt = k.active ? (Number.isInteger(k.mult) ? String(Math.round(mv)) : mv.toFixed(1)) : pv ? fmt(pv.mult) : '배수';
     const big = k.active || pv;
     if (e < 1) {
       ctx.save();
@@ -650,16 +751,18 @@ export class Renderer {
       rr(ctx, -bw / 2, -c.h / 2 + 4, bw, c.h - 8, 10);
       const cg = ctx.createLinearGradient(0, -c.h / 2, 0, c.h / 2);
       cg.addColorStop(0, '#1a8cff'); cg.addColorStop(1, '#0a4aa3');
-      ctx.fillStyle = cg; ctx.shadowColor = '#36c9ff'; ctx.shadowBlur = 8 + k.chipsPulse * 20; ctx.fill(); ctx.shadowBlur = 0;
+      if (k.chipsPulse > 0.05) { ctx.strokeStyle = `rgba(54,201,255,${Math.min(0.6, k.chipsPulse * 0.6)})`; ctx.lineWidth = 3 + k.chipsPulse * 8; ctx.stroke(); }
+      ctx.fillStyle = cg; ctx.fill();
       this.text(chipTxt, 0, 1, { size: big ? 24 : 15, color: '#fff', weight: 900, align: 'center', maxW: bw - 12, stroke: 'rgba(0,0,0,0.35)', sw: 3 });
       ctx.restore();
-      this.text('X', c.x + c.w / 2, c.y + c.h / 2 + 1, { size: 22, color: '#fff', weight: 900, align: 'center', glow: '#ff4d6d' });
+      this.text('X', c.x + c.w / 2, c.y + c.h / 2 + 1, { size: 22, color: '#fff', weight: 900, align: 'center', stroke: 'rgba(255,77,109,0.6)', sw: 4 });
       // 배수 박스
       ctx.save(); ctx.translate(c.x + c.w - bw / 2 - e * (bw / 2 + 20), c.y + c.h / 2); ctx.scale(mp, mp);
       rr(ctx, -bw / 2, -c.h / 2 + 4, bw, c.h - 8, 10);
       const mg = ctx.createLinearGradient(0, -c.h / 2, 0, c.h / 2);
       mg.addColorStop(0, '#ff3b5c'); mg.addColorStop(1, '#a3082a');
-      ctx.fillStyle = mg; ctx.shadowColor = '#ff4d6d'; ctx.shadowBlur = 8 + k.multPulse * 20; ctx.fill(); ctx.shadowBlur = 0;
+      if (k.multPulse > 0.05) { ctx.strokeStyle = `rgba(255,77,109,${Math.min(0.6, k.multPulse * 0.6)})`; ctx.lineWidth = 3 + k.multPulse * 8; ctx.stroke(); }
+      ctx.fillStyle = mg; ctx.fill();
       this.text(multTxt, 0, 1, { size: big ? 24 : 15, color: '#fff', weight: 900, align: 'center', maxW: bw - 12, stroke: 'rgba(0,0,0,0.35)', sw: 3 });
       ctx.restore();
       ctx.restore();
@@ -674,7 +777,7 @@ export class Renderer {
       const gg = ctx.createLinearGradient(-c.w / 2, 0, c.w / 2, 0);
       gg.addColorStop(0, '#0a4aa3'); gg.addColorStop(0.35, '#2a0f4a'); gg.addColorStop(0.65, '#2a0f4a'); gg.addColorStop(1, '#a3082a');
       ctx.fillStyle = gg; ctx.fill();
-      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.shadowColor = '#ffb627'; ctx.shadowBlur = 14; ctx.stroke(); ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,182,39,0.3)'; ctx.lineWidth = 7; ctx.stroke(); ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.stroke();
       const parts = [
         [fmt(k.chips), '#7fd0ff', 17], [' X ', '#fff', 15], [fmt(k.mult), '#ff8fa3', 17], [' = ', '#fff', 15], [fmt(k.totalShown), '#ffe68a', 26],
       ];
@@ -714,16 +817,7 @@ export class Renderer {
     const { ctx, L } = this;
     const g = app.game;
     const b = L.board, cell = L.cell;
-    rr(ctx, b.x - 6, b.y - 6, b.w + 12, b.h + 12, 12);
-    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
-    ctx.strokeStyle = 'rgba(120,255,200,0.25)'; ctx.lineWidth = 1.5; ctx.stroke();
-    // 빈칸
-    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-      const x = b.x + c * cell, y = b.y + r * cell;
-      rr(ctx, x + 1.5, y + 1.5, cell - 3, cell - 3, cell * 0.14);
-      ctx.fillStyle = (r + c) % 2 ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.38)'; ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1; ctx.stroke();
-    }
+    // 보드 틀과 빈칸은 배경 레이어에 미리 그려 둠
     const drag = app.drag;
     const hl = drag && drag.valid ? drag.lines : null;
     const hlSet = new Set();
@@ -771,8 +865,9 @@ export class Renderer {
     if (app.boardGlow && app.boardGlow.t < 0.3) {
       const q = 1 - app.boardGlow.t / 0.3;
       rr(ctx, b.x - 6, b.y - 6, b.w + 12, b.h + 12, 12);
-      ctx.strokeStyle = app.boardGlow.color; ctx.globalAlpha = q; ctx.lineWidth = 4; ctx.shadowColor = app.boardGlow.color; ctx.shadowBlur = 26 * q; ctx.stroke();
-      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+      ctx.strokeStyle = app.boardGlow.color;
+      for (let k = 0; k < 3; k++) { ctx.globalAlpha = q * (0.8 - k * 0.25); ctx.lineWidth = 4 + k * 6; ctx.stroke(); }
+      ctx.globalAlpha = 1;
     }
     // 예상 점수 칩 (하이라이트 줄 끝)
     if (drag && drag.valid && drag.preview) {
@@ -788,16 +883,16 @@ export class Renderer {
       this.text(label, px, py + 0.5, { size: 13, color: '#ffe68a', weight: 900, align: 'center' });
     }
     // 콤보 카운터 + 남은 유예
-    if (g.combo > 0 && g.phase === 'play') {
+    if (g.phase === 'play') {
       const grace = g.comboGrace;
       const left = Math.max(0, grace - g.missStreak);
-      const label = `콤보 ${g.combo}`;
+      const label = g.combo > 0 ? `콤보 ${g.combo} · 다음 +${g.combo * CONFIG.COMBO_MULT} 배수` : '콤보 0 · 연속 제거로 배수 UP';
       ctx.font = `900 13px ${FONT}`;
       const tw = ctx.measureText(label).width;
       const pw = tw + 16 + grace * 9;
       const px = b.x + b.w - pw + 4, py = b.y - 16;
       rr(ctx, px, py, pw, 20, 10);
-      const hot = g.combo >= 5 ? '#ff4d6d' : g.combo >= 3 ? '#ffb627' : '#36c9ff';
+      const hot = g.combo >= 5 ? '#ff4d6d' : g.combo >= 3 ? '#ffb627' : g.combo > 0 ? '#36c9ff' : '#8f80b8';
       ctx.fillStyle = 'rgba(10,4,24,0.9)'; ctx.fill();
       ctx.strokeStyle = hot; ctx.lineWidth = 1.5; ctx.stroke();
       this.text(label, px + 8, py + 10.5, { size: 13, color: hot, weight: 900 });
@@ -810,28 +905,53 @@ export class Renderer {
     if (app.gemFlash) {
       const f = app.gemFlash;
       const x = b.x + f.c * cell, y = b.y + f.r * cell;
-      ctx.strokeStyle = GEM_COLOR[f.gem]; ctx.lineWidth = 3; ctx.shadowColor = GEM_COLOR[f.gem]; ctx.shadowBlur = 12;
-      rr(ctx, x, y, cell, cell, cell * 0.2); ctx.stroke(); ctx.shadowBlur = 0;
+      rr(ctx, x, y, cell, cell, cell * 0.2);
+      ctx.globalAlpha = 0.35; ctx.strokeStyle = GEM_COLOR[f.gem]; ctx.lineWidth = 8; ctx.stroke();
+      ctx.globalAlpha = 1; ctx.lineWidth = 3; ctx.stroke();
     }
+  }
+
+  drawBar(app, time) {
+    const { ctx, L } = this;
+    const g = app.game;
+    // 트레이 교체
+    const sb = L.swapBtn;
+    const left = g.swapsLeft || 0, max = g.maxSwaps || 2;
+    const stuck = app.stuck;
+    const pulse = stuck ? 0.6 + Math.sin(time * 8) * 0.4 : 0;
+    rr(ctx, sb.x, sb.y + 4, sb.w, sb.h - 8, 18);
+    ctx.fillStyle = left ? (stuck ? `rgba(255,190,40,${0.35 + pulse * 0.3})` : 'rgba(0,0,0,0.35)') : 'rgba(0,0,0,0.2)'; ctx.fill();
+    ctx.strokeStyle = left ? (stuck ? '#ffd23f' : 'rgba(255,215,120,0.55)') : 'rgba(255,255,255,0.12)'; ctx.lineWidth = stuck ? 2.5 : 1.5; ctx.stroke();
+    this.text('↻ 트레이 교체', sb.x + 14, sb.y + sb.h / 2 + 1, { size: 14, color: left ? '#ffe68a' : 'rgba(255,255,255,0.35)', weight: 900 });
+    for (let i = 0; i < max; i++) {
+      ctx.beginPath(); ctx.arc(sb.x + sb.w - 18 - (max - 1 - i) * 14, sb.y + sb.h / 2, 5, 0, Math.PI * 2);
+      ctx.fillStyle = i < left ? '#3ddc97' : 'rgba(255,255,255,0.15)'; ctx.fill();
+    }
+    if (stuck && left) this.text('놓을 곳 없음! 교체하기', sb.x + sb.w + 8, sb.y + sb.h / 2 + 1, { size: 12, color: '#ffd23f', weight: 900, maxW: L.pause.x - sb.x - sb.w - 12 });
+    // 일시정지
+    const p = L.pause;
+    rr(ctx, p.x + 2, p.y + 2, p.w - 4, p.h - 4, 12);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(p.x + p.w / 2 - 7, p.y + 14, 4, 16); ctx.fillRect(p.x + p.w / 2 + 3, p.y + 14, 4, 16);
   }
 
   drawTray(app, time) {
     const { ctx, L } = this;
     const g = app.game;
-    // 트레이 슬롯 장식 (카지노 칩 자리)
+    // 빈 트레이 자리 문양 (자리 원은 배경에 미리 그림)
     for (let i = 0; i < 3; i++) {
       const slot = L.traySlot(i);
       const cx = slot.x + slot.w / 2, cy = slot.y + slot.h / 2;
       const r = Math.min(slot.w, slot.h) * 0.36;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.14)'; ctx.fill();
-      ctx.setLineDash([5, 6]); ctx.strokeStyle = g.tray[i] ? 'rgba(255,215,120,0.12)' : 'rgba(255,215,120,0.28)'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
       if (!g.tray[i]) {
         ctx.globalAlpha = 0.35;
         this.text(['♠', '♦', '♣'][i], cx, cy + 1, { size: r * 0.8, color: '#ffd77a', weight: 900, align: 'center' });
         ctx.globalAlpha = 1;
       }
     }
+    if (app.pendingEnd && app.pendingEnd.type === 'roundClear') return;
     for (let i = 0; i < 3; i++) {
       const p = g.tray[i];
       if (!p) continue;
@@ -868,7 +988,7 @@ export class Renderer {
     const [sx, sy] = [d.px - w / 2, d.py - h / 2];
     const ctx = this.ctx;
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 8;
+    ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 6;
     this.drawPiece(d.piece, sx, sy, cell, 1, time);
     ctx.restore();
   }
@@ -912,22 +1032,22 @@ export class Renderer {
 
   drawBubbles(app) {
     const { ctx, L } = this;
-    for (const b of app.bubbles) {
+    app.bubbles.forEach((b, order) => {
       const r = L.jokerRect(b.idx, Math.max(5, app.game.jokerSlots));
       const t = b.t / b.life;
       const a = t < 0.1 ? t / 0.1 : t > 0.75 ? (1 - t) / 0.25 : 1;
       ctx.font = `900 13px ${FONT}`;
       const w = Math.max(r.w, ctx.measureText(b.text).width + 14);
       let x = r.x + r.w / 2 - w / 2;
-      x = Math.max(L.gx + 4, Math.min(L.gx + L.gw - w - 4, x));
-      const y = r.y + r.h + 6 + Math.min(t * 30, 4);
+      x = Math.max(L.gx + 16, Math.min(L.gx + L.gw - w - 16, x));
+      const y = r.y + r.h + 6 + Math.min(t * 30, 4) + order * 27;
       ctx.globalAlpha = a;
       rr(ctx, x, y, w, 24, 8);
       ctx.fillStyle = b.color; ctx.fill();
       ctx.beginPath(); ctx.moveTo(r.x + r.w / 2 - 6, y + 1); ctx.lineTo(r.x + r.w / 2, y - 6); ctx.lineTo(r.x + r.w / 2 + 6, y + 1); ctx.fill();
       this.text(b.text, x + w / 2, y + 12.5, { size: 13, color: '#fff', weight: 900, align: 'center', stroke: 'rgba(0,0,0,0.35)', sw: 3 });
       ctx.globalAlpha = 1;
-    }
+    });
   }
 
   drawBanner(app, time) {
