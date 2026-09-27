@@ -184,7 +184,7 @@ try {
     check('다음 구간', after.sec === 1);
     await sleep(1500);
     await page.screenshot({ path: 'shots/16-next-section.png' });
-    check('새 테마 해금 저장', (await SAVE(page)).themes.unlocked.includes(1));
+    check('테마 요새 격파 기록 저장', ((await SAVE(page)).themes.forts || {})['0'] === 1);
 
     await G(page, () => { window.__game.opts.god = false; });
     let st = 'play';
@@ -206,6 +206,14 @@ try {
       check('출석 보상 수령', b1.coins === b0.coins + 80 && b1.streak.count === 1, `${b0.coins}->${b1.coins}`);
     } else check('출석 보상 버튼 표시', false);
     await page.screenshot({ path: 'shots/18-title-meta.png' });
+    // 가격이 올라서(업그레이드 400, 스킨 10 보석) 부족분만 보충한 뒤 구매 흐름 확인
+    const sv2 = await SAVE(page);
+    const gotGems = sv2.stats.gemsEarned;
+    check('플레이로 보석 획득', gotGems >= 1, `얻은 보석 ${gotGems}`);
+    await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('swarm-surfers-v1')); s.coins = Math.max(s.coins, 450); s.gems = Math.max(s.gems, 10); localStorage.setItem('swarm-surfers-v1', JSON.stringify(s)); });
+    await page.reload();
+    await page.waitForFunction(() => window.__game);
+    await sleep(600);
     await clickSel(page, cdp, '#tShop');
     await sleep(300);
     await clickSel(page, cdp, '[data-upg="start"]');

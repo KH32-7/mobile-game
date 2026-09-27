@@ -333,3 +333,5 @@ button { font-family: var(--font); border: 0; cursor: pointer; color: #fff; touc
   .panel .actions { margin-top: 10px; gap: 8px; }
   .cause { margin-top: 2px; }
 }
+.btn { white-space: nowrap; }
+@media (max-width: 380px) { .panel .actions .btn:not(.big) { font-size: 17px; padding: 0 10px; } }
