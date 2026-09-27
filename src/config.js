@@ -40,7 +40,7 @@ export const CFG = {
   maxCount: 99999,
 
   // 적
-  enemyRender: 90,
+  enemyRender: 60,
   battleSpeed: 0.12,
   battleRateBase: 26,
   battleRateScale: 0.9,
@@ -56,7 +56,7 @@ export const CFG = {
   fortHpFloor: 0.4,
   stairMults: [1, 1.5, 2, 3, 4, 5],
   stairStepLen: 2.6,
-  stairStepH: 0.42,
+  stairStepH: 0.7,
   stairThr0: 6,
   stairThrPerSec: 5,
   stairThrGrow: 1.55,

@@ -380,7 +380,7 @@ export class Entities {
       x.fillStyle = hex; x.fillRect(0, 0, c.width, c.height);
       const riser = 512 * CFG.stairStepH / W;
       x.fillStyle = 'rgba(0,0,0,0.22)'; x.fillRect(0, riser - 4, 512, 4);
-      x.font = `900 ${Math.round(riser * 0.8)}px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
+      x.font = `900 ${Math.round(riser * 0.9)}px system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
       x.textAlign = 'center'; x.textBaseline = 'middle';
       x.lineWidth = 5; x.strokeStyle = 'rgba(0,0,0,0.35)'; x.fillStyle = '#fff';
       for (const px of [96, 256, 416]) { x.strokeText('x' + m, px, riser * 0.52); x.fillText('x' + m, px, riser * 0.52); }

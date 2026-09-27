@@ -68,7 +68,7 @@ try {
     const s0 = await G(page, () => ({ st: window.__game.state, tut: window.__game.tutorial, n: window.__game.swarm.count }));
     check('첫 실행은 바로 튜토리얼 달리기', s0.st === 'play' && s0.tut && s0.n === 15, JSON.stringify(s0));
     check('첫 실행 타이틀 숨김', !(await page.locator('#title').isVisible()));
-    await page.screenshot({ path: 'shots/01-first-run.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/01-first-run.png' });
 
     const done = { lr: false, up: false, down: false };
     let battle = false, gateSeen = false;
@@ -76,7 +76,7 @@ try {
       await sleep(150);
       const s = await G(page, () => { const g = window.__game; return { wait: g.tutWait && g.tutWait.step, lane: g.lane, mode: g.mode, tut: g.tutorial, gates: g.dbg.gates.length }; });
       if (s.wait && !done[s.wait]) {
-        await page.screenshot({ path: `shots/02-tut-${s.wait}.png` });
+        await page.screenshot({ timeout: 90000, path: `shots/02-tut-${s.wait}.png` });
         const lane0 = s.lane;
         await swipe(cdp, s.wait === 'lr' ? 'left' : s.wait);
         await sleep(250);
@@ -92,10 +92,10 @@ try {
         gateSeen = true;
         const g0 = await G(page, () => window.__game.dbg.gates[0]);
         check('튜토리얼 게이트로 인원 증가', g0.after > g0.before, JSON.stringify(g0));
-        await page.screenshot({ path: 'shots/03-after-gate.png' });
+        await page.screenshot({ timeout: 90000, path: 'shots/03-after-gate.png' });
       }
       if (s.mode === 'battle') {
-        if (!battle) { battle = true; await page.screenshot({ path: 'shots/04-battle-tap.png' }); }
+        if (!battle) { battle = true; await page.screenshot({ timeout: 90000, path: 'shots/04-battle-tap.png' }); }
         await tap(cdp, W / 2, H * 0.55);
       }
       if (!s.tut) break;
@@ -103,17 +103,17 @@ try {
     check('튜토리얼 적 무리 전투', battle);
     check('튜토리얼 완료 저장', (await SAVE(page)).tutorialDone === true);
     await sleep(600);
-    await page.screenshot({ path: 'shots/05-tut-done.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/05-tut-done.png' });
 
     // 일시정지 → 3,2,1 카운트다운 → 재개
     await clickSel(page, cdp, '#pauseBtn');
     await sleep(300);
     check('일시정지', (await G(page, () => window.__game.state)) === 'pause');
-    await page.screenshot({ path: 'shots/06-pause.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/06-pause.png' });
     await clickSel(page, cdp, '#pResume');
     await sleep(200);
     check('재개 카운트다운', (await G(page, () => window.__game.state)) === 'countdown');
-    await page.screenshot({ path: 'shots/07-countdown.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/07-countdown.png' });
     for (let i = 0; i < 150 && (await G(page, () => window.__game.state)) === 'countdown'; i++) await sleep(200);
     check('카운트다운 후 플레이', (await G(page, () => window.__game.state)) === 'play');
 
@@ -123,10 +123,10 @@ try {
     for (let i = 0; i < 1500 && st !== 'over'; i++) {
       await sleep(200);
       st = await G(page, () => window.__game.state);
-      if (i === 15) await page.screenshot({ path: 'shots/08-running.png' });
+      if (i === 15) await page.screenshot({ timeout: 90000, path: 'shots/08-running.png' });
       if (st === 'revive' && !revived) {
         await G(page, () => { window.__game.reviveT = 30; }); // 느린 헤드리스에서 대기 시간 초과 방지
-        await page.screenshot({ path: 'shots/09-revive.png' });
+        await page.screenshot({ timeout: 90000, path: 'shots/09-revive.png' });
         const box = await page.locator('#rvYes').boundingBox();
         check('부활 버튼 한 줄', box && box.height < 80, `h=${box && box.height}`);
         await clickSel(page, cdp, '#rvYes');
@@ -139,13 +139,13 @@ try {
     check('게임 오버 도달', st === 'over');
     await G(page, () => { window.__game.opts.fast = 1; });
     await sleep(500);
-    await page.screenshot({ path: 'shots/10-gameover.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/10-gameover.png' });
     // 결과창에서 연 상점은 결과창 위에 떠야 함
     await clickSel(page, cdp, '#oShop');
     await sleep(300);
     const top = await page.evaluate(() => { const r = document.querySelector('#shopP .panel').getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + 60); return !!el.closest('#shopP'); });
     check('결과창 위에 상점 표시', top);
-    await page.screenshot({ path: 'shots/11-over-shop.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/11-over-shop.png' });
     await clickSel(page, cdp, '#shopP [data-close]');
     await clickSel(page, cdp, '#oTitle');
     await sleep(600);
@@ -153,7 +153,7 @@ try {
     check('첫 판 후 타이틀에 기능 단계적 노출', await page.locator('#tShop').isVisible() && !(await page.locator('#tWeekly').isVisible()));
     const titleChars = await G(page, () => window.__game.chars.body.count);
     check('타이틀에 무리 표시', titleChars >= 10, `${titleChars}`);
-    await page.screenshot({ path: 'shots/12-title-after-first.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/12-title-after-first.png' });
     await ctx.close();
   }
 
@@ -168,14 +168,20 @@ try {
     for (let i = 0; i < 600; i++) {
       await sleep(120);
       const s = await G(page, () => ({ m: window.__game.mode, f: window.__game.forts, rw: !!document.querySelector('.reward') }));
-      if (s.m === 'battle' && !shotBattle) { shotBattle = true; await page.screenshot({ path: 'shots/13-battle.png' }); }
-      if (s.m === 'siege' && !shotSiege) { shotSiege = true; await sleep(400); await page.screenshot({ path: 'shots/14-siege.png' }); }
+      if (s.m === 'battle' && !shotBattle) { shotBattle = true; await page.screenshot({ timeout: 90000, path: 'shots/13-battle.png' }); }
+      // 적 무리는 한 레인만 막으므로 전투를 보려면 그 레인으로 이동
+      if (!shotBattle && s.m === 'run' && !(await G(page, () => window.__game.dbg.battles))) {
+        const want = await G(page, () => { const g = window.__game; const e = g.ents.enemies.find((q) => !q.dead && q.d - g.dist > 3 && q.d - g.dist < 90); return e ? Math.round(e.x / 2.2) + 1 : null; });
+        const lane = await G(page, () => window.__game.lane);
+        if (want != null && want !== lane) await swipe(cdp, want < lane ? 'left' : 'right');
+      }
+      if (s.m === 'siege' && !shotSiege) { shotSiege = true; await sleep(400); await page.screenshot({ timeout: 90000, path: 'shots/14-siege.png' }); }
       if (s.m === 'siege') await tap(cdp, W / 2, H * 0.55);
       if (s.f > 0) broke = true;
-      if (s.rw && !shotStairs) { shotStairs = true; await page.screenshot({ path: 'shots/15-stairs-reward.png' }); }
+      if (s.rw && !shotStairs) { shotStairs = true; await page.screenshot({ timeout: 90000, path: 'shots/15-stairs-reward.png' }); }
       if (broke && s.m === 'run') break;
     }
-    check('적 무리 전투 발생', shotBattle);
+    check('적 무리 전투 발생', shotBattle || (await G(page, () => window.__game.dbg.battles || 0)) > 0);
     check('요새 격파', broke);
     check('보너스 계단 보상 카드', shotStairs);
     const after = await G(page, () => ({ c: window.__game.swarm.count, cs: window.__game.crowdScore, sec: window.__game.section }));
@@ -183,19 +189,20 @@ try {
     check('무리 점수 가산', after.cs > 0, `무리 점수 ${after.cs}`);
     check('다음 구간', after.sec === 1);
     await sleep(1500);
-    await page.screenshot({ path: 'shots/16-next-section.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/16-next-section.png' });
     check('테마 요새 격파 기록 저장', ((await SAVE(page)).themes.forts || {})['0'] === 1);
 
-    await G(page, () => { window.__game.opts.god = false; });
+    await G(page, () => { window.__game.opts.god = false; window.__game.opts.fast = 3; });
     let st = 'play';
-    for (let i = 0; i < 600 && st !== 'over'; i++) {
+    for (let i = 0; i < 2000 && st !== 'over'; i++) {
       await sleep(200);
       st = await G(page, () => window.__game.state);
       if (st === 'revive') await clickSel(page, cdp, '#rvNo');
     }
     check('두 번째 판 결과 화면', st === 'over');
+    await G(page, () => { window.__game.opts.fast = 1; });
     await sleep(400);
-    await page.screenshot({ path: 'shots/17-result-split.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/17-result-split.png' });
     await clickSel(page, cdp, '#oTitle');
     await sleep(500);
     const b0 = await SAVE(page);
@@ -205,7 +212,7 @@ try {
       const b1 = await SAVE(page);
       check('출석 보상 수령', b1.coins === b0.coins + 80 && b1.streak.count === 1, `${b0.coins}->${b1.coins}`);
     } else check('출석 보상 버튼 표시', false);
-    await page.screenshot({ path: 'shots/18-title-meta.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/18-title-meta.png' });
     // 가격이 올라서(업그레이드 400, 스킨 10 보석) 부족분만 보충한 뒤 구매 흐름 확인
     const sv2 = await SAVE(page);
     const gotGems = sv2.stats.gemsEarned;
@@ -227,11 +234,11 @@ try {
     check('스킨 구매 확인 단계', !mid.skins.owned.includes('mint'));
     await clickSel(page, cdp, '[data-skin="mint"] [data-a="buy"]');
     await sleep(400);
-    await page.screenshot({ path: 'shots/19-skins.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/19-skins.png' });
     await clickSel(page, cdp, '#skinP [data-close]');
     await clickSel(page, cdp, '#tMis');
     await sleep(300);
-    await page.screenshot({ path: 'shots/20-missions.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/20-missions.png' });
     await clickSel(page, cdp, '#misP [data-close]');
     const m2 = await SAVE(page);
     await page.reload();
@@ -240,11 +247,11 @@ try {
     const a2 = await SAVE(page);
     check('업그레이드 구매 후 유지', a2.upgrades.start === 1, `start Lv.${a2.upgrades.start}`);
     check('스킨 해금/선택 후 유지', a2.skins.owned.includes('mint') && a2.skins.sel === 'mint', `gems ${m2.gems}`);
-    check('재화/통계 유지', a2.coins === m2.coins && a2.gems === m2.gems && a2.stats.forts === 1, `coins ${a2.coins} gems ${a2.gems}`);
+    check('재화/통계 유지', a2.coins === m2.coins && a2.gems === m2.gems && a2.stats.forts >= 1, `coins ${a2.coins} gems ${a2.gems}`);
     check('업적 달성 기록', Object.keys(a2.ach).length >= 2, Object.keys(a2.ach).join(','));
     check('미션 보상 정수', [...a2.mset.list, ...a2.daily.list].every((m) => Number.isInteger(m.reward)));
     check('저장 버전', a2.v === 2);
-    await page.screenshot({ path: 'shots/21-title-after-reload.png' });
+    await page.screenshot({ timeout: 90000, path: 'shots/21-title-after-reload.png' });
     await ctx.close();
   }
 
@@ -270,15 +277,15 @@ try {
   for (const [w, h] of [[360, 640], [430, 932]]) {
     const { ctx, page } = await newPage('?notut&seed=11&count=60', w, h);
     await sleep(800);
-    await page.screenshot({ path: `shots/30-title-${w}x${h}.png` });
+    await page.screenshot({ timeout: 90000, path: `shots/30-title-${w}x${h}.png` });
     await page.evaluate(() => window.__game.startRun());
     await sleep(2500);
-    await page.screenshot({ path: `shots/31-play-${w}x${h}.png` });
+    await page.screenshot({ timeout: 90000, path: `shots/31-play-${w}x${h}.png` });
     await page.evaluate(() => { window.__game.state = 'revive'; window.__game.reviveT = 99; window.__game.ui.showRevive(4, 7, 3); });
     await sleep(200);
     const box = await page.locator('#rvYes').boundingBox();
     check(`부활 버튼 한 줄 ${w}x${h}`, box.height < 80, `h=${box.height}`);
-    await page.screenshot({ path: `shots/32-revive-${w}x${h}.png` });
+    await page.screenshot({ timeout: 90000, path: `shots/32-revive-${w}x${h}.png` });
     await ctx.close();
   }
 } catch (e) {

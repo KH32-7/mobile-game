@@ -335,3 +335,5 @@ button { font-family: var(--font); border: 0; cursor: pointer; color: #fff; touc
 }
 .btn { white-space: nowrap; }
 @media (max-width: 380px) { .panel .actions .btn:not(.big) { font-size: 17px; padding: 0 10px; } }
+.reward .rtap { animation: rtap .6s infinite alternate; }
+@keyframes rtap { to { opacity: .35; } }

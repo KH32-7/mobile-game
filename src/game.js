@@ -740,13 +740,15 @@ export class Game {
       }
       e.danger = e.count > sw.count * 0.7;
       if (e.state === 'idle' && front - this.dist < 18) e.state = 'alert';
+      if (e.tut && e.state !== 'battle' && sw.leader) e.x += (sw.leader.x - e.x) * Math.min(1, dt * 3); // 튜토리얼 적은 플레이어 레인으로 다가옴
       if (e.state === 'alert') {
         e.adv += dt * 2.2;
         const L = sw.leader;
-        const lateral = L && Math.abs(L.x - e.x) < e.hw + 0.7;
+        const lateral = L && (e.tut || Math.abs(L.x - e.x) < e.hw + 0.7); // 튜토리얼 적은 반드시 부딪힘
         if (lateral && this.dist + 0.4 >= front && this.mode === 'run') {
           e.state = 'battle';
           this.mode = 'battle';
+          this.dbg.battles = (this.dbg.battles || 0) + 1;
           this.modeT = 0;
           this.battleE = e;
           this.battleAcc = -0.3 * CFG.battleRateBase; // 0.3초 서로 파고드는 푸시 후 상쇄 시작

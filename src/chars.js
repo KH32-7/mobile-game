@@ -19,11 +19,11 @@ export class CharRenderer {
     for (const s of [-1, 1]) {
       const e = new THREE.SphereGeometry(0.075, 6, 4); e.scale(1, 1.15, 0.6); e.translate(s * 0.08, 0.56, -0.165); parts.push(e); cols.push(white);
       const p = new THREE.SphereGeometry(0.042, 5, 3); p.scale(1, 1.15, 0.6); p.translate(s * 0.08, 0.55, -0.205); parts.push(p); cols.push(black);
-      const c = new THREE.SphereGeometry(0.04, 4, 2); c.scale(1.3, 0.7, 0.4); c.translate(s * 0.13, 0.44, -0.17); parts.push(c); cols.push(pink);
+
     }
     // 등쪽 무늬: 하이라이트 + 물방울 점 3개 (뒤에서 봐도 귀엽게)
     const hl = new THREE.SphereGeometry(0.06, 5, 3); hl.scale(1, 1.4, 0.5); hl.translate(0.08, 0.63, 0.17); parts.push(hl); cols.push(new THREE.Color(1, 1, 1));
-    for (const [dx, dy, r] of [[-0.06, 0.5, 0.045], [0.02, 0.38, 0.035], [-0.07, 0.3, 0.03]]) {
+    for (const [dx, dy, r] of [[-0.06, 0.48, 0.05]]) {
       const sp = new THREE.SphereGeometry(r, 5, 3); sp.scale(1, 1, 0.45); sp.translate(dx, dy, 0.19); parts.push(sp); cols.push(new THREE.Color(1, 0.95, 0.7));
     }
     // 머리 위 더듬이 (모자 포인트)
