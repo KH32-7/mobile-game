@@ -2050,3 +2050,10 @@ body {
 .subline .rating {
   flex: none;
 }
+.subline .hb {
+  display: none;
+}
+.subline .next-goal {
+  flex: none;
+  max-width: 150px;
+}

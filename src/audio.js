@@ -260,15 +260,13 @@ export const audio = {
 
 function stats(d) {
   let peak = 0;
-  let last = 0;
-  for (let i = 0; i < d.length; i++) {
-    const v = Math.abs(d[i]);
-    if (v > peak) peak = v;
-    if (v > 0.003) last = i;
-  }
-  // 소리가 나는 구간(첫 샘플 ~ 마지막 유효 샘플) 기준 RMS
+  for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+  // 소리가 나는 구간(피크 대비 -30dB 이상) 기준 RMS: 리버브 꼬리는 제외
+  const th = Math.max(0.003, peak * 0.0316);
   let first = 0;
-  while (first < last && Math.abs(d[first]) < 0.003) first++;
+  let last = 0;
+  for (let i = 0; i < d.length; i++) if (Math.abs(d[i]) > th) last = i;
+  while (first < last && Math.abs(d[first]) < th) first++;
   let sum = 0;
   const n = Math.max(1, last - first + 1);
   for (let i = first; i <= last; i++) sum += d[i] * d[i];
